@@ -200,15 +200,17 @@ func deploySmokeAgent(ctx context.Context, target runtime.ConnectionTarget) erro
 	return agent.WriteFile(ctx, target.SSHHost, smokeAgentPath, []byte(smokeAgentScript), 0o644)
 }
 
-// InitSmokeRepos creates two local repositories for the runtime smoke test.
-func InitSmokeRepos(ctx context.Context, tmpDir string) (string, error) {
-	if err := initOneRepo(ctx, tmpDir, filepath.Join("remotes", "remote.git"), filepath.Join("repos", "clone")); err != nil {
+// InitSmokeRepos creates two local repositories for the runtime smoke test and
+// returns their parent directory. Each clone name includes the fixture's token
+// because md derives container names from the repository basename and branch.
+func InitSmokeRepos(ctx context.Context, tmpDir, runToken string) (string, error) {
+	if err := initOneRepo(ctx, tmpDir, filepath.Join("remotes", "remote.git"), filepath.Join("repos", "smoke-"+runToken+"-1")); err != nil {
 		return "", err
 	}
-	if err := initOneRepo(ctx, tmpDir, filepath.Join("remotes", "remote2.git"), filepath.Join("repos", "clone2")); err != nil {
+	if err := initOneRepo(ctx, tmpDir, filepath.Join("remotes", "remote2.git"), filepath.Join("repos", "smoke-"+runToken+"-2")); err != nil {
 		return "", err
 	}
-	return filepath.Join(tmpDir, "repos", "clone"), nil
+	return filepath.Join(tmpDir, "repos"), nil
 }
 
 // InitSmokeHarnessCache pre-populates model cache entries used by smoke tests.

@@ -55,6 +55,7 @@ build: frontend-build
 	@node scripts/startup_budget.mjs --dist backend/frontend/dist
 	@go install -trimpath -ldflags="-s -w -buildid=" ./backend/cmd/...
 
+# The Go lint lane typechecks the smoke-tagged tests without starting containers.
 verify: custom-gcl frontend-deps git-hooks
 	@./scripts/run-concurrently.sh \
 		sdk,workflows,go,js,ts,eslint,python,shell,misc \
@@ -139,11 +140,12 @@ test-e2e: frontend-deps generate-sdks playwright-browser
 
 # Real runtime smoke tests exercise the md container path and cannot run
 # without that runtime (see the smoke build tag sources for what they need).
-# A full run takes about 15 minutes on rootless Podman (847 s in Nov 2026). The
-# specialized image build in the first fixture takes most of it; the fixtures
-# share one md configuration, so later fixtures reuse that image.
+# The first run builds a small Debian base and md's specialized image, including
+# harness installers. On rootless Podman, image preparation took about 385 s cold
+# and 1 s warm, with the smoke SSH configuration in the OS user cache. The full
+# suite also runs the lifecycle fork and native replay scenarios, which take minutes.
 test-smoke:
-	@go test -tags="smoke" -run TestSmoke -v -timeout 30m -coverprofile=coverage.out ./backend/cmd/caic/
+	@go test -count=1 -tags="smoke" -run TestSmoke -v -timeout 30m -coverprofile=coverage.out ./backend/cmd/caic/
 
 git-hooks: frontend-deps
 	@./scripts/install-git-hooks.sh

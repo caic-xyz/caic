@@ -11,6 +11,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,6 +37,7 @@ import (
 
 	"github.com/caic-xyz/md"
 	"github.com/caic-xyz/md/git"
+	"github.com/gofrs/flock"
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -50,7 +53,7 @@ import (
 
 // TestSmoke groups the runtime scenarios and their container-free helper checks.
 //
-//nolint:paralleltest // The Lifecycle fixture sets process-wide XDG_CONFIG_HOME.
+//nolint:paralleltest // The runtime fixtures set process-wide XDG_CONFIG_HOME.
 func TestSmoke(t *testing.T) {
 	t.Run("NativeSubagentConversion", func(t *testing.T) {
 		got := nativeSubagent(&v1.EventNativeSubagent{
@@ -68,10 +71,6 @@ func TestSmoke(t *testing.T) {
 		}
 	})
 
-	// md keys its specialized image on the SSH keys under the md configuration,
-	// so fixtures sharing one configuration build the image once per run instead
-	// of once per fixture. Fixtures therefore run serially.
-	mdConfigDir := t.TempDir()
 	// The FailureDiagnostics scenario verifies bounded log tails and immediate launch
 	// failure reporting, including the terminal-state classification used by task
 	// waits. It needs no container runtime.
@@ -168,7 +167,7 @@ func TestSmoke(t *testing.T) {
 	// md/container runtime path, which makes it host-dependent and isolated
 	// behind the smoke build tag and its own make target (make test-smoke).
 	t.Run("Lifecycle", func(t *testing.T) {
-		smoke := startSmokeServer(t, mdConfigDir)
+		smoke := startSmokeServer(t)
 		baseURL := smoke.baseURL
 
 		// --- API endpoints ---
@@ -189,7 +188,7 @@ func TestSmoke(t *testing.T) {
 			if len(repos) == 0 {
 				t.Fatal("expected at least one repo")
 			}
-			// Smoke setup creates two repos (clone and clone2).
+			// Smoke setup creates two repositories.
 			if len(repos) < 2 {
 				t.Errorf("expected at least 2 repos, got %d", len(repos))
 			}
@@ -225,12 +224,6 @@ func TestSmoke(t *testing.T) {
 		t.Run("TaskLifecycle", func(t *testing.T) {
 			var repos []v1.Repo
 			getJSON(t, baseURL, "/api/caic/v1/server/repos", &repos)
-
-			var prefs v1.PreferencesResp
-			getJSON(t, baseURL, "/api/caic/v1/server/preferences", &prefs)
-			prefs.Settings.WellKnownCaches = nil
-			prefs.Settings.CacheMappings = nil
-			postJSON(t, baseURL, "/api/caic/v1/server/preferences", v1.UpdatePreferencesReq{Settings: prefs.Settings}, &prefs)
 
 			// Create a task on codex so the fork below switches harness (codex -> pi).
 			initialPrompt := "smoke test " + strconv.FormatInt(time.Now().UnixNano(), 10)
@@ -476,7 +469,7 @@ func TestSmoke(t *testing.T) {
 			}
 			backendSet[h] = backend
 		}
-		fixture := startServerFixture(t, serverFixture{mdConfigDir: mdConfigDir, backends: backendSet})
+		fixture := startServerFixture(t, serverFixture{useSmokeImage: true, backends: backendSet})
 		for _, rec := range smokeReplayRecordings {
 			t.Run(rec.name(), func(t *testing.T) {
 				runSmokeReplay(t, fixture, rec.harness, cases[rec.name()])
@@ -485,7 +478,7 @@ func TestSmoke(t *testing.T) {
 	})
 
 	t.Run("Push", func(t *testing.T) {
-		smoke := startSmokeServer(t, mdConfigDir)
+		smoke := startSmokeServer(t)
 		var repos []v1.Repo
 		getJSON(t, smoke.baseURL, "/api/caic/v1/server/repos", &repos)
 		root := filepath.Join(smoke.rootDir, repos[0].Path)
@@ -580,7 +573,7 @@ func TestSmoke(t *testing.T) {
 	})
 
 	t.Run("Submodules", func(t *testing.T) { //nolint:paralleltest // Fixtures set process-wide XDG_CONFIG_HOME and share one md configuration.
-		smoke := startSmokeServer(t, mdConfigDir)
+		smoke := startSmokeServer(t)
 		var repos []v1.Repo
 		getJSON(t, smoke.baseURL, "/api/caic/v1/server/repos", &repos)
 		root := filepath.Join(smoke.rootDir, repos[0].Path)
@@ -713,6 +706,8 @@ func TestSmoke(t *testing.T) {
 
 // serverFixture configures one isolated real-runtime server fixture.
 type serverFixture struct {
+	// useSmokeImage selects the reusable image for deterministic agents.
+	useSmokeImage bool
 	// mdConfigDir optionally reuses keys and the specialized image from a
 	// disposable md configuration shared with other fixtures. Its tests must
 	// run serially.
@@ -740,16 +735,15 @@ type smokeServer struct {
 	serverLogPath string
 }
 
-// startSmokeServer creates the deterministic real-runtime smoke fixture with
-// the md configuration in mdConfigDir.
-func startSmokeServer(t *testing.T, mdConfigDir string) *smokeServer {
+// startSmokeServer creates the deterministic real-runtime smoke fixture.
+func startSmokeServer(t *testing.T) *smokeServer {
 	// Use deterministic no-LLM agents, but run them inside real md containers
 	// through the normal relay over SSH.
 	sb := smoketest.NewSmokeBackend(harness.Codex)
 	sbFork := smoketest.NewSmokeBackend(harness.Pi)
 	return startServerFixture(t, serverFixture{
-		mdConfigDir: mdConfigDir,
-		backends:    map[harness.Name]agent.Backend{sb.Harness(): sb, sbFork.Harness(): sbFork},
+		useSmokeImage: true,
+		backends:      map[harness.Name]agent.Backend{sb.Harness(): sb, sbFork.Harness(): sbFork},
 		harnessEnv: func(runToken string) map[string][]string {
 			return map[string][]string{
 				// Re-injected into each instance's ~/.env; the fork section of
@@ -767,7 +761,7 @@ func startSmokeServer(t *testing.T, mdConfigDir string) *smokeServer {
 func startServerFixture(t *testing.T, fx serverFixture) *smokeServer {
 	ctx := t.Context()
 
-	// Create isolated temp dirs for config, cache, and md state.
+	// Create isolated temp dirs for the repository, server config and task state.
 	tmpDir := t.TempDir()
 	configDir := filepath.Join(tmpDir, "config")
 	cacheDir := filepath.Join(tmpDir, "cache")
@@ -778,25 +772,13 @@ func startServerFixture(t *testing.T, fx serverFixture) *smokeServer {
 		t.Fatalf("mkdir cache: %v", err)
 	}
 
-	// Set XDG_CONFIG_HOME so md can write its keys in isolation.
-	xdgDir := filepath.Join(tmpDir, "xdg")
-	if fx.mdConfigDir != "" {
-		xdgDir = fx.mdConfigDir
-	}
-	if err := os.MkdirAll(xdgDir, 0o700); err != nil {
-		t.Fatalf("mkdir xdg: %v", err)
-	}
-	t.Setenv("XDG_CONFIG_HOME", xdgDir)
-
-	// Initialize local repos used by the runtime smoke task.
-	clone, err := smoketest.InitSmokeRepos(ctx, tmpDir)
-	if err != nil {
-		t.Fatalf("init smoke repos: %v", err)
-	}
-
 	runToken, err := smoketest.NewSmokeRunToken()
 	if err != nil {
 		t.Fatalf("create smoke run token: %v", err)
+	}
+	root, err := smoketest.InitSmokeRepos(ctx, tmpDir, runToken)
+	if err != nil {
+		t.Fatalf("init smoke repos: %v", err)
 	}
 
 	harnessEnv := map[string][]string(nil)
@@ -811,7 +793,7 @@ func startServerFixture(t *testing.T, fx serverFixture) *smokeServer {
 
 	s := &smokeServer{
 		t:        t,
-		rootDir:  filepath.Dir(clone),
+		rootDir:  root,
 		runToken: runToken,
 		cfg: &server.Config{
 			Dirs: server.DirsConfig{
@@ -865,11 +847,8 @@ func startServerFixture(t *testing.T, fx serverFixture) *smokeServer {
 	})
 	t.Cleanup(s.close)
 	log := slog.New(slog.NewTextHandler(serverLog, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	client, err := mdruntime.New(ctx, log, "", "", "")
-	if err != nil {
-		t.Fatalf("init smoke image client: %v", err)
-	}
-	s.runtimeName = client.Runtime.Name()
+	runtimeName, baseImage := prepareSmokeImage(t, log, fx, filepath.Join(tmpDir, "xdg"))
+	s.runtimeName = runtimeName
 	t.Cleanup(func() {
 		s.stop()
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), 2*time.Minute)
@@ -878,27 +857,13 @@ func startServerFixture(t *testing.T, fx serverFixture) *smokeServer {
 			t.Errorf("cleanup smoke containers: %v", err)
 		}
 	})
-	// Image setup downloads current harness releases even though the test runs
-	// deterministic agents. Retry that preparation before any lifecycle assertions
-	// so a transient installer outage does not fail an otherwise healthy runtime.
-	warmCtx, cancel := context.WithTimeout(ctx, smokeImagePrepTimeout)
-	defer cancel()
-	w := &mdruntime.SlogWriter{Context: warmCtx, Logger: log, Phase: "warmup"}
-	for attempt := 1; ; attempt++ {
-		if _, err := client.Warmup(warmCtx, w, w, &md.WarmupOpts{}); err == nil {
-			break
-		} else if attempt == 3 || warmCtx.Err() != nil {
-			t.Fatalf("prepare smoke image after %d attempt(s): %v", attempt, err)
-		} else {
-			t.Logf("smoke image preparation attempt %d failed: %v; retrying", attempt, err)
-		}
-		select {
-		case <-warmCtx.Done():
-			t.Fatalf("prepare smoke image: %v", warmCtx.Err())
-		case <-time.After(5 * time.Second):
-		}
-	}
 	s.start()
+	if baseImage != "" {
+		var prefs v1.PreferencesResp
+		getJSON(t, s.baseURL, "/api/caic/v1/server/preferences", &prefs)
+		prefs.Settings.BaseImage = baseImage
+		postJSON(t, s.baseURL, "/api/caic/v1/server/preferences", v1.UpdatePreferencesReq{Settings: prefs.Settings}, &prefs)
+	}
 	return s
 }
 
@@ -961,11 +926,92 @@ func (s *smokeServer) stop() {
 	}
 }
 
+//go:embed testdata/smoke.Dockerfile
+var smokeDockerfile []byte
+
+// prepareSmokeImage sets up md's SSH configuration and warms the image before
+// starting the application. Only deterministic agents use the shared cache.
+func prepareSmokeImage(t *testing.T, log *slog.Logger, fx serverFixture, xdgDir string) (runtimeName, baseImage string) {
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
+	defer cancel()
+	if fx.mdConfigDir != "" {
+		xdgDir = fx.mdConfigDir
+	}
+	if fx.useSmokeImage {
+		cache, err := os.UserCacheDir()
+		if err != nil {
+			t.Fatal(err)
+		}
+		xdgDir = filepath.Join(cache, "caic-smoke")
+		if err := os.MkdirAll(xdgDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		info, err := os.Lstat(xdgDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !info.IsDir() || info.Mode().Perm()&0o077 != 0 {
+			t.Fatalf("smoke image cache %s must be a private directory", xdgDir)
+		}
+		// Serialize key creation and image builds across test invocations using
+		// the same cache. md uses these private SSH keys to check image freshness.
+		lock := flock.New(filepath.Join(xdgDir, "build.lock"))
+		ok, err := lock.TryLockContext(ctx, 100*time.Millisecond)
+		if err != nil || !ok {
+			t.Fatalf("lock smoke image cache: %v", err)
+		}
+		defer func() {
+			if err := lock.Close(); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	t.Setenv("XDG_CONFIG_HOME", xdgDir)
+	client, err := mdruntime.New(ctx, log, "", "", "")
+	if err != nil {
+		t.Fatalf("init smoke image client: %v", err)
+	}
+	runtimeName = client.Runtime.Name()
+	w := &mdruntime.SlogWriter{Context: ctx, Logger: log, Phase: "warmup"}
+	if fx.useSmokeImage {
+		// The recipe and cache identity distinguish this local image on a shared
+		// daemon. md verifies the specialized image against its own build inputs.
+		id := sha256.Sum256(append([]byte(xdgDir+"\x00"), smokeDockerfile...))
+		baseImage = fmt.Sprintf("caic-smoke-base:%x", id[:12])
+		if !client.Runtime.BaseImageIsLocal(ctx, baseImage) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), smokeDockerfile, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := client.Runtime.RunOut(ctx, "", w, w, "build", "-t", baseImage, filepath.ToSlash(dir)); err != nil {
+				t.Fatalf("build smoke base %s: %v", baseImage, err)
+			}
+			t.Logf("built smoke base %s in %s", baseImage, time.Since(start).Round(time.Millisecond))
+		}
+	}
+	// A cold md build still installs harness releases. Allow recovery from a
+	// transient installer outage before running any test assertions.
+	for attempt := 1; ; attempt++ {
+		built, err := client.Warmup(ctx, w, w, &md.WarmupOpts{BaseImage: baseImage})
+		if err == nil {
+			t.Logf("prepared %s smoke image in %s (md build ran: %t)", runtimeName, time.Since(start).Round(time.Millisecond), built)
+			return runtimeName, baseImage
+		}
+		if attempt == 3 || ctx.Err() != nil {
+			t.Fatalf("prepare smoke image after %d attempt(s): %v", attempt, err)
+		}
+		t.Logf("smoke image preparation attempt %d failed: %v; retrying", attempt, err)
+		select {
+		case <-ctx.Done():
+			t.Fatalf("prepare smoke image: %v", ctx.Err())
+		case <-time.After(5 * time.Second):
+		}
+	}
+}
+
 // smokeTaskTimeout bounds one smoke task's wait for a state or a runtime.
 const smokeTaskTimeout = 10 * time.Minute
-
-// smokeImagePrepTimeout bounds all attempts to download and build a fixture image.
-const smokeImagePrepTimeout = 10 * time.Minute
 
 // smokeServerLogTailBytes bounds how much of the fixture's server log a failure
 // copies into the test output.

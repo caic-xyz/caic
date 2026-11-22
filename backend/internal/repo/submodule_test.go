@@ -17,6 +17,24 @@ import (
 
 func TestSubmodulePushTargets(t *testing.T) {
 	t.Parallel()
+	t.Run("duplicate pinned declaration paths in a linked worktree", func(t *testing.T) {
+		t.Parallel()
+		root := initTestRepo(t)
+		base := runPushGit(t, root, "rev-parse", "HEAD")
+		writePushFile(t, root, ".gitmodules", "[submodule \"one\"]\npath = lib\nurl = ./one.git\n[submodule \"two\"]\npath = lib\nurl = ./two.git\n", 0o600)
+		runGit(t, root, "add", ".gitmodules")
+		runGit(t, root, "commit", "-m", "Declare two modules at one path")
+		tip := runPushGit(t, root, "rev-parse", "HEAD")
+		worktree := filepath.Join(t.TempDir(), "linked")
+		runGit(t, root, "worktree", "add", "--detach", worktree, tip)
+		repos := []runtime.Repo{{GitRoot: worktree, ContainerPath: "/repo", Branch: "caic-1"}}
+		destinations := []PushDestination{{Remote: "origin", Branch: "caic-1", BaseRef: base}}
+		_, _, _, err := submodulePushTargets(t.Context(), logtest.Logger(t), repos, destinations, []string{tip}, nil)
+		if err == nil || !strings.Contains(err.Error(), `multiple pinned submodules declare path "lib"`) {
+			t.Fatalf("duplicate declarations error = %v", err)
+		}
+	})
+
 	t.Run("conflicting pins for the same remote branch", func(t *testing.T) {
 		t.Parallel()
 		root, child := initTestRepo(t), initTestRepo(t)
