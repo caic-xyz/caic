@@ -12,6 +12,7 @@ import (
 	"io"
 	"iter"
 	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1558,6 +1559,29 @@ func TestManager(t *testing.T) {
 		}
 		if got := quotas[0].RateLimits[1]; got.Window != "7d" || got.Utilization != 0.91 {
 			t.Errorf("7d rate limit = %#v, want warning update", got)
+		}
+	})
+
+	t.Run("RateLimitWatchers", func(t *testing.T) {
+		t.Parallel()
+		m := newTestManager(t, Config{ServerCtx: t.Context()})
+		watched := func() []*taskrun.Task {
+			m.quotaWatchMu.Lock()
+			defer m.quotaWatchMu.Unlock()
+			return slices.Collect(maps.Keys(m.quotaWatches))
+		}
+		id := ksid.NewID()
+		first := mustNewTask(t, id, agent.Prompt{Text: "test"}, "", "")
+		entry := m.NewEntry(first, nil)
+		m.Insert(id, entry)
+		m.Insert(id, entry)
+		if got := watched(); len(got) != 1 || got[0] != first {
+			t.Fatalf("watched after re-registration = %v, want only the first task", got)
+		}
+		replacement := mustNewTask(t, id, agent.Prompt{Text: "test"}, "", "")
+		m.Insert(id, m.NewEntry(replacement, nil))
+		if got := watched(); len(got) != 1 || got[0] != replacement {
+			t.Fatalf("watched after replacement = %v, want only the replacement task", got)
 		}
 	})
 

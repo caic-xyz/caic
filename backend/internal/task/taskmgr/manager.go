@@ -165,10 +165,11 @@ type Manager struct {
 	importDone           chan struct{} // creation waits for startup branch ownership
 	pendingRuntimeEvents []runtime.Event
 
-	// Guarded by quotaWatchMu.
+	// Guarded by quotaWatchMu. Lock order: quotaWatchMu before mu.
 	quotaWatchMu     sync.Mutex
 	quotaWatchers    sync.WaitGroup
 	quotaWatchClosed bool
+	quotaWatches     map[*taskrun.Task]chan struct{} // Closing a channel stops that task's watcher.
 
 	// Serializes pending-input persistence and registration.
 	inputMu          sync.Mutex
@@ -251,6 +252,7 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 		taskDescriptors:      make(map[ksid.ID]taskDescriptor),
 		preparationLocks:     make(map[string]*sync.Mutex),
 		changed:              make(chan struct{}),
+		quotaWatches:         make(map[*taskrun.Task]chan struct{}),
 	}
 	inputs, err := m.logStore.Journal.LoadInputQueue()
 	if err != nil {
@@ -1439,7 +1441,7 @@ func (m *Manager) publishEntry(ctx context.Context, entry *Entry, reserveOnly in
 	m.tasks[t.ID] = entry
 	m.taskChangedLocked(t.ID)
 	m.mu.Unlock()
-	m.watchRateLimitEvents(t)
+	m.reconcileRateLimitWatchers()
 	return nil
 }
 
@@ -1969,7 +1971,7 @@ func (m *Manager) insertEntry(id ksid.ID, entry *Entry) {
 	m.taskChangedLocked(id)
 	m.mu.Unlock()
 	m.inputMu.Unlock()
-	m.watchRateLimitEvents(entry.Task())
+	m.reconcileRateLimitWatchers()
 }
 
 // replaceEntryLocked preserves task-owned input during startup adoption.
@@ -1995,18 +1997,45 @@ func (m *Manager) replaceEntryLocked(id ksid.ID, entry *Entry) {
 	m.tasks[id] = entry
 }
 
-// watchRateLimitEvents forwards task quota changes to the shared change
-// channel, letting task and usage SSE subscribers refresh immediately.
-func (m *Manager) watchRateLimitEvents(t *taskrun.Task) {
+// reconcileRateLimitWatchers keeps one quota watcher per registered task. It
+// starts a watcher for each newly registered task and stops the watcher of each
+// task that left the registry or was replaced. Call it after changing m.tasks,
+// without holding m.mu.
+func (m *Manager) reconcileRateLimitWatchers() {
 	m.quotaWatchMu.Lock()
 	defer m.quotaWatchMu.Unlock()
 	if m.quotaWatchClosed {
 		return
 	}
+	m.mu.Lock()
+	registered := make(map[*taskrun.Task]struct{}, len(m.tasks))
+	for _, e := range m.tasks {
+		registered[e.Task()] = struct{}{}
+	}
+	m.mu.Unlock()
+	for t, stop := range m.quotaWatches {
+		if _, ok := registered[t]; !ok {
+			close(stop)
+			delete(m.quotaWatches, t)
+		}
+	}
+	for t := range registered {
+		if _, ok := m.quotaWatches[t]; !ok {
+			m.watchRateLimitEventsLocked(t)
+		}
+	}
+}
+
+// watchRateLimitEventsLocked forwards task quota changes to the shared change
+// channel, letting task and usage SSE subscribers refresh immediately. Callers
+// hold quotaWatchMu.
+func (m *Manager) watchRateLimitEventsLocked(t *taskrun.Task) {
+	stop := make(chan struct{})
+	m.quotaWatches[t] = stop
 	// Subscribe before reading history so a message appended in between still
 	// wakes the watcher. Apply each message: the task snapshot retains only its
 	// latest rate limit, while the tracker needs every quota window.
-	wake, _ := t.SubscribeTimelineWakeups(m.serverCtx)
+	wake, unsub := t.SubscribeTimelineWakeups(m.serverCtx)
 	history, next := t.RateLimitsSince(0)
 	historyChanged := false
 	for _, rateLimit := range history {
@@ -2018,9 +2047,12 @@ func (m *Manager) watchRateLimitEvents(t *taskrun.Task) {
 		m.NotifyTaskUpdate(t.ID)
 	}
 	m.quotaWatchers.Go(func() {
+		defer unsub()
 		for {
 			select {
 			case <-m.serverCtx.Done():
+				return
+			case <-stop:
 				return
 			case <-wake:
 			}
@@ -2525,7 +2557,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	m.taskChangedLocked(t.ID)
 	m.mu.Unlock()
 	m.inputMu.Unlock()
-	m.watchRateLimitEvents(t)
+	m.reconcileRateLimitWatchers()
 	if lt.OpenSync != "" {
 		endInterruptedSync(ctx, m.log.With("task", t.ID), entry, lt.OpenSync)
 	}

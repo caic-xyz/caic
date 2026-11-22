@@ -354,6 +354,13 @@ func (h *historyHandlers) handleHistoryEvents(w http.ResponseWriter, r *http.Req
 	cursor, err := parseHistoryCursor(value)
 	stream := sse.New(w)
 	w.Header().Set("Cache-Control", "private, no-store")
+	// Advertise a 1 s EventSource reconnection time; Chromium otherwise waits
+	// 3 s. The browser reconnects natively, resuming exactly through
+	// Last-Event-ID, only after an unexpected drop: every deliberate end writes
+	// a reset or error frame. The next frame flushes the field.
+	if err := stream.Writef("retry: 1000\n\n"); err != nil {
+		return
+	}
 	reset := func(ctx context.Context) {
 		if err := historyFrame(stream, "reset", "", v1.HistoryReset{ManifestURL: fmt.Sprintf("/api/caic/v1/tasks/%s/history/manifest", e.Task().ID)}); err != nil {
 			h.log.DebugContext(ctx, "write history reset", "err", err)
@@ -404,6 +411,8 @@ func (h *historyHandlers) handleHistoryEvents(w http.ResponseWriter, r *http.Req
 	defer poll.Stop()
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
+	// Every return below follows request cancellation or a failed write, or
+	// writes a reset or error frame, so the client never sees a silent end.
 	for {
 		select {
 		case <-r.Context().Done():

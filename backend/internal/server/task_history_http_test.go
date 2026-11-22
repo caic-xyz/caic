@@ -570,6 +570,21 @@ func TestTaskResourceSnapshot(t *testing.T) {
 
 func TestHistoryStream(t *testing.T) {
 	t.Parallel()
+	t.Run("advertises reconnect delay before the first frame", func(t *testing.T) {
+		t.Parallel()
+		s, tk, _ := historyHTTPFixture(t)
+		b := historyBootstrap(t, s, tk, "")
+		r, cancel := historyStream(t, s, tk, b.Cursor, "")
+		line, err := r.ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		if line != "retry: 1000\n" {
+			t.Fatalf("first line = %q, want the reconnect delay", line)
+		}
+		assertStatsSnapshot(t, r)
+		cancel()
+	})
 	t.Run("coherent compact metadata after checkpoint", func(t *testing.T) {
 		t.Parallel()
 		s, tk, path := historyHTTPFixture(t)
