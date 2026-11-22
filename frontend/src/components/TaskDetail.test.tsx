@@ -708,6 +708,27 @@ describe("TaskDetail", () => {
     expect(unique().some((key) => key?.startsWith("turn:"))).toBe(true);
   });
 
+  it("keeps focus that moves before the prompt's autofocus frame runs", async (t) => {
+    // A loaded host can run the frame after the user or another control has
+    // moved focus; minimized from a flaky focus assertion in this suite.
+    const frames: FrameRequestCallback[] = [];
+    const frame = vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation((cb) => frames.push(cb));
+    const control = document.createElement("button");
+    t.after(() => {
+      frame.mockRestore();
+      control.remove();
+    });
+    await renderTaskDetail({ taskId: "late-autofocus" });
+    const prompt = await screen.findByTestId("task-detail-prompt");
+    document.body.append(control);
+    control.focus();
+
+    for (const callback of frames.splice(0)) callback(0);
+
+    expect(control).toHaveFocus();
+    expect(prompt).not.toHaveFocus();
+  });
+
   it("keeps the current separator and focused skill link mounted during live flushes", async () => {
     let send: ((message: EventMessage) => void) | undefined;
     taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {

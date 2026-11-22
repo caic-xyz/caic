@@ -414,11 +414,16 @@ export default function TaskDetail(props: Props) {
 
   // The prompt may appear after the task fetch; focus it whenever its ref attaches.
   // Touch-primary devices skip this to avoid opening the software keyboard.
+  // Focus that moves before the frame runs, by the user or another control,
+  // wins; a frame delayed under load would otherwise take it back.
   let promptRef: HTMLElement | null = null;
   function setPromptRef(element: HTMLElement) {
     promptRef = element;
     if (!props.autoFocusPrompt || window.matchMedia("(hover: none) and (pointer: coarse)").matches) return;
+    const focused = document.activeElement;
     requestAnimationFrame(() => {
+      const current = document.activeElement;
+      if (current !== focused && current !== null && current !== document.body) return;
       if (element.isConnected && taskViewMode(location.pathname, location.search) === "closed") element.focus();
     });
   }
