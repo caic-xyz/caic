@@ -4556,39 +4556,49 @@ func TestTask(t *testing.T) {
 
 	t.Run("PushStats", func(t *testing.T) {
 		t.Parallel()
-		t.Run("SubscribeStats", func(t *testing.T) {
+		t.Run("StatsSince", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-			tk.PushStats(&runtime.Stats{CPUPerc: 50.0, MemUsed: 1024})
-			tk.PushStats(&runtime.Stats{CPUPerc: 75.0, MemUsed: 2048})
+			tk.PushStats(&runtime.Stats{CPUPerc: 50.0, MemUsed: 1024, DiskUsed: -1})
+			tk.PushStats(&runtime.Stats{CPUPerc: 75.0, MemUsed: 2048, DiskUsed: -1})
 
-			ctx := t.Context()
-			history, live, unsub := tk.SubscribeStats(ctx)
+			wake, unsub := tk.SubscribeStatsWakeups(t.Context())
 			t.Cleanup(unsub)
-
-			if len(history) != 2 {
-				t.Fatalf("history len = %d, want 2", len(history))
-			}
-			if history[0].CPUPerc != 50.0 {
-				t.Errorf("history[0].CPUPerc = %v, want 50.0", history[0].CPUPerc)
-			}
-			if history[1].CPUPerc != 75.0 {
-				t.Errorf("history[1].CPUPerc = %v, want 75.0", history[1].CPUPerc)
+			history, seq := tk.StatsSince(0)
+			if len(history) != 2 || history[0].CPUPerc != 50.0 || history[1].CPUPerc != 75.0 {
+				t.Fatalf("history = %+v, want CPU 50 then 75", history)
 			}
 
-			tk.PushStats(&runtime.Stats{CPUPerc: 100.0, MemUsed: 4096})
-			timeout := time.After(time.Second)
+			tk.PushStats(&runtime.Stats{CPUPerc: 100.0, MemUsed: 4096, DiskUsed: -1})
 			select {
-			case s := <-live:
-				if s.CPUPerc != 100.0 {
-					t.Errorf("live.CPUPerc = %v, want 100.0", s.CPUPerc)
-				}
-			case <-timeout:
-				t.Fatal("timed out waiting for live stat")
+			case <-wake:
+			case <-time.After(time.Second):
+				t.Fatal("timed out waiting for stats wakeup")
 			}
-			unsub()
-			if _, ok := <-live; ok {
-				t.Fatal("unsubscribe left the live stats channel open")
+			live, seq := tk.StatsSince(seq)
+			if len(live) != 1 || live[0].CPUPerc != 100.0 {
+				t.Fatalf("live = %+v, want only CPU 100", live)
+			}
+			// A disk revision resends the latest sample with the same timestamp.
+			tk.UpdateDiskUsage(700)
+			<-wake
+			if revised, _ := tk.StatsSince(seq); len(revised) != 1 || revised[0].CPUPerc != 100.0 || revised[0].DiskUsed != 700 {
+				t.Fatalf("revised = %+v, want CPU 100 with disk 700", revised)
+			}
+		})
+
+		t.Run("SlowReaderGetsRetainedSamples", func(t *testing.T) {
+			t.Parallel()
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+			_, seq := tk.StatsSince(0)
+			// A reader that misses more writes than a channel buffer or the ring
+			// holds still receives the newest samples.
+			for i := range 100 {
+				tk.PushStats(&runtime.Stats{CPUPerc: float64(i)})
+			}
+			got, _ := tk.StatsSince(seq)
+			if len(got) != statsRingSize || got[0].CPUPerc != 40 || got[len(got)-1].CPUPerc != 99 {
+				t.Fatalf("got %d samples from CPU %v to %v, want %d from 40 to 99", len(got), got[0].CPUPerc, got[len(got)-1].CPUPerc, statsRingSize)
 			}
 		})
 
@@ -4601,10 +4611,7 @@ func TestTask(t *testing.T) {
 			for i := range 65 {
 				tk.PushStats(&runtime.Stats{CPUPerc: float64(i)})
 			}
-			ctx := t.Context()
-			history, _, unsub := tk.SubscribeStats(ctx)
-			t.Cleanup(unsub)
-
+			history, _ := tk.StatsSince(0)
 			if len(history) != statsRingSize {
 				t.Errorf("history len = %d, want %d (ring capped at size)", len(history), statsRingSize)
 			}
@@ -4633,8 +4640,7 @@ func TestTask(t *testing.T) {
 		tk.UpdateDiskUsage(700)
 		tk.PushStats(&runtime.Stats{CPUPerc: 75, DiskUsed: -1})
 
-		history, _, unsub := tk.SubscribeStats(t.Context())
-		unsub()
+		history, _ := tk.StatsSince(0)
 		if len(history) != 2 {
 			t.Fatalf("history len = %d, want 2", len(history))
 		}
@@ -4651,8 +4657,7 @@ func TestTask(t *testing.T) {
 		if snapshot := tk.Snapshot(); !snapshot.DiskKnown || snapshot.DiskUsed != 700 {
 			t.Fatalf("disk usage = (%d, %t), want (700, true)", snapshot.DiskUsed, snapshot.DiskKnown)
 		}
-		history, _, unsub := tk.SubscribeStats(t.Context())
-		unsub()
+		history, _ := tk.StatsSince(0)
 		if len(history) != 0 {
 			t.Fatalf("stats history = %+v, want none", history)
 		}
@@ -4847,25 +4852,20 @@ func TestSessionHandle(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		ctx, cancel := context.WithCancel(t.Context())
-		_, canceledStats, unsubCanceledStats := tk.SubscribeStats(ctx)
+		_, unsubCanceledStats := tk.SubscribeStatsWakeups(ctx)
 		_, unsubCanceledWake := tk.SubscribeTimelineWakeups(ctx)
-		_, explicitStats, unsubStats := tk.SubscribeStats(t.Context())
+		_, unsubStats := tk.SubscribeStatsWakeups(t.Context())
 		_, unsubWake := tk.SubscribeTimelineWakeups(t.Context())
 		cancel()
-		for range canceledStats {
-		}
 		// Calls after cancellation and repeated calls are no-ops.
 		for _, unsub := range []func(){unsubCanceledStats, unsubCanceledWake, unsubStats, unsubWake} {
 			unsub()
 			unsub()
 		}
-		if _, ok := <-explicitStats; ok {
-			t.Fatal("stats channel open after unsubscribe")
-		}
 		tk.mu.Lock()
 		defer tk.mu.Unlock()
-		if len(tk.statsSubs) != 0 || len(tk.wakeSubs) != 0 {
-			t.Fatalf("subscribers left: stats=%d wake=%d", len(tk.statsSubs), len(tk.wakeSubs))
+		if len(tk.statsWakeSubs) != 0 || len(tk.wakeSubs) != 0 {
+			t.Fatalf("subscribers left: stats=%d wake=%d", len(tk.statsWakeSubs), len(tk.wakeSubs))
 		}
 	})
 }

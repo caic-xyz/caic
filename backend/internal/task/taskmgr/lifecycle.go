@@ -916,6 +916,9 @@ func (r *Lifecycle) cleanup(ctx context.Context, reason task.State) {
 			r.manager.log.InfoContext(ctx, "cleanup done", "task", t.ID, "reason", reason, "dur", elapsed, "cost", result.CostUSD, "turns", result.NumTurns, "final_state", result.State)
 		}
 		r.entry.Finish(&result)
+		if t.GetState() == task.StatePurged {
+			r.manager.retireRateLimitWatcher(t)
+		}
 		r.manager.NotifyTaskUpdate(r.entry.Task().ID)
 	})
 }

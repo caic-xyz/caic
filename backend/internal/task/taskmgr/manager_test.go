@@ -1583,6 +1583,35 @@ func TestManager(t *testing.T) {
 		if got := watched(); len(got) != 1 || got[0] != replacement {
 			t.Fatalf("watched after replacement = %v, want only the replacement task", got)
 		}
+		// A registration that loses the race to its replacement starts nothing.
+		m.updateRateLimitWatchers(first, nil)
+		if got := watched(); len(got) != 1 || got[0] != replacement {
+			t.Fatalf("watched after late registration = %v, want only the replacement task", got)
+		}
+	})
+
+	t.Run("RateLimitWatchersSkipPurgedTasks", func(t *testing.T) {
+		t.Parallel()
+		m := newTestManager(t, Config{ServerCtx: t.Context()})
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
+		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.RateLimitMessage{
+			Status:        agent.RateLimitStatusRejected,
+			ResetsAt:      time.Now().Add(time.Hour),
+			QuotaProvider: agent.QuotaProviderClaudeCode,
+			QuotaWindow:   "5h",
+			Utilization:   1,
+		}}), nil)
+		tk.SetState(task.StatePurged)
+		m.Insert(tk.ID, m.NewEntry(tk, nil))
+		if quotas := m.QuotaTracker.Merge(nil, time.Now()); len(quotas) != 1 {
+			t.Fatalf("tracked quotas = %#v, want the purged task's history", quotas)
+		}
+		m.quotaWatchMu.Lock()
+		stop, ok := m.quotaWatches[tk]
+		m.quotaWatchMu.Unlock()
+		if !ok || stop != nil {
+			t.Fatalf("purged task watch = (%v, %t), want history applied without a watcher", stop, ok)
+		}
 	})
 
 	t.Run("RateLimitStatusOnlyUtilization", func(t *testing.T) {
@@ -4022,6 +4051,45 @@ func TestManager(t *testing.T) {
 				t.Fatal("backend Purge did not start immediately")
 			}
 		})
+		t.Run("retires_rate_limit_watcher", func(t *testing.T) {
+			t.Parallel()
+			m := newTestManager(t, Config{
+				ServerCtx: t.Context(),
+				Runtimes:  newTestRuntime(t, &runtimetest.FakeBackend{}, nil),
+			})
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, harness.Claude, "")
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetState(task.StateStopped)
+			entry := m.NewEntry(tk, nil)
+			m.Insert(tk.ID, entry)
+			t.Cleanup(func() {
+				if err := entry.Lifecycle.Close(); err != nil {
+					t.Errorf("Close: %v", err)
+				}
+			})
+			recordTestTaskLog(t, m, entry)
+			watch := func() (chan struct{}, bool) {
+				m.quotaWatchMu.Lock()
+				defer m.quotaWatchMu.Unlock()
+				stop, ok := m.quotaWatches[tk]
+				return stop, ok
+			}
+			stop, _ := watch()
+			if stop == nil {
+				t.Fatal("stopped task has no rate-limit watcher")
+			}
+			if err := entry.Lifecycle.Purge(t.Context(), 0); err != nil {
+				t.Fatalf("Purge: %v", err)
+			}
+			select {
+			case <-stop:
+			case <-time.After(5 * time.Second):
+				t.Fatalf("purge left the rate-limit watcher running in state %s", tk.GetState())
+			}
+			if got, ok := watch(); !ok || got != nil {
+				t.Fatalf("purged task watch = (%v, %t), want retired", got, ok)
+			}
+		})
 		t.Run("zero_delay_purges_immediately", func(t *testing.T) {
 			t.Parallel()
 			fake := &runtimetest.FakeBackend{}
@@ -6407,8 +6475,7 @@ func TestManager(t *testing.T) {
 		ticker := time.NewTicker(10 * time.Millisecond)
 		t.Cleanup(ticker.Stop)
 		for {
-			history, _, unsub := tk.SubscribeStats(t.Context())
-			unsub()
+			history, _ := tk.StatsSince(0)
 			if len(history) > 0 {
 				if history[0].CPUPerc != 2.5 || history[0].MemUsed != 200 || history[0].DiskUsed != -1 {
 					t.Fatalf("streamed stats = %+v", history[0])
@@ -6557,8 +6624,7 @@ func TestManager(t *testing.T) {
 			t.Fatal("timed out waiting for final disk usage")
 		}
 
-		history, _, unsub := tk.SubscribeStats(t.Context())
-		unsub()
+		history, _ := tk.StatsSince(0)
 		if len(history) != 1 || history[0].DiskUsed != 700 {
 			t.Fatalf("stopped task stats = %+v, want disk usage 700", history)
 		}

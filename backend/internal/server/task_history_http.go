@@ -376,8 +376,12 @@ func (h *historyHandlers) handleHistoryEvents(w http.ResponseWriter, r *http.Req
 	// detects physical controls that emit no semantic notification.
 	wake, unsub := e.Task().SubscribeTimelineWakeups(r.Context())
 	defer unsub()
-	stats, statsLive, statsUnsub := e.Task().SubscribeStats(r.Context())
+	// Stats wakeups also coalesce: each wakeup sends every retained sample
+	// written or revised since the previous read, so a slow client misses only
+	// samples the ring already evicted.
+	statsWake, statsUnsub := e.Task().SubscribeStatsWakeups(r.Context())
 	defer statsUnsub()
+	stats, statsSeq := e.Task().StatsSince(0)
 	if err := historyFrame(stream, "statsSnapshot", "", apiconv.StatsSnapshot(stats)); err != nil {
 		return
 	}
@@ -418,13 +422,13 @@ func (h *historyHandlers) handleHistoryEvents(w http.ResponseWriter, r *http.Req
 		case <-r.Context().Done():
 			return
 		case <-wake:
-		case sample, ok := <-statsLive:
-			if !ok {
-				return
-			}
-			// Never attach a raw ID: same-timestamp disk revisions must still arrive.
-			if err := historyFrame(stream, "stats", "", apiconv.Stats(&sample)); err != nil {
-				return
+		case <-statsWake:
+			stats, statsSeq = e.Task().StatsSince(statsSeq)
+			for i := range stats {
+				// Never attach a raw ID: same-timestamp disk revisions must still arrive.
+				if err := historyFrame(stream, "stats", "", apiconv.Stats(&stats[i])); err != nil {
+					return
+				}
 			}
 			continue
 		case <-heartbeat.C:

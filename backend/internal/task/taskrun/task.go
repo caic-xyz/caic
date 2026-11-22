@@ -118,9 +118,11 @@ type Task struct {
 	runtimeInstanceID      runtime.ID
 	runtimeConnection      runtime.ConnectionTarget
 	statsRing              [statsRingSize]runtime.Stats
+	statsRingSeq           [statsRingSize]uint64 // statsSeq at each slot's last write
 	statsLen               int
 	statsHead              int
-	statsSubs              []chan runtime.Stats
+	statsSeq               uint64          // counts ring writes, including disk revisions
+	statsWakeSubs          []chan struct{} // active coalescing stats wakeup subscribers
 	diskUsed               int64
 	diskKnown              bool
 	state                  task.State
@@ -1331,7 +1333,7 @@ func (t *Task) RateLimitsSince(next int) (rateLimits []*agent.RateLimitMessage, 
 	return rateLimits, view.Len()
 }
 
-// PushStats records a runtime stats snapshot and notifies live subscribers.
+// PushStats records a runtime stats snapshot and wakes stats subscribers.
 func (t *Task) PushStats(s *runtime.Stats) {
 	t.mu.Lock()
 	val := *s
@@ -1343,17 +1345,14 @@ func (t *Task) PushStats(s *runtime.Stats) {
 	}
 	idx := (t.statsHead + t.statsLen) % statsRingSize
 	t.statsRing[idx] = val
+	t.statsSeq++
+	t.statsRingSeq[idx] = t.statsSeq
 	if t.statsLen < statsRingSize {
 		t.statsLen++
 	} else {
 		t.statsHead = (t.statsHead + 1) % statsRingSize
 	}
-	for _, ch := range t.statsSubs {
-		select {
-		case ch <- val:
-		default:
-		}
-	}
+	wakeLocked(t.statsWakeSubs)
 	t.mu.Unlock()
 }
 
@@ -1370,30 +1369,49 @@ func (t *Task) UpdateDiskUsage(bytes int64) {
 	}
 	idx := (t.statsHead + t.statsLen - 1) % statsRingSize
 	t.statsRing[idx].DiskUsed = bytes
-	val := t.statsRing[idx]
-	for _, ch := range t.statsSubs {
-		select {
-		case ch <- val:
-		default:
-		}
-	}
+	t.statsSeq++
+	t.statsRingSeq[idx] = t.statsSeq
+	wakeLocked(t.statsWakeSubs)
 	t.mu.Unlock()
 }
 
-// SubscribeStats returns a snapshot of the stats ring buffer and a channel that
-// receives only live stats arriving after the snapshot. A full channel skips
-// samples; the ring buffer stays authoritative. Cancellation or unsubscribing
-// closes the channel. unsubFn is idempotent and safe after ctx cancellation.
-func (t *Task) SubscribeStats(ctx context.Context) (history []runtime.Stats, live <-chan runtime.Stats, unsubFn func()) {
-	ch := make(chan runtime.Stats, 64)
+// SubscribeStatsWakeups returns a channel that receives a coalesced signal
+// after each stats ring write. Read the ring with StatsSince; subscribe first
+// so a write between the two still wakes the reader. The channel is never
+// closed. unsubFn is idempotent and safe after ctx cancellation.
+func (t *Task) SubscribeStatsWakeups(ctx context.Context) (wake <-chan struct{}, unsubFn func()) {
+	ch := make(chan struct{}, 1)
 	t.mu.Lock()
-	history = make([]runtime.Stats, t.statsLen)
-	for i := range t.statsLen {
-		history[i] = t.statsRing[(t.statsHead+i)%statsRingSize]
-	}
-	t.statsSubs = append(t.statsSubs, ch)
+	t.statsWakeSubs = append(t.statsWakeSubs, ch)
 	t.mu.Unlock()
-	return history, ch, unsubscribe(t, ctx, &t.statsSubs, ch, func() { close(ch) })
+	return ch, unsubscribe(t, ctx, &t.statsWakeSubs, ch, func() {})
+}
+
+// StatsSince returns, oldest first, the retained samples written or revised
+// after the write numbered after, and the number to pass to the next call.
+// Start at 0 for the whole ring. A reader that falls behind the ring loses
+// only evicted samples.
+func (t *Task) StatsSince(after uint64) (samples []runtime.Stats, through uint64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for i := range t.statsLen {
+		idx := (t.statsHead + i) % statsRingSize
+		if t.statsRingSeq[idx] > after {
+			samples = append(samples, t.statsRing[idx])
+		}
+	}
+	return samples, t.statsSeq
+}
+
+// wakeLocked signals each coalescing wakeup subscriber without blocking.
+func wakeLocked(subs []chan struct{}) {
+	for _, ch := range subs {
+		select {
+		case ch <- struct{}{}:
+		default:
+			// A signal is already pending.
+		}
+	}
 }
 
 // unsubscribe returns a function that, on its first call or on ctx
@@ -2161,13 +2179,7 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage) (stateChanged bool) {
 	// Forward the folded message to the usage rollup with the cost snapshot
 	// reflecting every prior fold in this message.
 	t.observeRollupLocked(m, at, producerAt, false)
-	for _, ch := range t.wakeSubs {
-		select {
-		case ch <- struct{}{}:
-		default:
-			// A signal is already pending.
-		}
-	}
+	wakeLocked(t.wakeSubs)
 	return stateChanged
 }
 

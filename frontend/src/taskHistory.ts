@@ -34,6 +34,7 @@ interface HistoryAttempt {
   publishTimer: ReturnType<typeof setTimeout> | null;
   retryTimer: ReturnType<typeof setTimeout> | null;
   watchdog: ReturnType<typeof setTimeout> | null;
+  aliveUntil: number;
   incomingStats: EventStats[] | null;
   observedThrough: number;
 }
@@ -250,14 +251,24 @@ export function createTaskHistory(id: string): TaskHistory {
     if (owner.watchdog !== null) clearTimeout(owner.watchdog);
     owner.watchdog = null;
   }
+  // The server repeats the current checkpoint every 15 seconds. Three missed
+  // frames replace a connection that silently stopped delivering data.
+  const silenceLimit = 45_000;
+  function armWatchdog(owner: HistoryAttempt, delay: number) {
+    owner.watchdog = setTimeout(() => {
+      owner.watchdog = null;
+      if (!current(owner)) return;
+      const remaining = owner.aliveUntil - Date.now();
+      if (remaining > 0) armWatchdog(owner, remaining);
+      else void discover();
+    }, delay);
+  }
   function alive(owner: HistoryAttempt) {
     if (!current(owner)) return;
-    clearWatchdog(owner);
-    // The server repeats the current checkpoint every 15 seconds. Three missed
-    // frames replace a connection that silently stopped delivering data.
-    owner.watchdog = setTimeout(() => {
-      if (current(owner)) void discover();
-    }, 45_000);
+    // Bursts deliver thousands of frames per task; move the deadline instead
+    // of replacing the timer for each one.
+    owner.aliveUntil = Date.now() + silenceLimit;
+    if (owner.watchdog === null) armWatchdog(owner, silenceLimit);
   }
   function retire() {
     const owner = attempt;
@@ -288,6 +299,7 @@ export function createTaskHistory(id: string): TaskHistory {
       publishTimer: null,
       retryTimer: null,
       watchdog: null,
+      aliveUntil: 0,
       incomingStats: null,
       observedThrough: 0,
     };

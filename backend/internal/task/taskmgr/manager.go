@@ -169,7 +169,10 @@ type Manager struct {
 	quotaWatchMu     sync.Mutex
 	quotaWatchers    sync.WaitGroup
 	quotaWatchClosed bool
-	quotaWatches     map[*taskrun.Task]chan struct{} // Closing a channel stops that task's watcher.
+	// quotaWatches holds one entry per task whose quota history was applied.
+	// Closing a channel stops that task's watcher; nil marks a purged task,
+	// which runs no watcher.
+	quotaWatches map[*taskrun.Task]chan struct{}
 
 	// Serializes pending-input persistence and registration.
 	inputMu          sync.Mutex
@@ -1441,7 +1444,7 @@ func (m *Manager) publishEntry(ctx context.Context, entry *Entry, reserveOnly in
 	m.tasks[t.ID] = entry
 	m.taskChangedLocked(t.ID)
 	m.mu.Unlock()
-	m.reconcileRateLimitWatchers()
+	m.updateRateLimitWatchers(t, nil)
 	return nil
 }
 
@@ -1967,16 +1970,19 @@ func (m *Manager) handleRuntimeStart(instanceID runtime.ID) {
 func (m *Manager) insertEntry(id ksid.ID, entry *Entry) {
 	m.inputMu.Lock()
 	m.mu.Lock()
-	m.replaceEntryLocked(id, entry)
+	var displaced []*taskrun.Task
+	if previous := m.replaceEntryLocked(id, entry); previous != nil {
+		displaced = append(displaced, previous)
+	}
 	m.taskChangedLocked(id)
 	m.mu.Unlock()
 	m.inputMu.Unlock()
-	m.reconcileRateLimitWatchers()
+	m.updateRateLimitWatchers(entry.Task(), displaced)
 }
 
-// replaceEntryLocked preserves task-owned input during startup adoption.
-// The caller holds both inputMu and mu.
-func (m *Manager) replaceEntryLocked(id ksid.ID, entry *Entry) {
+// replaceEntryLocked preserves task-owned input during startup adoption and
+// returns the task it displaced, if any. The caller holds both inputMu and mu.
+func (m *Manager) replaceEntryLocked(id ksid.ID, entry *Entry) (displaced *taskrun.Task) {
 	// Import may finish after Cancel snapshots registered entries. Fence its
 	// execution admission before publication, even with a retained lifecycle context.
 	if m.serverCtx.Err() != nil {
@@ -1986,6 +1992,9 @@ func (m *Manager) replaceEntryLocked(id ksid.ID, entry *Entry) {
 	if previous := m.tasks[id]; previous != nil && previous != entry {
 		pending = previous.PendingInput()
 		previous.setPendingInput(nil)
+		if previous.Task() != entry.Task() {
+			displaced = previous.Task()
+		}
 	}
 	// Claim staged prompts before registration can certify task-list membership.
 	// Pruning then cannot mistake a newly registered task's input for missing.
@@ -1995,57 +2004,84 @@ func (m *Manager) replaceEntryLocked(id ksid.ID, entry *Entry) {
 	}
 	entry.setPendingInput(pending)
 	m.tasks[id] = entry
+	return displaced
 }
 
-// reconcileRateLimitWatchers keeps one quota watcher per registered task. It
-// starts a watcher for each newly registered task and stops the watcher of each
-// task that left the registry or was replaced. Call it after changing m.tasks,
+// updateRateLimitWatchers stops the watchers of the displaced tasks and starts
+// one for t while it stays registered. Concurrent registrations may call it out
+// of order; checking membership under quotaWatchMu keeps a task that was
+// displaced first from gaining a watcher. Call it after changing m.tasks,
 // without holding m.mu.
-func (m *Manager) reconcileRateLimitWatchers() {
+func (m *Manager) updateRateLimitWatchers(t *taskrun.Task, displaced []*taskrun.Task) {
 	m.quotaWatchMu.Lock()
 	defer m.quotaWatchMu.Unlock()
 	if m.quotaWatchClosed {
 		return
 	}
+	for _, d := range displaced {
+		if stop, ok := m.quotaWatches[d]; ok {
+			if stop != nil {
+				close(stop)
+			}
+			delete(m.quotaWatches, d)
+		}
+	}
+	if _, ok := m.quotaWatches[t]; ok {
+		return
+	}
 	m.mu.Lock()
-	registered := make(map[*taskrun.Task]struct{}, len(m.tasks))
-	for _, e := range m.tasks {
-		registered[e.Task()] = struct{}{}
-	}
+	e := m.tasks[t.ID]
 	m.mu.Unlock()
-	for t, stop := range m.quotaWatches {
-		if _, ok := registered[t]; !ok {
-			close(stop)
-			delete(m.quotaWatches, t)
-		}
-	}
-	for t := range registered {
-		if _, ok := m.quotaWatches[t]; !ok {
-			m.watchRateLimitEventsLocked(t)
-		}
+	if e != nil && e.Task() == t {
+		m.watchRateLimitEventsLocked(t)
 	}
 }
 
-// watchRateLimitEventsLocked forwards task quota changes to the shared change
-// channel, letting task and usage SSE subscribers refresh immediately. Callers
-// hold quotaWatchMu.
+// retireRateLimitWatcher stops the watcher of a purged task after it applies
+// the task's remaining quota messages. A purged task cannot leave StatePurged,
+// so no later message needs a watcher.
+func (m *Manager) retireRateLimitWatcher(t *taskrun.Task) {
+	m.quotaWatchMu.Lock()
+	defer m.quotaWatchMu.Unlock()
+	if stop := m.quotaWatches[t]; stop != nil {
+		close(stop)
+		m.quotaWatches[t] = nil
+	}
+}
+
+// watchRateLimitEventsLocked applies t's quota history and, unless t is
+// purged, forwards later quota changes to the shared change channel, letting
+// task and usage SSE subscribers refresh immediately. Callers hold
+// quotaWatchMu.
 func (m *Manager) watchRateLimitEventsLocked(t *taskrun.Task) {
+	// Apply each message: the task snapshot retains only its latest rate
+	// limit, while the tracker needs every quota window. History is already in
+	// the registered snapshot, so only a tracker change notifies; a live message
+	// also changes the task's latest rate limit.
+	apply := func(next int, live bool) int {
+		rateLimits, end := t.RateLimitsSince(next)
+		changed := live && len(rateLimits) > 0
+		for _, rateLimit := range rateLimits {
+			if m.recordRateLimitMessage(rateLimit) {
+				changed = true
+			}
+		}
+		if changed {
+			m.NotifyTaskUpdate(t.ID)
+		}
+		return end
+	}
+	if t.GetState() == task.StatePurged {
+		apply(0, false)
+		m.quotaWatches[t] = nil
+		return
+	}
 	stop := make(chan struct{})
 	m.quotaWatches[t] = stop
 	// Subscribe before reading history so a message appended in between still
-	// wakes the watcher. Apply each message: the task snapshot retains only its
-	// latest rate limit, while the tracker needs every quota window.
+	// wakes the watcher.
 	wake, unsub := t.SubscribeTimelineWakeups(m.serverCtx)
-	history, next := t.RateLimitsSince(0)
-	historyChanged := false
-	for _, rateLimit := range history {
-		if m.recordRateLimitMessage(rateLimit) {
-			historyChanged = true
-		}
-	}
-	if historyChanged {
-		m.NotifyTaskUpdate(t.ID)
-	}
+	next := apply(0, false)
 	m.quotaWatchers.Go(func() {
 		defer unsub()
 		for {
@@ -2053,14 +2089,11 @@ func (m *Manager) watchRateLimitEventsLocked(t *taskrun.Task) {
 			case <-m.serverCtx.Done():
 				return
 			case <-stop:
+				// Apply messages appended since the last wakeup was consumed.
+				apply(next, true)
 				return
 			case <-wake:
-			}
-			var rateLimits []*agent.RateLimitMessage
-			rateLimits, next = t.RateLimitsSince(next)
-			for _, rateLimit := range rateLimits {
-				m.recordRateLimitMessage(rateLimit)
-				m.NotifyTaskUpdate(t.ID)
+				next = apply(next, true)
 			}
 		}
 	})
@@ -2543,21 +2576,27 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	}
 
 	// Register the entry, replacing stale log entries for the same branch.
+	var displaced []*taskrun.Task
 	m.inputMu.Lock()
 	m.mu.Lock()
 	if relPath != "" || branch != "" {
 		for _, oldID := range branchIDs[relPath+"\x00"+branch] {
 			if oldID != t.ID {
+				if old := m.tasks[oldID]; old != nil {
+					displaced = append(displaced, old.Task())
+				}
 				delete(m.tasks, oldID)
 				m.taskChangedLocked(oldID)
 			}
 		}
 	}
-	m.replaceEntryLocked(t.ID, entry)
+	if previous := m.replaceEntryLocked(t.ID, entry); previous != nil {
+		displaced = append(displaced, previous)
+	}
 	m.taskChangedLocked(t.ID)
 	m.mu.Unlock()
 	m.inputMu.Unlock()
-	m.reconcileRateLimitWatchers()
+	m.updateRateLimitWatchers(t, displaced)
 	if lt.OpenSync != "" {
 		endInterruptedSync(ctx, m.log.With("task", t.ID), entry, lt.OpenSync)
 	}
