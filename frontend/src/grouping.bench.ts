@@ -1,7 +1,7 @@
-// Benchmarks bounded text/tool streaming and compact concurrent transcript display.
+// Benchmarks bounded text/tool streaming, history turn grouping, and compact concurrent transcript display.
 import type { EventMessage } from "@sdk/types.gen";
 import { bench } from "@tests/bench";
-import { groupMessages, IncrementalMessageGrouper } from "./grouping";
+import { groupMessages, groupTurns, IncrementalMessageGrouper } from "./grouping";
 import { NativeActivityTracker } from "./nativeSubagents";
 
 const concurrent: EventMessage[] = Array.from({ length: 10000 }, (_, i) => {
@@ -60,6 +60,21 @@ bench(
   "concurrent full history (10k fragments)",
   () => {
     groupMessages(concurrent);
+  },
+  { time: 500, warmupTime: 100 },
+);
+const thinking: EventMessage[] = [
+  { kind: "thinking", ts: 1, thinking: { text: "Let me think about this..." } },
+  ...Array.from({ length: 65000 }, (_, i): EventMessage => ({
+    kind: "thinkingDelta",
+    ts: i + 2,
+    thinkingDelta: { text: `word${i} ` },
+  })),
+];
+bench(
+  "history section turns (65k thinking fragments)",
+  () => {
+    groupTurns(groupMessages(thinking));
   },
   { time: 500, warmupTime: 100 },
 );
