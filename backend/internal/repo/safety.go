@@ -11,7 +11,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -52,7 +51,7 @@ type secretPattern struct {
 // when comparing against a remote tracking branch.
 // It returns any issues found. A non-nil error indicates a git command failure,
 // or incomplete secret scan, not a safety problem.
-func CheckSafety(ctx context.Context, log *slog.Logger, dir, branch, baseRef string, ds v3.DiffStat) ([]SafetyIssue, error) {
+func CheckSafety(ctx context.Context, log *slog.Logger, g gitRepository, branch, baseRef string, ds v3.DiffStat) ([]SafetyIssue, error) {
 	if log == nil {
 		return nil, errors.New("safety logger is required")
 	}
@@ -63,7 +62,7 @@ func CheckSafety(ctx context.Context, log *slog.Logger, dir, branch, baseRef str
 		if !f.Binary {
 			continue
 		}
-		size, err := gitCatFileSize(ctx, log, dir, branch, f.Path)
+		size, err := gitCatFileSize(ctx, log, g, branch, f.Path)
 		if err != nil {
 			// File may have been deleted; skip.
 			continue
@@ -78,7 +77,7 @@ func CheckSafety(ctx context.Context, log *slog.Logger, dir, branch, baseRef str
 	}
 
 	// Scan added lines for secrets.
-	secretIssues, err := scanDiffForSecrets(ctx, log, dir, branch, baseRef)
+	secretIssues, err := scanDiffForSecrets(ctx, log, g, branch, baseRef)
 	if err != nil {
 		return issues, err
 	}
@@ -87,10 +86,9 @@ func CheckSafety(ctx context.Context, log *slog.Logger, dir, branch, baseRef str
 }
 
 // gitCatFileSize returns the size of a blob in the given branch.
-func gitCatFileSize(ctx context.Context, log *slog.Logger, dir, branch, path string) (int64, error) {
+func gitCatFileSize(ctx context.Context, log *slog.Logger, g gitRepository, branch, path string) (int64, error) {
 	log.DebugContext(ctx, "git cat-file size", "branch", branch, "path", path)
-	cmd := exec.CommandContext(ctx, "git", "cat-file", "-s", branch+":"+path) //nolint:gosec // branch and path are from internal git state, not user input.
-	cmd.Dir = dir
+	cmd := g.Command(ctx, "cat-file", "-s", branch+":"+path)
 	out, err := cmd.Output()
 	if err != nil {
 		return 0, err
@@ -99,13 +97,12 @@ func gitCatFileSize(ctx context.Context, log *slog.Logger, dir, branch, path str
 }
 
 // scanDiffForSecrets runs git diff and scans added lines for secret patterns.
-func scanDiffForSecrets(ctx context.Context, log *slog.Logger, dir, branch, baseRef string) ([]SafetyIssue, error) {
+func scanDiffForSecrets(ctx context.Context, log *slog.Logger, g gitRepository, branch, baseRef string) ([]SafetyIssue, error) {
 	log.InfoContext(ctx, "git diff for secrets", "branch", branch, "baseRef", baseRef)
 	// Cancel the producer on scan failure, and always reap it before returning.
 	commandCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	cmd := exec.CommandContext(commandCtx, "git", "diff", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", baseRef+"..."+branch) //nolint:gosec // branch names are from internal git state.
-	cmd.Dir = dir
+	cmd := g.Command(commandCtx, "diff", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", baseRef+"..."+branch)
 	cmd.WaitDelay = time.Second
 	// A configured diff helper can emit credentials or source on stderr.
 	// Drain it without retaining bytes that could escape through returned errors.

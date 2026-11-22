@@ -5,6 +5,8 @@ package mdruntime
 import (
 	"errors"
 	"fmt"
+	slashpath "path"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -23,15 +25,20 @@ const (
 	gitWorktreeStatMarker = "caic-git-worktree-stat"
 )
 
-func gitStatusCommand(repo, defaultRemote, defaultBranch string) string {
-	comparison := ""
-	if defaultRemote != "" && defaultBranch != "" {
-		comparison = defaultRemote + "/" + defaultBranch
+// gitComparisonRef returns a complete configured comparison, never a partial
+// ref when one side of the runtime's default-branch metadata is absent.
+func gitComparisonRef(remote, branch string) string {
+	if remote == "" || branch == "" {
+		return ""
 	}
+	return remote + "/" + branch
+}
+
+func gitStatusCommand(repo, comparison string) string {
 	return gitStatusHeader(repo, comparison) + ` && ` +
 		untrackedDiffSetup() + ` && ` +
 		`printf '` + gitTotalStatMarker + `\0' && ` +
-		`if [ -n "$comparison" ]; then untracked_diff git diff "$diff_base" --numstat --stat -z -- .; fi && ` +
+		`if [ -n "$comparison" ]; then untracked_diff git diff "$diff_base" --numstat --stat -z -- .; elif git rev-parse --verify --quiet HEAD >/dev/null; then untracked_diff git diff HEAD --numstat --stat -z -- .; fi && ` +
 		`printf '\0` + gitWorktreeStatMarker + `\0' && ` +
 		`untracked_diff git diff HEAD --numstat --stat -z -- . && ` +
 		`printf '\0` + gitLogMarker + `\0' && ` +
@@ -43,15 +50,11 @@ func gitStatusCommand(repo, defaultRemote, defaultBranch string) string {
 // branch-diff numstat sections of the full status report in one probe. It
 // omits the per-commit log and per-file worktree stats that only the diff
 // view needs, so periodic callers avoid the per-commit log.
-func compactGitStatusCommand(repo, defaultRemote, defaultBranch string) string {
-	comparison := ""
-	if defaultRemote != "" && defaultBranch != "" {
-		comparison = defaultRemote + "/" + defaultBranch
-	}
+func compactGitStatusCommand(repo, comparison string) string {
 	return gitStatusHeader(repo, comparison) + ` && ` +
 		untrackedDiffSetup() + ` && ` +
 		`printf '` + gitTotalStatMarker + `\0' && ` +
-		`if [ -n "$comparison" ]; then untracked_diff git diff "$diff_base" --numstat --stat -z -- .; fi && ` +
+		`if [ -n "$comparison" ]; then untracked_diff git diff "$diff_base" --numstat --stat -z -- .; elif git rev-parse --verify --quiet HEAD >/dev/null; then untracked_diff git diff HEAD --numstat --stat -z -- .; fi && ` +
 		`printf '\0` + gitWorktreeStatMarker + `\0'`
 }
 
@@ -59,6 +62,9 @@ func compactGitStatusCommand(repo, defaultRemote, defaultBranch string) string {
 // and operation detection shared by the full and compact status commands. A
 // configured task base is used only when the checked-out branch has no usable
 // tracking upstream, so the task card and diff agree with git status.
+// Detached modules fall back to their integration point, then a cached remote
+// HEAD for modules initialized after provisioning. Missing comparison refs still
+// report pending file statistics against HEAD.
 // Branch stats use the merge-base, falling back to the comparison tip only
 // when rewritten histories have no common ancestor (merge-base exit code 1).
 func gitStatusHeader(repo, configuredComparison string) string {
@@ -68,6 +74,10 @@ func gitStatusHeader(repo, configuredComparison string) string {
 		`comparison=$upstream && fallback=` + shellQuote(configuredComparison) + ` && ` +
 		`if ! git rev-parse --verify --quiet "$comparison^{commit}" >/dev/null; then comparison=$fallback; fi && ` +
 		`if ! git rev-parse --verify --quiet "$comparison^{commit}" >/dev/null; then comparison=; fi && ` +
+		`if [ -z "$comparison" ] && [ "$fallback" = refs/md/sync/HEAD ]; then ` +
+		`remote_heads=$(git for-each-ref --format='%(refname)' refs/remotes) && ` +
+		`for candidate in refs/remotes/origin/HEAD $remote_heads; do ` +
+		`case "$candidate" in */HEAD) if git rev-parse --verify --quiet "$candidate^{commit}" >/dev/null; then comparison=$candidate; break; fi ;; esac; done; fi && ` +
 		`if [ -n "$comparison" ]; then ` +
 		`divergence=$(git rev-list --left-right --count "$comparison...HEAD") && ` +
 		`printf '` + gitComparisonMarker + `%s\0` + gitDivergenceMarker + `%s\0' "$comparison" "$divergence"; ` +
@@ -87,16 +97,31 @@ func gitStatusHeader(repo, configuredComparison string) string {
 // commit: a detached worktree of repo at ~/src/<repo name>-<short sha>, removed
 // by the shell's exit trap. A leftover from a killed session is replaced. Two
 // concurrent runs on the same commit share that path and so collide.
-func workspaceSteps(repo, commit string) []string {
-	return []string{
+func workspaceSteps(repo, commit string, sub *runtime.PushSubmodule) []string {
+	steps := []string{
 		"cd " + shellQuote(repo),
-		`wt="$HOME/src/$(basename "$PWD")-$(git rev-parse --short ` + commit + `)"`,
-		`mkdir -p "$HOME/src"`,
-		`rm -rf "$wt" && git worktree prune`,
-		`trap 'cd / && rm -rf "$wt" && git -C ` + shellQuote(repo) + ` worktree prune' EXIT`,
-		`git worktree add -q --detach "$wt" ` + commit,
-		`cd "$wt"`,
+		`prefix=$(git rev-parse --show-prefix) && if [ -n "$prefix" ]; then printf '%s\n' "Git checkout missing at $PWD" >&2; exit 1; fi`,
+		`root=$PWD`,
 	}
+	name := `"$(basename "$root")"`
+	if sub != nil && sub.GitDir != "" {
+		steps = append(steps,
+			`gd=$(git rev-parse --path-format=absolute --git-common-dir)/modules/`+shellQuote(sub.GitDir),
+			`repo_git() { git --git-dir="$gd" --work-tree="$root" "$@"; }`,
+		)
+		name = shellQuote(slashpath.Base(sub.Path))
+	} else {
+		steps = append(steps, `repo_git() { git -C "$root" "$@"; }`)
+	}
+	return append(steps,
+		`short=$(repo_git rev-parse --short `+commit+`)`,
+		`wt="$HOME/src/"`+name+`"-$short"`,
+		`mkdir -p "$HOME/src"`,
+		`rm -rf "$wt" && repo_git worktree prune`,
+		`trap 'cd / && rm -rf "$wt" && repo_git worktree prune' EXIT`,
+		`repo_git worktree add -q --detach "$wt" `+commit,
+		`cd "$wt"`,
+	)
 }
 
 // prePushCommand runs the repository's pre-push hook in the workspace at
@@ -114,7 +139,20 @@ func prePushCommand(repo, commit string, dest runtime.PushRefs) (string, error) 
 		return "", errors.New("pre-push remote and branch are required")
 	}
 	update := "refs/heads/" + dest.Branch + " " + commit + " refs/heads/" + dest.Branch + " " + dest.RemoteCommit
-	steps := append([]string{"exec 2>&1", "{ stty -onlcr 2>/dev/null || :; }", "export GIT_OPTIONAL_LOCKS=0 LC_ALL=C"}, workspaceSteps(repo, commit)...)
+	if sub := dest.Submodule; sub != nil {
+		for _, p := range []string{sub.Path, sub.GitDir} {
+			if p != "" && (!filepath.IsLocal(filepath.FromSlash(p)) || slashpath.Clean(p) != p || p == ".") {
+				return "", fmt.Errorf("invalid pre-push submodule path %q", p)
+			}
+		}
+		if sub.Path == "" {
+			return "", errors.New("pre-push submodule path is required")
+		}
+		if sub.GitDir == "" {
+			repo = slashpath.Join(repo, sub.Path)
+		}
+	}
+	steps := append([]string{"exec 2>&1", "{ stty -onlcr 2>/dev/null || :; }", "export GIT_OPTIONAL_LOCKS=0 LC_ALL=C"}, workspaceSteps(repo, commit, dest.Submodule)...)
 	return strings.Join(append(steps,
 		`hook=$(git rev-parse --git-path hooks/pre-push)`,
 		`if [ ! -x "$hook" ]; then exit 0; fi`,
@@ -147,6 +185,19 @@ func gitFileDiffCommand(repo, commit, path, originalPath string) (string, error)
 		commands = append(commands, gitPatchCommand("show")+" --format= --diff-merges=first-parent --follow "+shellQuote(commit)+" -- "+shellQuote(path))
 	}
 	return strings.Join(commands, " && "), nil
+}
+
+// patchArgs scopes patch paths without exposing output-format flags to
+// callers. Statistics use typed repository probes instead of parsing patches.
+func patchArgs(patch runtime.DiffPatch) []string {
+	args := []string{"--src-prefix=", "--dst-prefix="}
+	if patch.Prefix != "" {
+		args = []string{"--src-prefix=a/" + patch.Prefix + "/", "--dst-prefix=b/" + patch.Prefix + "/"}
+	}
+	if patch.Path != "" {
+		args = append(args, "--", patch.Path)
+	}
+	return args
 }
 
 func gitPatchCommand(subcommand string) string {
@@ -537,12 +588,12 @@ func statusCode(code byte) string {
 // turnGitCommand measures branch and committed-turn changes in one container command.
 // Both commit comparisons use the fetched tip. A moving HEAD invalidates the
 // probe instead of combining stats from different revisions.
-func turnGitCommand(repo, remote, branch, from, to string) (string, error) {
+func turnGitCommand(repo, comparison, from, to string) (string, error) {
 	if !isGitObjectID(to) || from != "" && !isGitObjectID(from) {
 		return "", errors.New("turn snapshot requires full object IDs")
 	}
 	guard := `test "$(git rev-parse HEAD)" = ` + shellQuote(to)
-	cmd := "cd " + shellQuote(repo) + " && " + guard + " && " + compactGitStatusCommand(repo, remote, branch)
+	cmd := "cd " + shellQuote(repo) + " && " + guard + " && " + compactGitStatusCommand(repo, comparison)
 	cmd += ` && printf '\0caic-git-turn-stat\0' && `
 	if from == "" {
 		cmd += `printf 'unavailable\0'`

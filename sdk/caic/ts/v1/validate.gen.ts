@@ -122,6 +122,8 @@ export function validateDiffFileStat(raw: ValidatorInput): DiffFileStat {
 
 export function validateGitRepositoryState(raw: ValidatorInput): GitRepositoryState {
   const obj = asObject(raw, "GitRepositoryState");
+  if (!Object.prototype.hasOwnProperty.call(obj, "repository")) throw new TypeError("missing required field: GitRepositoryState.repository");
+  if (!Object.prototype.hasOwnProperty.call(obj, "submodule")) throw new TypeError("missing required field: GitRepositoryState.submodule");
   if (!Object.prototype.hasOwnProperty.call(obj, "name")) throw new TypeError("missing required field: GitRepositoryState.name");
   if (!Object.prototype.hasOwnProperty.call(obj, "branch")) throw new TypeError("missing required field: GitRepositoryState.branch");
   if (!Object.prototype.hasOwnProperty.call(obj, "ahead")) throw new TypeError("missing required field: GitRepositoryState.ahead");
@@ -132,6 +134,8 @@ export function validateGitRepositoryState(raw: ValidatorInput): GitRepositorySt
   if (!Object.prototype.hasOwnProperty.call(obj, "uncommittedFiles")) throw new TypeError("missing required field: GitRepositoryState.uncommittedFiles");
   if (!Object.prototype.hasOwnProperty.call(obj, "conflicts")) throw new TypeError("missing required field: GitRepositoryState.conflicts");
   return {
+    repository: asNumber(obj["repository"], "GitRepositoryState.repository"),
+    submodule: asString(obj["submodule"], "GitRepositoryState.submodule"),
     ...(Object.prototype.hasOwnProperty.call(obj, "stale") ? { stale: asBoolean(obj["stale"], "GitRepositoryState.stale") } : {}),
     name: asString(obj["name"], "GitRepositoryState.name"),
     branch: asString(obj["branch"], "GitRepositoryState.branch"),

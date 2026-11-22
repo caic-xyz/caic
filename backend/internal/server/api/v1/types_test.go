@@ -156,6 +156,7 @@ func TestFileDiffReq(t *testing.T) {
 			{Repository: 0, Path: "frontend/src/App.tsx"},
 			{Repository: 1, Commit: "0123456789abcdef0123456789abcdef01234567", Path: "backend/main.go"},
 			{Repository: 0, Path: "renamed.go", OriginalPath: "old.go"},
+			{Repository: 0, Submodule: "lib with space/nested", Path: "file.go"},
 		} {
 			if err := req.Validate(); err != nil {
 				t.Errorf("Validate(%+v): %v", req, err)
@@ -167,6 +168,16 @@ func TestFileDiffReq(t *testing.T) {
 		t.Parallel()
 		for _, req := range []FileDiffReq{
 			{Repository: -1, Path: "file.go"},
+			{Repository: 0, Submodule: "../escape", Path: "file.go"},
+			{Repository: 0, Submodule: "lib/../escape", Path: "file.go"},
+			{Repository: 0, Submodule: "/absolute", Path: "file.go"},
+			{Repository: 0, Submodule: "lib\\escape", Path: "file.go"},
+			{Repository: 0, Submodule: ".", Path: "file.go"},
+			{Repository: 0, Submodule: "..", Path: "file.go"},
+			{Repository: 0, Submodule: "./lib", Path: "file.go"},
+			{Repository: 0, Submodule: "lib/", Path: "file.go"},
+			{Repository: 0, Submodule: "lib//nested", Path: "file.go"},
+			{Repository: 0, Submodule: "lib\x00nested", Path: "file.go"},
 			{Repository: 0},
 			{Repository: 0, Commit: "main", Path: "file.go"},
 			{Repository: 0, Commit: "0123456789abcdef0123456789abcdef01234567", Path: "new.go", OriginalPath: "old.go"},
@@ -218,7 +229,7 @@ func TestRoutes(t *testing.T) {
 		if r.Path != "/api/caic/v1/tasks/{id}/diff/file" {
 			t.Fatalf("path = %q, want file diff path", r.Path)
 		}
-		want := []string{"repository", "commit", "path", "originalPath"}
+		want := []string{"repository", "submodule", "commit", "path", "originalPath"}
 		if !slices.Equal(r.QueryParams, want) {
 			t.Fatalf("QueryParams = %v, want %v", r.QueryParams, want)
 		}

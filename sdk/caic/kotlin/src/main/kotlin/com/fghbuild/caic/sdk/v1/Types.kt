@@ -1973,6 +1973,10 @@ data class DiffFileStat(
 /** GitRepositoryState summarizes the compact Git state of one task repository. */
 @Serializable
 data class GitRepositoryState(
+    /** Repository indexes the task's mapped repositories, independently of response ordering. */
+    val repository: Int,
+    /** Submodule is an initialized descendant path relative to that mapping, or empty for the mapped root. */
+    val submodule: String,
     /** Last known data retained after a failed refresh. */
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val stale: Boolean? = null,
     val name: String,
@@ -2323,7 +2327,7 @@ data class SafetyIssue(
 /** SyncResp is the response for POST /api/caic/v1/tasks/{id}/sync. */
 @Serializable
 data class SyncResp(
-    /** "synced", "blocked", or "empty" */
+    /** "synced", "blocked", or "empty" when no destination ref moved */
     val status: String,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val branch: String? = null,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val diffStat: DiffStat? = null,
@@ -2395,6 +2399,10 @@ data class GitFileStatus(
 /** GitRepositoryStatus describes the checked-out state of one task repository. */
 @Serializable
 data class GitRepositoryStatus(
+    /** Repository indexes the task's mapped repositories, independently of response ordering. */
+    val repository: Int,
+    /** Submodule is an initialized descendant path relative to that mapping, or empty for the mapped root. */
+    val submodule: String,
     val name: String,
     val branch: String,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val upstream: String? = null,
@@ -2450,6 +2458,10 @@ data class DiffIndexFileStatus(
 /** DiffIndexRepository describes one repository in a diff index. */
 @Serializable
 data class DiffIndexRepository(
+    /** Repository indexes the task's mapped repositories, independently of response ordering. */
+    val repository: Int,
+    /** Submodule is an initialized descendant path relative to that mapping, or empty for the mapped root. */
+    val submodule: String,
     val name: String,
     val branch: String,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val upstream: String? = null,

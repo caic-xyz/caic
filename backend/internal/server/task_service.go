@@ -1101,6 +1101,32 @@ func (s *taskService) repositoryStatuses(ctx context.Context, checkout *repo.Che
 	return snapshot.Statuses, err
 }
 
+// taskRepositoryViews preserves mapped repository identity independently of the
+// number or ordering of initialized submodules returned by a Git probe. Repos and
+// statuses must match one-to-one; a mismatch is reported rather than indexed.
+func taskRepositoryViews(repos []repo.Mount, statuses []runtime.RepositoryStatus) ([]taskRepositoryView, error) {
+	if len(repos) != len(statuses) {
+		return nil, fmt.Errorf("repository status count mismatch: %d mounts, %d statuses", len(repos), len(statuses))
+	}
+	var out []taskRepositoryView
+	for i := range statuses {
+		status := &statuses[i]
+		out = append(out, taskRepositoryView{Repository: i, Name: repos[i].Name, Status: status})
+		for j := range status.Submodules {
+			module := &status.Submodules[j]
+			out = append(out, taskRepositoryView{Repository: i, Submodule: module.Path, Name: repos[i].Name + "/" + module.Path, Status: &module.Status})
+		}
+	}
+	return out, nil
+}
+
+type taskRepositoryView struct {
+	Repository int
+	Submodule  string
+	Name       string
+	Status     *runtime.RepositoryStatus
+}
+
 func (s *taskService) taskDiffIndex(ctx context.Context, entry *taskmgr.Entry) (*v1.TaskDiffIndexResp, error) {
 	defer trace.StartRegion(ctx, "task.diff.index").End()
 	t := entry.Task()
@@ -1120,13 +1146,13 @@ func (s *taskService) taskDiffIndex(ctx context.Context, entry *taskmgr.Entry) (
 	if err != nil {
 		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 	}
-	repos := t.ReposSnapshot()
-	if len(repos) != len(statuses) {
-		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "repository status count mismatch"}
+	views, err := taskRepositoryViews(t.ReposSnapshot(), statuses)
+	if err != nil {
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 	}
-	repositories := make([]v1.DiffIndexRepository, len(statuses))
-	for i := range statuses {
-		status := &statuses[i]
+	repositories := make([]v1.DiffIndexRepository, len(views))
+	for i, view := range views {
+		status := view.Status
 		commits := make([]v1.DiffIndexCommit, len(status.Commits))
 		for j, commit := range status.Commits {
 			stat := make([]v1.DiffIndexFileStat, len(commit.Stat))
@@ -1162,7 +1188,9 @@ func (s *taskService) taskDiffIndex(ctx context.Context, entry *taskmgr.Entry) (
 			}
 		}
 		repositories[i] = v1.DiffIndexRepository{
-			Name:        repos[i].Name,
+			Repository:  view.Repository,
+			Submodule:   view.Submodule,
+			Name:        view.Name,
 			Branch:      status.Branch,
 			Upstream:    status.Upstream,
 			Ahead:       status.Ahead,
@@ -1195,7 +1223,7 @@ func (s *taskService) taskFileDiff(ctx context.Context, entry *taskmgr.Entry, re
 	if !ok {
 		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "unknown repo"}
 	}
-	diff, err := checkout.FileDiff(ctx, s.runtimes, t.GitTarget(), req.Repository, req.Commit, req.Path, req.OriginalPath)
+	diff, err := checkout.FileDiff(ctx, s.runtimes, t.GitTarget(), req.Repository, req.Submodule, req.Commit, req.Path, req.OriginalPath)
 	if err != nil {
 		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 	}
@@ -1228,18 +1256,18 @@ func (s *taskService) taskDiff(ctx context.Context, entry *taskmgr.Entry, filePa
 	if err != nil {
 		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 	}
-	repos := t.ReposSnapshot()
-	if len(repos) != len(statuses) {
-		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "repository status count mismatch"}
+	views, err := taskRepositoryViews(t.ReposSnapshot(), statuses)
+	if err != nil {
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 	}
-	repositories := make([]v1.GitRepositoryStatus, len(statuses))
-	for i := range statuses {
-		status := &statuses[i]
+	repositories := make([]v1.GitRepositoryStatus, len(views))
+	for i, view := range views {
+		status := view.Status
 		commits := make([]v1.GitCommit, len(status.Commits))
 		for j, commit := range status.Commits {
 			stat := make(v1.DiffStat, len(commit.Stat))
 			for k, file := range commit.Stat {
-				fileDiff, err := checkout.FileDiff(ctx, s.runtimes, target, i, commit.SHA, file.Path, "")
+				fileDiff, err := checkout.FileDiff(ctx, s.runtimes, target, view.Repository, view.Submodule, commit.SHA, file.Path, "")
 				if err != nil {
 					return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 				}
@@ -1263,7 +1291,7 @@ func (s *taskService) taskDiff(ctx context.Context, entry *taskmgr.Entry, filePa
 		}
 		uncommitted := make([]v1.GitFileStatus, len(status.Uncommitted))
 		for j, file := range status.Uncommitted {
-			fileDiff, err := checkout.FileDiff(ctx, s.runtimes, target, i, "", file.Path, file.OriginalPath)
+			fileDiff, err := checkout.FileDiff(ctx, s.runtimes, target, view.Repository, view.Submodule, "", file.Path, file.OriginalPath)
 			if err != nil {
 				return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 			}
@@ -1280,7 +1308,9 @@ func (s *taskService) taskDiff(ctx context.Context, entry *taskmgr.Entry, filePa
 			}
 		}
 		repositories[i] = v1.GitRepositoryStatus{
-			Name:        repos[i].Name,
+			Repository:  view.Repository,
+			Submodule:   view.Submodule,
+			Name:        view.Name,
 			Branch:      status.Branch,
 			Upstream:    status.Upstream,
 			Ahead:       status.Ahead,
@@ -1310,13 +1340,13 @@ func (s *taskService) taskRepoStatus(ctx context.Context, entry *taskmgr.Entry) 
 	if err != nil {
 		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 	}
-	repos := t.ReposSnapshot()
-	if len(repos) != len(statuses) {
-		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "repository status count mismatch"}
+	views, err := taskRepositoryViews(t.ReposSnapshot(), statuses)
+	if err != nil {
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 	}
-	out := make([]v1.GitRepositoryState, len(statuses))
-	for i := range statuses {
-		status := &statuses[i]
+	out := make([]v1.GitRepositoryState, len(views))
+	for i, view := range views {
+		status := view.Status
 		conflicts := 0
 		for _, file := range status.Uncommitted {
 			if file.IndexStatus == "U" || file.WorktreeStatus == "U" {
@@ -1330,7 +1360,9 @@ func (s *taskService) taskRepoStatus(ctx context.Context, entry *taskmgr.Entry) 
 			deleted += file.LinesDeleted
 		}
 		out[i] = v1.GitRepositoryState{
-			Name:             repos[i].Name,
+			Repository:       view.Repository,
+			Submodule:        view.Submodule,
+			Name:             view.Name,
 			Branch:           status.Branch,
 			Ahead:            status.Ahead,
 			Behind:           status.Behind,

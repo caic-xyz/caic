@@ -361,7 +361,7 @@ var Routes = []apispec.Route{
 		Category:    "Tasks",
 		Path:        "/api/caic/v1/tasks/{id}/diff/file",
 		Resp:        reflect.TypeFor[FileDiffResp](),
-		QueryParams: []string{"repository", "commit", "path", "originalPath"},
+		QueryParams: []string{"repository", "submodule", "commit", "path", "originalPath"},
 	},
 	{
 		Name:     "getTaskRepoStatus",

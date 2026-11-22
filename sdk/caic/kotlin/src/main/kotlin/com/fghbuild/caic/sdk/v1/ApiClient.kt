@@ -183,7 +183,7 @@ class ApiClient(
     /** Returns repository and changed-file metadata without loading patch bodies. */
     suspend fun getTaskDiffIndex(id: String): TaskDiffIndexResp = request("GET", "/api/caic/v1/tasks/$id/diff/index")
     /** Returns one committed or uncommitted file patch. */
-    suspend fun getTaskFileDiff(id: String, repository: String, commit: String, path: String, originalPath: String): FileDiffResp = request("GET", "/api/caic/v1/tasks/$id/diff/file?repository=${java.net.URLEncoder.encode(repository, "UTF-8")}&commit=${java.net.URLEncoder.encode(commit, "UTF-8")}&path=${java.net.URLEncoder.encode(path, "UTF-8")}&originalPath=${java.net.URLEncoder.encode(originalPath, "UTF-8")}")
+    suspend fun getTaskFileDiff(id: String, repository: String, submodule: String, commit: String, path: String, originalPath: String): FileDiffResp = request("GET", "/api/caic/v1/tasks/$id/diff/file?repository=${java.net.URLEncoder.encode(repository, "UTF-8")}&submodule=${java.net.URLEncoder.encode(submodule, "UTF-8")}&commit=${java.net.URLEncoder.encode(commit, "UTF-8")}&path=${java.net.URLEncoder.encode(path, "UTF-8")}&originalPath=${java.net.URLEncoder.encode(originalPath, "UTF-8")}")
     /** Returns compact Git state for every repository mapped to a task. */
     suspend fun getTaskRepoStatus(id: String): TaskRepoStatusResp = request("GET", "/api/caic/v1/tasks/$id/repo-status")
     /** Returns the list of running processes inside the task's runtime instance. */

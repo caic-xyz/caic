@@ -137,7 +137,7 @@ func TestCheckout(t *testing.T) {
 		before := runPushGit(t, root, "status", "--porcelain=v2")
 		g := &git.Checkout{Root: root, Logger: logtest.Logger(t)}
 		d := PushDestination{Remote: "origin", Branch: "pushed"}
-		if err := pushCommit(t.Context(), logtest.Logger(t), g, tip, d, false); err != nil {
+		if _, err := pushCommit(t.Context(), logtest.Logger(t), g, tip, &d, false); err != nil {
 			t.Fatal(err)
 		}
 		if got := runPushGit(t, root, "ls-remote", "origin", "refs/heads/pushed"); !strings.HasPrefix(got, tip+"\t") {
@@ -150,10 +150,10 @@ func TestCheckout(t *testing.T) {
 		runGit(t, root, "checkout", "-q", "--detach", "main")
 		runGit(t, root, "commit", "-q", "--allow-empty", "-m", "other")
 		other := runPushGit(t, root, "rev-parse", "HEAD")
-		if err := pushCommit(t.Context(), logtest.Logger(t), g, other, d, false); err == nil {
+		if _, err := pushCommit(t.Context(), logtest.Logger(t), g, other, &d, false); err == nil {
 			t.Fatal("non-fast-forward push accepted")
 		}
-		if err := pushCommit(t.Context(), logtest.Logger(t), g, other, d, true); err != nil {
+		if _, err := pushCommit(t.Context(), logtest.Logger(t), g, other, &d, true); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -187,7 +187,8 @@ func TestCheckout(t *testing.T) {
 				tv := &fakeTaskView{instanceID: id, repo: []runtime.Repo{{GitRoot: clone, Branch: "caic-1", ContainerPath: "/repo"}}}
 				sc := newRecordingContainer()
 				sc.FetchedBranches = []runtime.FetchedBranch{{RepositoryPath: "/repo", BranchName: "caic-1", CommitHash: tip}}
-				_, issues, err := w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), tv.GitTarget(), []PushDestination{{Remote: "origin", Branch: "main", BaseRef: "refs/remotes/origin/main"}}, PushOptions{})
+				res, err := w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), tv.GitTarget(), []PushDestination{{Remote: "origin", Branch: "main", BaseRef: "refs/remotes/origin/main"}}, PushOptions{})
+				issues := res.SafetyIssues
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -244,7 +245,8 @@ func TestCheckout(t *testing.T) {
 				tv := &fakeTaskView{instanceID: id, repo: []runtime.Repo{{GitRoot: clone, Branch: "caic-1", ContainerPath: "/repo"}}}
 				sc := newRecordingContainer()
 				sc.FetchedBranches = []runtime.FetchedBranch{{RepositoryPath: "/repo", BranchName: "caic-1", CommitHash: tip}}
-				_, issues, err := w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), tv.GitTarget(), []PushDestination{{Remote: "origin", Branch: "main", BaseRef: "refs/remotes/origin/main"}}, PushOptions{})
+				res, err := w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), tv.GitTarget(), []PushDestination{{Remote: "origin", Branch: "main", BaseRef: "refs/remotes/origin/main"}}, PushOptions{})
+				issues := res.SafetyIssues
 				if err == nil {
 					t.Fatal("diverged main push succeeded")
 				}
@@ -321,7 +323,8 @@ func TestCheckout(t *testing.T) {
 		if target.Repos[0].GitRoot != roots[0] {
 			t.Fatalf("primary host root not resolved: %+v", target.Repos[0])
 		}
-		ds, issues, err := w.Push(context.WithoutCancel(ctx), logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{})
+		res, err := w.Push(context.WithoutCancel(ctx), logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{})
+		ds, issues := res.DiffStat, res.SafetyIssues
 		if err != nil || len(issues) != 0 || len(ds) != 2 {
 			t.Fatalf("push pinned commits: stats=%+v issues=%+v err=%v", ds, issues, err)
 		}
@@ -353,7 +356,8 @@ func TestCheckout(t *testing.T) {
 		for i := range destinations {
 			destinations[i].Branch = "blocked-task"
 		}
-		_, issues, err = w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{Force: true})
+		res, err = w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{Force: true})
+		issues = res.SafetyIssues
 		if err != nil || len(issues) == 0 {
 			t.Fatalf("second-repo safety check: %+v, %v", issues, err)
 		}
@@ -369,12 +373,12 @@ func TestCheckout(t *testing.T) {
 		}
 		// Incomplete fetch results cannot fall back to a stale tracking ref.
 		sc.FetchedBranches = nil
-		_, _, err = w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{})
+		_, err = w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{})
 		if err == nil || !strings.Contains(err.Error(), "fetch did not return commit") {
 			t.Fatalf("incomplete fetch: %v", err)
 		}
 		sc.FetchErr = errors.New("fetch unavailable")
-		_, _, err = w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{})
+		_, err = w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{})
 		if !errors.Is(err, sc.FetchErr) {
 			t.Fatalf("failed fetch: %v", err)
 		}
@@ -397,7 +401,7 @@ func TestCheckout(t *testing.T) {
 		sc := newRecordingContainer()
 		sc.FetchedBranches = []runtime.FetchedBranch{{RepositoryPath: "/repo", BranchName: "caic-1", CommitHash: tip}}
 		sc.prePushErr = errors.New("verify failed")
-		_, _, err = w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{})
+		_, err = w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{})
 		if !errors.Is(err, sc.prePushErr) {
 			t.Fatalf("hook rejection: %v", err)
 		}
@@ -405,7 +409,7 @@ func TestCheckout(t *testing.T) {
 			t.Fatalf("rejected commit was pushed: %q", got)
 		}
 		sc.prePushErr = nil
-		if _, _, err = w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{}); err != nil {
+		if _, err = w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{}); err != nil {
 			t.Fatal(err)
 		}
 		// A branch that does not exist yet reports the all-zero object ID, as Git does.
@@ -426,7 +430,7 @@ func TestCheckout(t *testing.T) {
 		runGit(t, root, "checkout", "-q", "main")
 		sc.FetchedBranches = []runtime.FetchedBranch{{RepositoryPath: "/repo", BranchName: "caic-1", CommitHash: next}}
 		var hookOut strings.Builder
-		if _, _, err = w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{HookOutput: &hookOut}); err != nil {
+		if _, err = w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{HookOutput: &hookOut}); err != nil {
 			t.Fatal(err)
 		}
 		if got := sc.prePushOuts[len(sc.prePushOuts)-1]; got != io.Writer(&hookOut) {
@@ -442,15 +446,15 @@ func TestCheckout(t *testing.T) {
 		root := initTestRepo(t)
 		g := &git.Checkout{Root: root, Logger: logtest.Logger(t)}
 		tip := runPushGit(t, root, "rev-parse", "HEAD")
-		got, err := remoteBranchTip(t.Context(), g, PushDestination{Remote: "origin", Branch: "main"}, len(tip))
+		got, err := remoteBranchTip(t.Context(), g, &PushDestination{Remote: "origin", Branch: "main"}, len(tip))
 		if err != nil || got != tip {
 			t.Fatalf("existing branch: %q, %v", got, err)
 		}
-		got, err = remoteBranchTip(t.Context(), g, PushDestination{Remote: "origin", Branch: "absent"}, len(tip))
+		got, err = remoteBranchTip(t.Context(), g, &PushDestination{Remote: "origin", Branch: "absent"}, len(tip))
 		if err != nil || got != strings.Repeat("0", len(tip)) {
 			t.Fatalf("absent branch: %q, %v", got, err)
 		}
-		if _, err = remoteBranchTip(t.Context(), g, PushDestination{Remote: "nowhere", Branch: "main"}, len(tip)); err == nil {
+		if _, err = remoteBranchTip(t.Context(), g, &PushDestination{Remote: "nowhere", Branch: "main"}, len(tip)); err == nil {
 			t.Fatal("unreachable remote accepted")
 		}
 	})
@@ -481,29 +485,42 @@ func TestCheckout(t *testing.T) {
 				// md owns task-diff baselines, including local upstream overrides
 				// and recorded integration refs. An unchanged task reports no diff
 				// even though its non-default base differs from origin/main.
-				sc.DiffOutput = ""
+				sc.RepositoryStatusValue.DiffStat = nil
 				sc.FetchedBranches = []runtime.FetchedBranch{{RepositoryPath: "/repo", BranchName: "caic-1", CommitHash: tip}}
 				target, destinations, err := w.ResolvePushDestinations(t.Context(), logtest.Logger(t), target, false)
 				if err != nil {
 					t.Fatal(err)
 				}
-				ds, issues, err := w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{})
+				res, err := w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{})
+				ds, issues := res.DiffStat, res.SafetyIssues
 				if err != nil || len(ds) != 0 || len(issues) != 0 {
 					t.Fatalf("unchanged task report: stats=%+v issues=%+v err=%v", ds, issues, err)
+				}
+				if !res.Updated {
+					t.Fatal("publishing a new task branch reported no update")
 				}
 				// Pending runtime edits belong in the public default-sync report
 				// while the exact existing task commit is pushed without them.
 				if err := os.WriteFile(filepath.Join(root, "pending.txt"), []byte("sk-"+strings.Repeat("a", 24)+"\n"), 0o600); err != nil {
 					t.Fatal(err)
 				}
-				sc.DiffOutput = "1\t0\tpending.txt\n"
+				sc.RepositoryStatusValue.DiffStat = []runtime.GitFileStat{{Path: "pending.txt", LinesAdded: 1}}
 				target, destinations, err = w.ResolvePushDestinations(t.Context(), logtest.Logger(t), target, true)
 				if err != nil {
 					t.Fatal(err)
 				}
-				ds, issues, err = w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{})
+				res, err = w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{})
+				ds, issues = res.DiffStat, res.SafetyIssues
 				if err != nil || len(ds) != 1 || ds[0].Path != "pending.txt" || len(issues) != 0 || destinations[0].Branch != "main" {
 					t.Fatalf("pending report is separate from committed safety: stats=%+v issues=%+v destination=%+v err=%v", ds, issues, destinations[0], err)
+				}
+				if !res.Updated {
+					t.Fatal("moving the default branch reported no update")
+				}
+				// Republishing the same commit is a no-op the caller can detect.
+				res, err = w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{})
+				if err != nil || res.Updated || len(res.SafetyIssues) != 0 {
+					t.Fatalf("republishing the same commit must report no update: %+v, %v", res, err)
 				}
 				out, err := g.RunGit(t.Context(), "ls-remote", "origin", "refs/heads/main")
 				if err != nil || !strings.HasPrefix(out, tip+"\t") {
@@ -515,7 +532,7 @@ func TestCheckout(t *testing.T) {
 					}
 				}
 				sc.refreshErr = errors.New("container refs unavailable")
-				_, _, err = w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{})
+				_, err = w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{})
 				if !errors.Is(err, sc.refreshErr) || !strings.Contains(err.Error(), "push completed") {
 					t.Fatalf("post-push refresh failure must report that publication completed: %v", err)
 				}
@@ -534,7 +551,7 @@ func TestCheckout(t *testing.T) {
 		cancel()
 		target := GitTarget{InstanceID: runtime.NewID("test-runtime", "ctr-1"), Repos: []runtime.Repo{{GitRoot: root, ContainerPath: "/repo", Branch: "caic-1"}}}
 		sc := &timeoutFetchBackend{FakeBackend: &runtimetest.FakeBackend{}}
-		_, _, err := w.Push(context.WithoutCancel(ctx), logtest.Logger(t), newTestRuntime(t, sc), target, []PushDestination{{Remote: "origin", Branch: "caic-1", BaseRef: "refs/remotes/origin/main"}}, PushOptions{})
+		_, err := w.Push(context.WithoutCancel(ctx), logtest.Logger(t), newTestRuntime(t, sc), target, []PushDestination{{Remote: "origin", Branch: "caic-1", BaseRef: "refs/remotes/origin/main"}}, PushOptions{})
 		if !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("detached fetch must remain bounded: %v", err)
 		}
@@ -586,7 +603,8 @@ func TestCheckout(t *testing.T) {
 					sc.FetchedBranches = []runtime.FetchedBranch{{RepositoryPath: "/repo", BranchName: "caic-1", CommitHash: tip}}
 					w := newInitializedTestCheckout(t, root)
 					target := GitTarget{InstanceID: runtime.NewID("test-runtime", "ctr-1"), Repos: []runtime.Repo{{GitRoot: root, ContainerPath: "/repo", Branch: "caic-1"}}}
-					_, issues, err := w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, []PushDestination{{Remote: "origin", Branch: "caic-1", BaseRef: "refs/remotes/origin/main"}}, tc.opts)
+					res, err := w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, []PushDestination{{Remote: "origin", Branch: "caic-1", BaseRef: "refs/remotes/origin/main"}}, tc.opts)
+					issues := res.SafetyIssues
 					if err != nil || (len(issues) != 0) != tc.secret {
 						t.Fatalf("issues=%+v err=%v", issues, err)
 					}
@@ -629,7 +647,8 @@ func TestCheckout(t *testing.T) {
 				sc.FetchedBranches = []runtime.FetchedBranch{{RepositoryPath: "/repo", BranchName: "caic-1", CommitHash: tip}}
 				w := newInitializedTestCheckout(t, root)
 				target := GitTarget{InstanceID: runtime.NewID("test-runtime", "ctr-1"), Repos: []runtime.Repo{{GitRoot: root, ContainerPath: "/repo", Branch: "caic-1"}}}
-				_, issues, err := w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, []PushDestination{{Remote: "origin", Branch: "caic-1", BaseRef: "refs/remotes/origin/main"}}, PushOptions{BypassSafety: true})
+				res, err := w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, []PushDestination{{Remote: "origin", Branch: "caic-1", BaseRef: "refs/remotes/origin/main"}}, PushOptions{BypassSafety: true})
+				issues := res.SafetyIssues
 				if err == nil || len(issues) != 0 {
 					t.Fatalf("issues=%+v err=%v, want push error", issues, err)
 				}
@@ -722,23 +741,6 @@ func TestCheckout(t *testing.T) {
 		})
 	})
 
-	t.Run("BranchDiffStat", func(t *testing.T) {
-		t.Parallel()
-		sc := newRecordingContainer()
-		r := newTestCheckout("/repo")
-		tv := &fakeTaskView{instanceID: runtime.NewID("test-runtime", "ctr-1"), repo: []runtime.Repo{{GitRoot: "/repo", Branch: "feature"}}}
-		snapshot, err := r.DiffStat(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), tv.GitTarget())
-		if err != nil {
-			t.Fatal(err)
-		}
-		ds := snapshot.DiffStat
-		if len(sc.fetchIDs) != 0 {
-			t.Errorf("BranchDiffStat called Fetch %d times, want 0", len(sc.fetchIDs))
-		}
-		if len(ds) != 1 || ds[0].Path != "main.go" || ds[0].LinesAdded != 5 || ds[0].LinesDeleted != 1 {
-			t.Errorf("BranchDiffStat = %+v, want [{main.go +5 -1}]", ds)
-		}
-	})
 	t.Run("AdoptLocalBranch", func(t *testing.T) {
 		t.Parallel()
 		clone := initTestRepo(t)
@@ -764,39 +766,6 @@ func TestCheckout(t *testing.T) {
 			t.Fatalf("adopted branch was deleted: %v", err)
 		}
 	})
-	t.Run("BranchDiffStatMultiRepoUsesInstanceID", func(t *testing.T) {
-		t.Parallel()
-		sc := newRecordingContainer()
-		r := newTestCheckout("/home/user/src/caic")
-		tv := &fakeTaskView{instanceID: runtime.NewID("test-runtime", "ctr-2"), repo: []runtime.Repo{
-			{GitRoot: "/home/user/src/caic", Branch: "caic-7", ContainerPath: "/home/user/src/caic"},
-			{GitRoot: "/home/user/src/genai", Branch: "caic-0", ContainerPath: "/home/user/src/genai"},
-		}}
-
-		snapshot, err := r.DiffStat(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), tv.GitTarget())
-		if err != nil {
-			t.Fatal(err)
-		}
-		ds := snapshot.DiffStat
-
-		if len(ds) != 2 {
-			t.Fatalf("BranchDiffStat len = %d, want 2", len(ds))
-		}
-		if len(sc.diffIDs) != 2 {
-			t.Fatalf("diff calls = %d, want 2", len(sc.diffIDs))
-		}
-		for i, id := range sc.diffIDs {
-			if id != "test-runtime:ctr-2" {
-				t.Errorf("diff call %d id = %q, want test-runtime:ctr-2", i, id)
-			}
-		}
-		if sc.diffIdxs[0] != 0 || sc.diffIdxs[1] != 1 {
-			t.Errorf("diff indexes = %v, want [0 1]", sc.diffIdxs)
-		}
-		if ds[1].Path != "genai/main.go" {
-			t.Errorf("second path = %q, want genai/main.go", ds[1].Path)
-		}
-	})
 	t.Run("BranchDiffStatNoContainer", func(t *testing.T) {
 		t.Parallel()
 		r := newTestCheckout(t.TempDir())
@@ -805,10 +774,10 @@ func TestCheckout(t *testing.T) {
 		}
 	})
 
-	// DiffStatAndRepoStates covers the compact card probe: the combined diff
+	// DiffStat covers the compact card probe: the combined diff
 	// stat, the per-repo state summary, and how partial probe failures degrade so
 	// one failing repository cannot blank the whole task card.
-	t.Run("DiffStatAndRepoStates", func(t *testing.T) {
+	t.Run("DiffStat", func(t *testing.T) {
 		t.Parallel()
 		status := runtime.RepositoryStatus{
 			Branch:   "caic-3",
@@ -832,7 +801,7 @@ func TestCheckout(t *testing.T) {
 			r := newTestCheckout("/repo")
 			tv := &fakeTaskView{instanceID: runtime.NewID("test-runtime", "ctr-1"), repo: []runtime.Repo{{GitRoot: "/repo", Branch: "feature", ContainerPath: "/repo"}}}
 
-			snapshot, err := r.DiffStatAndRepoStates(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), tv.GitTarget())
+			snapshot, err := r.DiffStat(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), tv.GitTarget())
 			ds, states := snapshot.DiffStat, snapshot.RepoStates
 			if snapshot.Read.InstanceID != tv.instanceID {
 				t.Fatalf("snapshot instance = %q", snapshot.Read.InstanceID)
@@ -873,7 +842,7 @@ func TestCheckout(t *testing.T) {
 				{GitRoot: "/home/user/src/genai", Branch: "caic-0", ContainerPath: "/home/user/src/genai"},
 			}
 
-			snapshot, err := r.DiffStatAndRepoStates(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), GitTarget{InstanceID: "test-runtime:ctr-2", Repos: repos})
+			snapshot, err := r.DiffStat(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), GitTarget{InstanceID: "test-runtime:ctr-2", Repos: repos})
 			ds, states := snapshot.DiffStat, snapshot.RepoStates
 			if err != nil {
 				t.Fatal(err)
@@ -902,7 +871,7 @@ func TestCheckout(t *testing.T) {
 			}
 			runtimes := newTestRuntime(t, &compactFailingBackend{FakeBackend: sc.FakeBackend, failIdx: 1})
 
-			snapshot, err := r.DiffStatAndRepoStates(t.Context(), logtest.Logger(t), runtimes, GitTarget{InstanceID: "test-runtime:ctr-2", Repos: repos})
+			snapshot, err := r.DiffStat(t.Context(), logtest.Logger(t), runtimes, GitTarget{InstanceID: "test-runtime:ctr-2", Repos: repos})
 			ds, states := snapshot.DiffStat, snapshot.RepoStates
 			if err == nil {
 				t.Fatal("want the probe error")
@@ -924,7 +893,7 @@ func TestCheckout(t *testing.T) {
 			repos := []runtime.Repo{{GitRoot: "/repo", Branch: "feature", ContainerPath: "/repo"}}
 			runtimes := newTestRuntime(t, &compactFailingBackend{FakeBackend: sc.FakeBackend, failIdx: 0})
 
-			snapshot, err := r.DiffStatAndRepoStates(t.Context(), logtest.Logger(t), runtimes, GitTarget{InstanceID: "test-runtime:ctr-1", Repos: repos})
+			snapshot, err := r.DiffStat(t.Context(), logtest.Logger(t), runtimes, GitTarget{InstanceID: "test-runtime:ctr-1", Repos: repos})
 			ds, states := snapshot.DiffStat, snapshot.RepoStates
 			if err == nil {
 				t.Fatal("want the probe error")
@@ -991,43 +960,6 @@ func TestCheckout(t *testing.T) {
 	})
 }
 
-func TestDiffContentArgs(t *testing.T) {
-	t.Parallel()
-	cases := map[string]struct {
-		path  string
-		repo  runtime.Repo
-		multi bool
-		want  []string
-	}{
-		"single repo full diff": {
-			want: []string{"--src-prefix=", "--dst-prefix="},
-		},
-		"single repo path": {
-			path: "main.go",
-			want: []string{"--src-prefix=", "--dst-prefix=", "--", "main.go"},
-		},
-		"multi repo full diff": {
-			repo:  runtime.Repo{ContainerPath: "~/src/caic"},
-			multi: true,
-			want:  []string{"--src-prefix=a/caic/", "--dst-prefix=b/caic/"},
-		},
-		"multi repo path": {
-			path:  "b/main.go",
-			repo:  runtime.Repo{ContainerPath: "~/src/caic-xyz/caic"},
-			multi: true,
-			want:  []string{"--src-prefix=a/caic-xyz/caic/", "--dst-prefix=b/caic-xyz/caic/", "--", "b/main.go"},
-		},
-	}
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			if got := diffContentArgs(tc.path, &tc.repo, tc.multi); !slices.Equal(got, tc.want) {
-				t.Errorf("diffContentArgs() = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
 func TestDiffRepoPrefix(t *testing.T) {
 	t.Parallel()
 	cases := map[string]struct {
@@ -1061,10 +993,8 @@ func TestDiffRepoPrefix(t *testing.T) {
 	}
 }
 
-// recordingContainer is a fake runtime whose Diff reports a fixed one-file
-// numstat and which records Fetch/Diff calls, so tests can assert per-repo
-// diffing by instance id and repo index, and that BranchDiffStat does not
-// fetch.
+// recordingContainer supplies fixed repository statistics and records task
+// fetching and ref refreshes for push and snapshot behavior tests.
 type recordingContainer struct {
 	*runtimetest.FakeBackend
 
@@ -1078,9 +1008,9 @@ type recordingContainer struct {
 	diffIdxs    []int
 }
 
-// newRecordingContainer builds a recordingContainer with the fixed diff output.
+// newRecordingContainer supplies a one-file repository summary.
 func newRecordingContainer() *recordingContainer {
-	return &recordingContainer{FakeBackend: &runtimetest.FakeBackend{DiffOutput: "5\t1\tmain.go\n"}}
+	return &recordingContainer{FakeBackend: &runtimetest.FakeBackend{RepositoryStatusValue: runtime.RepositoryStatus{DiffStat: []runtime.GitFileStat{{Path: "main.go", LinesAdded: 5, LinesDeleted: 1}}}}}
 }
 
 func (c *recordingContainer) RunPrePush(_ context.Context, _ runtime.ID, _ int, commit string, dest runtime.PushRefs, out io.Writer) error {
@@ -1099,10 +1029,10 @@ func (c *recordingContainer) Fetch(ctx context.Context, id runtime.ID, opts runt
 	return c.FakeBackend.Fetch(ctx, id, opts)
 }
 
-func (c *recordingContainer) Diff(ctx context.Context, id runtime.ID, repoIdx int, args ...string) (string, error) {
+func (c *recordingContainer) Diff(ctx context.Context, id runtime.ID, repoIdx int, patch runtime.DiffPatch) (string, error) {
 	c.diffIDs = append(c.diffIDs, id)
 	c.diffIdxs = append(c.diffIdxs, repoIdx)
-	return c.FakeBackend.Diff(ctx, id, repoIdx, args...)
+	return c.FakeBackend.Diff(ctx, id, repoIdx, patch)
 }
 
 type prePushCall struct {
@@ -1395,14 +1325,14 @@ func TestRepositoryStatusesSnapshot(t *testing.T) {
 func TestGitProbeCompletionOrder(t *testing.T) {
 	t.Parallel()
 	checkout := newTestCheckout(t.TempDir())
-	backend := &runtimetest.FakeBackend{DiffOutput: "5\t1\tmain.go\n", RepositoryStatusValue: runtime.RepositoryStatus{Branch: "feature"}}
+	backend := &runtimetest.FakeBackend{RepositoryStatusValue: runtime.RepositoryStatus{Branch: "feature", DiffStat: []runtime.GitFileStat{{Path: "main.go", LinesAdded: 5, LinesDeleted: 1}}}}
 	runtimes := newTestRuntime(t, backend)
 	tv := &fakeTaskView{instanceID: "test-runtime:ctr", repo: []runtime.Repo{{Branch: "feature"}}}
 	full, err := checkout.RepositoryStatuses(t.Context(), runtimes, tv.GitTarget())
 	if err != nil {
 		t.Fatal(err)
 	}
-	compact, err := checkout.DiffStatAndRepoStates(t.Context(), logtest.Logger(t), runtimes, tv.GitTarget())
+	compact, err := checkout.DiffStat(t.Context(), logtest.Logger(t), runtimes, tv.GitTarget())
 	if err != nil {
 		t.Fatal(err)
 	}

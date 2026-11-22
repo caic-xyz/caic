@@ -139,7 +139,7 @@ func TestRuntimeBackend(t *testing.T) {
 			t.Run(test.name, func(t *testing.T) {
 				t.Parallel()
 
-				got, err := b.FileDiff(t.Context(), "", test.repoIdx, test.commit, test.path, "")
+				got, err := b.FileDiff(t.Context(), "", test.repoIdx, "", test.commit, test.path, "")
 				if err != nil {
 					t.Fatal(err)
 				}

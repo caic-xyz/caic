@@ -88,7 +88,7 @@ func TestRouter(t *testing.T) {
 		if podman.launches != 1 || docker.launches != 0 {
 			t.Fatalf("launches docker=%d podman=%d, want docker=0 podman=1", docker.launches, podman.launches)
 		}
-		if _, err := router.Diff(t.Context(), id, 0); err != nil {
+		if _, err := router.Diff(t.Context(), id, 0, runtime.DiffPatch{}); err != nil {
 			t.Fatal(err)
 		}
 		if podman.lastID != "podman:podman-1" {
@@ -378,7 +378,7 @@ func TestRouterRecordsOperationMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := router.Diff(t.Context(), id, 0); err != nil {
+	if _, err := router.Diff(t.Context(), id, 0, runtime.DiffPatch{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := router.Stop(t.Context(), id); err != nil {
@@ -465,7 +465,7 @@ func TestRouterRecordsOperationMetrics(t *testing.T) {
 	// the named return value when the function returns, so any form that read
 	// the error earlier would report every failure as a success and still look
 	// healthy here.
-	if _, err := router.Diff(t.Context(), runtime.NewID("missing-runtime", "ctr-1"), 0); err == nil {
+	if _, err := router.Diff(t.Context(), runtime.NewID("missing-runtime", "ctr-1"), 0, runtime.DiffPatch{}); err == nil {
 		t.Fatal("Diff on an unknown runtime succeeded")
 	}
 	failures := int64(0)
@@ -545,9 +545,9 @@ func (f *routerFakeBackend) Launch(_ context.Context, _ []runtime.Repo, _ *runti
 	return runtime.NewID(runtime.Name(f.name), runtime.InstanceID(f.name+"-1")), nil
 }
 
-func (f *routerFakeBackend) Diff(ctx context.Context, id runtime.ID, repoIdx int, args ...string) (string, error) {
+func (f *routerFakeBackend) Diff(ctx context.Context, id runtime.ID, repoIdx int, patch runtime.DiffPatch) (string, error) {
 	f.lastID = id
-	return f.FakeBackend.Diff(ctx, id, repoIdx, args...)
+	return f.FakeBackend.Diff(ctx, id, repoIdx, patch)
 }
 
 func (f *routerFakeBackend) Fork(context.Context, runtime.ID, *runtime.ForkOptions) (runtime.ID, runtime.ConnectionInfo, error) {

@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"maps"
 	"net/http"
 	"net/url"
@@ -895,7 +896,7 @@ func (r SyncReq) Validate() error {
 
 // SyncResp is the response for POST /api/caic/v1/tasks/{id}/sync.
 type SyncResp struct {
-	Status       string        `json:"status"` // "synced", "blocked", or "empty"
+	Status       string        `json:"status"` // "synced", "blocked", or "empty" when no destination ref moved
 	Branch       string        `json:"branch,omitempty"`
 	DiffStat     DiffStat      `json:"diffStat,omitzero"`
 	SafetyIssues []SafetyIssue `json:"safetyIssues,omitempty"`
@@ -1176,6 +1177,10 @@ const (
 
 // GitRepositoryState summarizes the compact Git state of one task repository.
 type GitRepositoryState struct {
+	// Repository indexes the task's mapped repositories, independently of response ordering.
+	Repository int `json:"repository"`
+	// Submodule is an initialized descendant path relative to that mapping, or empty for the mapped root.
+	Submodule        string       `json:"submodule"`
 	Stale            bool         `json:"stale,omitempty"` // Last known data retained after a failed refresh.
 	Name             string       `json:"name"`
 	Branch           string       `json:"branch"`
@@ -1196,11 +1201,15 @@ type TaskRepoStatusResp struct {
 
 // GitRepositoryStatus describes the checked-out state of one task repository.
 type GitRepositoryStatus struct {
-	Name     string `json:"name"`
-	Branch   string `json:"branch"`
-	Upstream string `json:"upstream,omitempty"`
-	Ahead    int    `json:"ahead"`
-	Behind   int    `json:"behind"`
+	// Repository indexes the task's mapped repositories, independently of response ordering.
+	Repository int `json:"repository"`
+	// Submodule is an initialized descendant path relative to that mapping, or empty for the mapped root.
+	Submodule string `json:"submodule"`
+	Name      string `json:"name"`
+	Branch    string `json:"branch"`
+	Upstream  string `json:"upstream,omitempty"`
+	Ahead     int    `json:"ahead"`
+	Behind    int    `json:"behind"`
 
 	Commits     []GitCommit     `json:"commits"`
 	Uncommitted []GitFileStatus `json:"uncommitted"`
@@ -1249,11 +1258,15 @@ type DiffIndexFileStatus struct {
 
 // DiffIndexRepository describes one repository in a diff index.
 type DiffIndexRepository struct {
-	Name     string `json:"name"`
-	Branch   string `json:"branch"`
-	Upstream string `json:"upstream,omitempty"`
-	Ahead    int    `json:"ahead"`
-	Behind   int    `json:"behind"`
+	// Repository indexes the task's mapped repositories, independently of response ordering.
+	Repository int `json:"repository"`
+	// Submodule is an initialized descendant path relative to that mapping, or empty for the mapped root.
+	Submodule string `json:"submodule"`
+	Name      string `json:"name"`
+	Branch    string `json:"branch"`
+	Upstream  string `json:"upstream,omitempty"`
+	Ahead     int    `json:"ahead"`
+	Behind    int    `json:"behind"`
 
 	Commits     []DiffIndexCommit     `json:"commits"`
 	Uncommitted []DiffIndexFileStatus `json:"uncommitted"`
@@ -1266,6 +1279,7 @@ type TaskDiffIndexResp struct {
 
 // FileDiffReq selects one committed or uncommitted file patch.
 type FileDiffReq struct {
+	Submodule    string
 	Repository   int
 	Commit       string
 	Path         string
@@ -1274,6 +1288,12 @@ type FileDiffReq struct {
 
 // Validate checks that the file patch selector is well formed.
 func (r FileDiffReq) Validate() error {
+	// fs.ValidPath rejects rooted, empty, "." and ".." elements; "." alone names
+	// the mapped root, which an empty Submodule selects. Backslashes are not
+	// separators in Git paths but are on Windows hosts.
+	if r.Submodule != "" && (r.Submodule == "." || !fs.ValidPath(r.Submodule) || strings.ContainsAny(r.Submodule, "\\\x00")) {
+		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "submodule must be a relative Git path"}
+	}
 	if r.Repository < 0 {
 		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "repository must be non-negative"}
 	}

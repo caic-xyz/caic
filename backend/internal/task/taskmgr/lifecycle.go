@@ -480,11 +480,11 @@ func (r *Lifecycle) Sync(ctx context.Context, target SyncTarget, force bool) (*S
 	if target != SyncTargetDefault {
 		opts = repo.PushOptions{CommitPending: true, BypassSafety: force, Force: true, HookOutput: recorder}
 	}
-	ds, issues, err := checkout.Push(pushCtx, r.manager.log, r.manager.Runtimes, gitTarget, destinations, opts)
+	result, err := checkout.Push(pushCtx, r.manager.log, r.manager.Runtimes, gitTarget, destinations, opts)
 	status := "synced"
-	if err == nil && len(issues) > 0 && !opts.BypassSafety {
+	if err == nil && len(result.SafetyIssues) > 0 && !opts.BypassSafety {
 		status = "blocked"
-	} else if err == nil && len(ds) == 0 {
+	} else if err == nil && !result.Updated {
 		status = "empty"
 	}
 	cancelled := err != nil && errors.Is(context.Cause(pushCtx), errSyncCancelled)
@@ -494,7 +494,7 @@ func (r *Lifecycle) Sync(ctx context.Context, target SyncTarget, force bool) (*S
 	case cancelled:
 		outcome, outcomeErr = v3.SyncStatusCancelled, errSyncCancelled
 	case err == nil && status == "blocked":
-		outcome, outcomeErr = v3.SyncStatusFailed, fmt.Errorf("blocked by %d safety issue(s)", len(issues))
+		outcome, outcomeErr = v3.SyncStatusFailed, fmt.Errorf("blocked by %d safety issue(s)", len(result.SafetyIssues))
 	case err != nil && !refreshFailed:
 		// A refresh failure follows pushes that all succeeded; its note keeps it visible.
 		outcome = v3.SyncStatusFailed
@@ -507,7 +507,7 @@ func (r *Lifecycle) Sync(ctx context.Context, target SyncTarget, force bool) (*S
 		return nil, internalErr(err, "sync to "+string(target))
 	}
 	if status != "blocked" {
-		snapshot, err := checkout.DiffStatAndRepoStates(ctx, r.manager.log, r.manager.Runtimes, gitTarget)
+		snapshot, err := checkout.DiffStat(ctx, r.manager.log, r.manager.Runtimes, gitTarget)
 		changed, recordErr := r.agentRuntime.RecordRepositorySummary(ctx, t, &snapshot)
 		if changed {
 			r.manager.NotifyTaskUpdate(r.entry.Task().ID)
@@ -516,7 +516,7 @@ func (r *Lifecycle) Sync(ctx context.Context, target SyncTarget, force bool) (*S
 			return nil, internalErr(err, "push completed but refreshing task repository summary failed")
 		}
 	}
-	return &SyncResult{Status: status, Branch: destinations[0].Branch, DiffStat: ds, SafetyIssues: issues}, nil
+	return &SyncResult{Status: status, Branch: destinations[0].Branch, DiffStat: result.DiffStat, SafetyIssues: result.SafetyIssues}, nil
 }
 
 // CancelSync cancels the push of the task's running Sync. It returns a conflict

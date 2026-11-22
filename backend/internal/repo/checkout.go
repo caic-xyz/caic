@@ -197,7 +197,7 @@ func (w *Checkout) ResolvePushDestinations(ctx context.Context, log *slog.Logger
 	ctx = context.WithoutCancel(ctx)
 	for i := range repos {
 		rp := &repos[i]
-		g := &git.Checkout{Root: rp.GitRoot, Logger: log}
+		g := hostRepository(rp, log)
 		gitCtx, cancel := context.WithTimeout(ctx, w.GitTimeout)
 		remote, err := g.DefaultRemote(gitCtx)
 		if err != nil {
@@ -234,24 +234,26 @@ func (w *Checkout) ResolvePushDestinations(ctx context.Context, log *slog.Logger
 // rejection aborts the push. The host then pushes the commit with --no-verify
 // straight from its repository, so no host hook or checkout is involved.
 // Successful pushes refresh the runtime's cached upstream refs. No host checkout
-// files or branches change. The returned statistics describe the pre-push diff.
+// files or branches change. The returned statistics describe the pre-push diff,
+// and Updated reports whether any destination ref moved. A later failure may
+// leave earlier child or task refs published.
 //
 // Cancelling ctx stops the push at its current step, so a caller that must not
 // lose a push to a disconnecting client passes a detached context.
-func (w *Checkout) Push(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, target GitTarget, destinations []PushDestination, opts PushOptions) (v3.DiffStat, []SafetyIssue, error) {
+func (w *Checkout) Push(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, target GitTarget, destinations []PushDestination, opts PushOptions) (PushResult, error) {
 	id, repos, err := w.queryRuntime(target)
 	if err != nil {
-		return nil, nil, err
+		return PushResult{}, err
 	}
 	if len(repos) == 0 {
-		return nil, nil, errors.New("push requires at least one repository")
+		return PushResult{}, errors.New("push requires at least one repository")
 	}
 	if len(destinations) != len(repos) {
-		return nil, nil, errors.New("one push destination is required per repository")
+		return PushResult{}, errors.New("one push destination is required per repository")
 	}
 	for _, d := range destinations {
 		if d.Remote == "" || d.Branch == "" || d.BaseRef == "" {
-			return nil, nil, errors.New("push destination requires remote, branch, and comparison revision")
+			return PushResult{}, errors.New("push destination requires remote, branch, and comparison revision")
 		}
 	}
 	region := trace.StartRegion(ctx, "push-fetch")
@@ -260,7 +262,7 @@ func (w *Checkout) Push(ctx context.Context, log *slog.Logger, runtimes *runtime
 	fetchCancel()
 	region.End()
 	if err != nil {
-		return nil, nil, fmt.Errorf("fetch: %w", err)
+		return PushResult{}, fmt.Errorf("fetch: %w", err)
 	}
 	// Fetch returns immutable object IDs. Never resolve the mutable runtime
 	// tracking ref again, even if another refresh moves it during verification.
@@ -276,7 +278,7 @@ func (w *Checkout) Push(ctx context.Context, log *slog.Logger, runtimes *runtime
 			}
 		}
 		if commits[i] == "" {
-			return nil, nil, fmt.Errorf("fetch did not return commit for %s branch %s", repos[i].ContainerPath, repos[i].Branch)
+			return PushResult{}, fmt.Errorf("fetch did not return commit for %s branch %s", repos[i].ContainerPath, repos[i].Branch)
 		}
 	}
 	// The runtime owns the public task diff: its integration base/upstream
@@ -284,61 +286,91 @@ func (w *Checkout) Push(ctx context.Context, log *slog.Logger, runtimes *runtime
 	// Preserve that result even when the runtime's best-effort probe fails.
 	snapshot, _ := w.DiffStat(ctx, log, runtimes, GitTarget{InstanceID: id, Repos: repos})
 	ds := snapshot.DiffStat
+	// Resolve each committed Gitlink through its own object store. Descendants
+	// are verified and published before their ancestors can expose those links.
+	roots := len(repos)
+	graphCtx, graphCancel := context.WithTimeout(ctx, w.GitTimeout)
+	repos, destinations, commits, err = submodulePushTargets(graphCtx, log, repos, destinations, commits, branches)
+	graphCancel()
+	if err != nil {
+		return PushResult{}, err
+	}
 	var allIssues []SafetyIssue
 	for i, d := range destinations {
 		rp := &repos[i]
-		g := &git.Checkout{Root: rp.GitRoot, Logger: log}
+		g := hostRepository(rp, log)
 		checkCtx, cancel := context.WithTimeout(ctx, w.GitTimeout)
 		base := d.BaseRef
 		stat, err := g.RunGit(checkCtx, "diff", "--numstat", "--stat", base+"..."+commits[i])
 		if err != nil {
 			cancel()
-			return ds, allIssues, fmt.Errorf("diff %s: %w", rp.ContainerPath, err)
+			return PushResult{DiffStat: ds, SafetyIssues: allIssues}, fmt.Errorf("diff %s: %w", rp.ContainerPath, err)
 		}
 		repoDS := ParseDiffNumstat(stat)
-		issues, err := CheckSafety(checkCtx, log, rp.GitRoot, commits[i], base, repoDS)
+		issues, err := CheckSafety(checkCtx, log, g, commits[i], base, repoDS)
 		cancel()
 		if err != nil {
-			return ds, allIssues, fmt.Errorf("safety check %s: %w", rp.ContainerPath, err)
+			return PushResult{DiffStat: ds, SafetyIssues: allIssues}, fmt.Errorf("safety check %s: %w", rp.ContainerPath, err)
+		}
+		if d.submodule != nil {
+			prefix := d.submodule.Path
+			if roots > 1 {
+				prefix = diffRepoPrefix(&repos[d.repoIdx]) + "/" + prefix
+			}
+			for j := range issues {
+				issues[j].File = prefix + "/" + issues[j].File
+			}
 		}
 		allIssues = append(allIssues, issues...)
 	}
 	if len(allIssues) > 0 && !opts.BypassSafety {
-		return ds, allIssues, nil
+		return PushResult{DiffStat: ds, SafetyIssues: allIssues}, nil
 	}
-	for i, d := range destinations {
+	order := make([]int, 0, len(repos))
+	for i := len(repos) - 1; i >= roots; i-- {
+		order = append(order, i)
+	}
+	for i := range roots {
+		order = append(order, i)
+	}
+	moved := false
+	for _, i := range order {
+		d := &destinations[i]
 		rp := &repos[i]
 		pushCtx, cancel := context.WithTimeout(ctx, w.PushTimeout)
-		g := &git.Checkout{Root: rp.GitRoot, Logger: log}
+		g := hostRepository(rp, log)
 		remoteCommit, err := remoteBranchTip(pushCtx, g, d, len(commits[i]))
 		if err != nil {
 			cancel()
-			return ds, allIssues, fmt.Errorf("remote tip of %s/%s: %w", d.Remote, d.Branch, err)
+			return PushResult{DiffStat: ds, SafetyIssues: allIssues, Updated: moved}, fmt.Errorf("remote tip of %s/%s: %w", d.Remote, d.Branch, err)
 		}
-		err = runtimes.RunPrePush(pushCtx, id, i, commits[i], runtime.PushRefs{Remote: d.Remote, Branch: d.Branch, RemoteCommit: remoteCommit}, opts.HookOutput)
+		refs := runtime.PushRefs{Submodule: d.submodule, Remote: d.Remote, Branch: d.Branch, RemoteCommit: remoteCommit}
+		err = runtimes.RunPrePush(pushCtx, id, d.repoIdx, commits[i], refs, opts.HookOutput)
 		if err != nil {
 			cancel()
-			return ds, allIssues, fmt.Errorf("pre-push hook for %s: %w", rp.ContainerPath, err)
+			return PushResult{DiffStat: ds, SafetyIssues: allIssues, Updated: moved}, fmt.Errorf("pre-push hook for %s: %w", rp.ContainerPath, err)
 		}
-		err = pushCommit(pushCtx, log, g, commits[i], d, opts.Force)
+		pushed, err := pushCommit(pushCtx, log, g, commits[i], d, opts.Force)
 		cancel()
 		if err != nil {
-			return ds, allIssues, fmt.Errorf("push %s to %s/%s: %w", rp.ContainerPath, d.Remote, d.Branch, err)
+			return PushResult{DiffStat: ds, SafetyIssues: allIssues, Updated: moved}, fmt.Errorf("push %s to %s/%s: %w", rp.ContainerPath, d.Remote, d.Branch, err)
 		}
+		moved = moved || pushed
 	}
 	refreshCtx, cancel := context.WithTimeout(ctx, w.GitTimeout)
 	err = runtimes.RefreshRefs(refreshCtx, id)
 	cancel()
 	if err != nil {
-		return ds, allIssues, &PushRefreshError{Err: err}
+		return PushResult{DiffStat: ds, SafetyIssues: allIssues, Updated: moved}, &PushRefreshError{Err: err}
 	}
-	return ds, allIssues, nil
+	return PushResult{DiffStat: ds, SafetyIssues: allIssues, Updated: moved}, nil
 }
 
 // DiffContent returns the unified diff for the given repos, optionally filtered
 // to a single file path. When there are multiple repos, file paths are prefixed
 // with `<repoName>/` so the frontend can distinguish changes from different
-// repos. Holds branchMu during diff.
+// repos. One failing repository is reported and skipped so a partial patch still
+// reaches the task view. Holds branchMu during diff.
 func (w *Checkout) DiffContent(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, target GitTarget, path string) (string, error) {
 	log = log.With("repo", w.RelPath)
 	id, repos, err := w.queryRuntime(target)
@@ -352,8 +384,11 @@ func (w *Checkout) DiffContent(ctx context.Context, log *slog.Logger, runtimes *
 	var buf strings.Builder
 	for i := range repos {
 		repo := &repos[i]
-		args := diffContentArgs(path, repo, len(repos) > 1)
-		diff, err := runtimes.Diff(ctx, id, i, args...)
+		patch := runtime.DiffPatch{Path: path}
+		if len(repos) > 1 {
+			patch.Prefix = diffRepoPrefix(repo)
+		}
+		diff, err := runtimes.Diff(ctx, id, i, patch)
 		if err != nil {
 			log.Warn("diff failed", "repo", repo.ContainerPath, "br", repo.Branch, "err", err)
 			continue
@@ -367,7 +402,7 @@ func (w *Checkout) DiffContent(ctx context.Context, log *slog.Logger, runtimes *
 }
 
 // FileDiff returns one committed or uncommitted file patch from a task repository.
-func (w *Checkout) FileDiff(ctx context.Context, runtimes *runtime.Router, target GitTarget, repoIdx int, commit, path, originalPath string) (string, error) {
+func (w *Checkout) FileDiff(ctx context.Context, runtimes *runtime.Router, target GitTarget, repoIdx int, submodule, commit, path, originalPath string) (string, error) {
 	id, repos, err := w.queryRuntime(target)
 	if err != nil {
 		return "", err
@@ -379,7 +414,7 @@ func (w *Checkout) FileDiff(ctx context.Context, runtimes *runtime.Router, targe
 	defer cancel()
 	w.branchMu.Lock()
 	defer w.branchMu.Unlock()
-	return runtimes.FileDiff(ctx, id, repoIdx, commit, path, originalPath)
+	return runtimes.FileDiff(ctx, id, repoIdx, submodule, commit, path, originalPath)
 }
 
 // RepositoryStatuses reads branch, upstream commits, and working-tree status
@@ -543,23 +578,6 @@ func (w *Checkout) FetchAndCreateBranch(ctx context.Context, log *slog.Logger, t
 	return nil
 }
 
-// DiffStat reads combined per-repository numstat. Its snapshot is stamped after
-// the probe under branchMu, even when an error accompanies partial statistics.
-func (w *Checkout) DiffStat(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, target GitTarget) (GitSnapshot, error) {
-	id, repos, err := w.queryRuntime(target)
-	if err != nil {
-		return GitSnapshot{}, err
-	}
-
-	log = log.With("repo", w.RelPath)
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
-	defer cancel()
-	w.branchMu.Lock()
-	defer w.branchMu.Unlock()
-	stats, failed, err := w.diffStatLocked(ctx, log, runtimes, id, repos)
-	return GitSnapshot{Read: NewGitRead(id), Target: GitTarget{InstanceID: id, Repos: repos}, FailedRepos: failed, DiffStat: stats}, err
-}
-
 // TurnSnapshot fetches branch tips and measures branch/turn changes as one
 // runtime operation, stamped under the checkout lock like every Git query.
 func (w *Checkout) TurnSnapshot(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, target GitTarget, previous []v3.RepositoryCommit) (GitSnapshot, []v3.RepositoryCommit, *v3.ChangeStat, error) {
@@ -623,10 +641,10 @@ func (w *Checkout) TurnSnapshot(ctx context.Context, log *slog.Logger, runtimes 
 	return snapshot, commits, change, err
 }
 
-// DiffStatAndRepoStates reads branch statistics and compact repository state
+// DiffStat reads branch statistics and compact repository state
 // with one log-free probe per repository. The snapshot carries completion order
 // and can contain partial results when some probes fail.
-func (w *Checkout) DiffStatAndRepoStates(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, target GitTarget) (GitSnapshot, error) {
+func (w *Checkout) DiffStat(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, target GitTarget) (GitSnapshot, error) {
 	id, repos, err := w.queryRuntime(target)
 	if err != nil {
 		return GitSnapshot{}, err
@@ -671,9 +689,10 @@ func summarizeRepositoryStatuses(repos []runtime.Repo, statuses []runtime.Reposi
 }
 
 func repositorySummary(repo *runtime.Repo, i, repoCount int, status *runtime.RepositoryStatus) (v3.DiffStat, v3.RepoState) {
-	result := make(v3.DiffStat, 0, len(status.DiffStat))
-	for j := range status.DiffStat {
-		stat := status.DiffStat[j]
+	files, uncommitted := repositoryFiles(status)
+	result := make(v3.DiffStat, 0, len(files))
+	for j := range files {
+		stat := files[j]
 		path := stat.Path
 		if repoCount > 1 {
 			path = diffRepoPrefix(repo) + "/" + path
@@ -688,12 +707,12 @@ func repositorySummary(repo *runtime.Repo, i, repoCount int, status *runtime.Rep
 		})
 	}
 	added, deleted := 0, 0
-	for _, stat := range status.DiffStat {
+	for _, stat := range files {
 		added += stat.LinesAdded
 		deleted += stat.LinesDeleted
 	}
 	conflicts := 0
-	for _, file := range status.Uncommitted {
+	for _, file := range uncommitted {
 		if file.IndexStatus == "U" || file.WorktreeStatus == "U" {
 			conflicts++
 		}
@@ -704,13 +723,35 @@ func repositorySummary(repo *runtime.Repo, i, repoCount int, status *runtime.Rep
 		Operation:        string(status.Operation),
 		Ahead:            status.Ahead,
 		Behind:           status.Behind,
-		ChangedFiles:     len(status.DiffStat),
+		ChangedFiles:     len(files),
 		LinesAdded:       added,
 		LinesDeleted:     deleted,
-		UncommittedFiles: len(status.Uncommitted),
+		UncommittedFiles: len(uncommitted),
 		Conflicts:        conflicts,
 	}
 	return result, state
+}
+
+// repositoryFiles expands child changes under their mapped path. Gitlinks
+// remain visible as parent changes alongside the child files they reference.
+func repositoryFiles(status *runtime.RepositoryStatus) ([]runtime.GitFileStat, []runtime.GitFileStatus) {
+	stats := slices.Clone(status.DiffStat)
+	pending := slices.Clone(status.Uncommitted)
+	for i := range status.Submodules {
+		module := &status.Submodules[i]
+		for _, file := range module.Status.DiffStat {
+			file.Path = module.Path + "/" + file.Path
+			stats = append(stats, file)
+		}
+		for _, file := range module.Status.Uncommitted {
+			file.Path = module.Path + "/" + file.Path
+			if file.OriginalPath != "" {
+				file.OriginalPath = module.Path + "/" + file.OriginalPath
+			}
+			pending = append(pending, file)
+		}
+	}
+	return stats, pending
 }
 
 // queryRuntime validates the captured target and resolves its primary host root.
@@ -803,39 +844,10 @@ func (w *Checkout) effectiveBaseBranch(t TaskView) string {
 	return w.BaseBranch
 }
 
-// diffStatLocked runs Diff("--numstat") on each repo and returns the combined
-// diff stat. File paths are prefixed with `<repoName>/` when there are multiple
-// repos so the frontend can distinguish changes per repo. The caller must hold
-// branchMu. It returns an error if any repo's diff fails.
-func (w *Checkout) diffStatLocked(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, id runtime.ID, repos []runtime.Repo) (v3.DiffStat, []int, error) {
-	var result v3.DiffStat
-	var errs []error
-	var failed []int
-	for i := range repos {
-		repo := &repos[i]
-		numstat, err := runtimes.Diff(ctx, id, i, "--numstat", "--stat")
-		if err != nil {
-			log.Warn("diff numstat failed", "repo", repo.ContainerPath, "br", repo.Branch, "err", err)
-			errs = append(errs, err)
-			failed = append(failed, i)
-			continue
-		}
-		ds := ParseDiffNumstat(numstat)
-		if len(repos) > 1 {
-			prefix := diffRepoPrefix(repo)
-			for i := range ds {
-				ds[i].Path = prefix + "/" + ds[i].Path
-			}
-		}
-		result = append(result, ds...)
-	}
-	return result, failed, errors.Join(errs...)
-}
-
 // remoteBranchTip returns the commit that d's branch points to on the remote,
 // or an all-zero object ID of idLen hex digits when the branch does not exist,
 // as Git reports it to a pre-push hook.
-func remoteBranchTip(ctx context.Context, g *git.Checkout, d PushDestination, idLen int) (string, error) {
+func remoteBranchTip(ctx context.Context, g gitRepository, d *PushDestination, idLen int) (string, error) {
 	out, err := g.RunGit(ctx, "ls-remote", "--", d.Remote, "refs/heads/"+d.Branch)
 	if err != nil {
 		return "", err
@@ -849,14 +861,22 @@ func remoteBranchTip(ctx context.Context, g *git.Checkout, d PushDestination, id
 // pushCommit pushes commit to d from the host repository without touching its
 // checkout. The container already ran the repository's pre-push hook on commit,
 // so the host skips hooks. Git keeps the user's transport and SSH configuration.
-func pushCommit(ctx context.Context, log *slog.Logger, g *git.Checkout, commit string, d PushDestination, force bool) error {
-	args := []string{"push", "--no-verify"}
+func pushCommit(ctx context.Context, log *slog.Logger, g gitRepository, commit string, d *PushDestination, force bool) (bool, error) {
+	args := []string{"push", "--porcelain", "--no-verify"}
 	if force {
 		args = append(args, "--force")
 	}
 	log.InfoContext(ctx, "git push", "remote", d.Remote, "branch", d.Branch, "force", force)
-	_, err := g.RunGit(ctx, append(args, "--", d.Remote, commit+":refs/heads/"+d.Branch)...)
-	return err
+	out, err := g.RunGit(ctx, append(args, "--", d.Remote, commit+":refs/heads/"+d.Branch)...)
+	if err != nil {
+		return false, err
+	}
+	for line := range strings.SplitSeq(out, "\n") {
+		if flag, _, ok := strings.Cut(line, "\t"); ok {
+			return flag != "=", nil
+		}
+	}
+	return false, errors.New("git push did not report the destination status")
 }
 
 // AllocatedBranch owns a newly created branch at its pinned starting commit.
@@ -931,6 +951,20 @@ type PushDestination struct {
 	Branch string
 	// BaseRef is an explicit safety comparison ref or immutable commit ID.
 	BaseRef string
+
+	repoIdx   int
+	submodule *runtime.PushSubmodule
+}
+
+// PushResult reports what a Push published.
+type PushResult struct {
+	// DiffStat is the pre-push task diff, including pending edits.
+	DiffStat v3.DiffStat
+	// SafetyIssues block publication unless the caller bypassed them.
+	SafetyIssues []SafetyIssue
+	// Updated reports whether any destination ref moved. An already published
+	// task reports false, so callers can tell a no-op sync apart.
+	Updated bool
 }
 
 // PushOptions keeps committing pending edits, accepting safety issues, and
@@ -1079,20 +1113,6 @@ func deleteLocalBranchIfUnmodified(ctx context.Context, checkout *git.Checkout, 
 		return false, err
 	}
 	return true, nil
-}
-
-func diffContentArgs(path string, repo *runtime.Repo, multi bool) []string {
-	var args []string
-	if multi {
-		prefix := diffRepoPrefix(repo)
-		args = append(args, "--src-prefix=a/"+prefix+"/", "--dst-prefix=b/"+prefix+"/")
-	} else {
-		args = append(args, "--src-prefix=", "--dst-prefix=")
-	}
-	if path != "" {
-		args = append(args, "--", path)
-	}
-	return args
 }
 
 func diffRepoPrefix(repo *runtime.Repo) string {

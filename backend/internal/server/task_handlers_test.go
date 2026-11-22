@@ -31,6 +31,7 @@ import (
 )
 
 type fileDiffCall struct {
+	submodule    string
 	repository   int
 	commit       string
 	path         string
@@ -43,8 +44,8 @@ type diffRuntimeBackend struct {
 	fileDiffCalls []fileDiffCall
 }
 
-func (b *diffRuntimeBackend) FileDiff(_ context.Context, _ runtime.ID, repository int, commit, path, originalPath string) (string, error) {
-	b.fileDiffCalls = append(b.fileDiffCalls, fileDiffCall{repository: repository, commit: commit, path: path, originalPath: originalPath})
+func (b *diffRuntimeBackend) FileDiff(_ context.Context, _ runtime.ID, repository int, submodule, commit, path, originalPath string) (string, error) {
+	b.fileDiffCalls = append(b.fileDiffCalls, fileDiffCall{submodule: submodule, repository: repository, commit: commit, path: path, originalPath: originalPath})
 	if commit == "" {
 		return "uncommitted patch", nil
 	}
@@ -113,6 +114,46 @@ func TestTaskDiffHandlers(t *testing.T) {
 		commits := resp.Repositories[0].Commits
 		if commits[0].Behind || !commits[1].Behind || commits[1].Subject != "Missing upstream change" {
 			t.Fatalf("index commits = %+v, want ahead and missing upstream commits", commits)
+		}
+	})
+
+	t.Run("nested child identity survives index and both patch APIs", func(t *testing.T) {
+		t.Parallel()
+		s, backend, taskID := newTaskDiffTestRouter(t)
+		backend.RepositoryStatusValue.Submodules = []runtime.SubmoduleStatus{{Path: "lib with space/nested", Status: runtime.RepositoryStatus{Ahead: 1, Commits: []runtime.GitCommit{{SHA: diffTestCommit, Subject: "Child commit", Stat: []runtime.GitFileStat{{Path: "tracked.txt", LinesAdded: 1}}}}, Uncommitted: []runtime.GitFileStatus{{Path: "new.txt", IndexStatus: "?", WorktreeStatus: "?", LinesAdded: 1}}}}}
+		h := testTaskHandlers(s).routes()
+		request := func(suffix string) *httptest.ResponseRecorder {
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/tasks/"+taskID.String()+suffix, nil))
+			if w.Code != http.StatusOK {
+				t.Fatalf("%s: %d %s", suffix, w.Code, w.Body.String())
+			}
+			return w
+		}
+		var index v1.TaskDiffIndexResp
+		if err := json.NewDecoder(request("/diff/index").Body).Decode(&index); err != nil {
+			t.Fatal(err)
+		}
+		if len(index.Repositories) != 2 || index.Repositories[1].Repository != 0 || index.Repositories[1].Submodule != "lib with space/nested" || index.Repositories[1].Commits[0].Stat[0].Path != "tracked.txt" {
+			t.Fatalf("index: %+v", index)
+		}
+		request("/diff/file?repository=0&submodule=lib%20with%20space%2Fnested&path=new.txt")
+		if len(backend.fileDiffCalls) != 1 || backend.fileDiffCalls[0].submodule != "lib with space/nested" {
+			t.Fatalf("selector: %+v", backend.fileDiffCalls)
+		}
+		var combined v1.DiffResp
+		if err := json.NewDecoder(request("/diff").Body).Decode(&combined); err != nil {
+			t.Fatal(err)
+		}
+		if len(combined.Repositories) != 2 || combined.Repositories[1].Submodule != "lib with space/nested" || combined.Repositories[1].Commits[0].Stat[0].Diff != "committed patch" {
+			t.Fatalf("combined: %+v", combined)
+		}
+		var compact v1.TaskRepoStatusResp
+		if err := json.NewDecoder(request("/repo-status").Body).Decode(&compact); err != nil {
+			t.Fatal(err)
+		}
+		if len(compact.Repositories) != 2 || compact.Repositories[1].UncommittedFiles != 1 || compact.Repositories[1].Repository != 0 {
+			t.Fatalf("compact: %+v", compact)
 		}
 	})
 

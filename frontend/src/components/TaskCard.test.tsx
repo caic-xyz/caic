@@ -297,6 +297,8 @@ describe("TaskCard", () => {
         {...props({
           repoStates: [
             {
+              repository: 0,
+              submodule: "",
               name: "repo",
               branch: "task-branch",
               ahead: 1,
@@ -334,6 +336,8 @@ describe("TaskCard", () => {
           diffStat: [{ path: "secondary/main.go", linesAdded: 5, linesDeleted: 1, oldSize: -1, newSize: -1 }],
           repoStates: [
             {
+              repository: 0,
+              submodule: "",
               name: "secondary",
               branch: "caic-2",
               ahead: 3,
@@ -360,6 +364,8 @@ describe("TaskCard", () => {
   it("updates the repository state when the task stream pushes new values", async () => {
     const [repoStates, setRepoStates] = createSignal<TaskCardProps["repoStates"]>([
       {
+        repository: 0,
+        submodule: "",
         name: "repo",
         branch: "task-branch",
         ahead: 1,
@@ -381,6 +387,8 @@ describe("TaskCard", () => {
     // without any client-side fetch.
     setRepoStates([
       {
+        repository: 0,
+        submodule: "",
         name: "repo",
         branch: "task-branch",
         ahead: 3,
@@ -430,6 +438,8 @@ describe("TaskCard", () => {
     expect(await screen.findByText("1f")).toBeInTheDocument();
     setRepoStates([
       {
+        repository: 0,
+        submodule: "",
         name: "repo",
         branch: "task-branch",
         ahead: 0,

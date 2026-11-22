@@ -380,7 +380,8 @@ func (b *mcpJSONFieldBudget) take(value any, count, textBytes int) (bool, error)
 // Complete totals are computed before any rows are omitted.
 func taskMCPDiffstat(idx *v1.TaskDiffIndexResp) (*v1.MCPTaskDiffstat, error) {
 	out := &v1.MCPTaskDiffstat{Repositories: []v1.DiffIndexRepository{}}
-	for _, repo := range idx.Repositories {
+	for i := range idx.Repositories {
+		repo := &idx.Repositories[i]
 		for _, commit := range repo.Commits {
 			for _, file := range commit.Stat {
 				out.Totals.FileChanges++
@@ -406,10 +407,11 @@ func taskMCPDiffstat(idx *v1.TaskDiffIndexResp) (*v1.MCPTaskDiffstat, error) {
 	}
 	budget := mcpJSONFieldBudget{remaining: mcpTextOutputMaxBytes - len(base)}
 repositories:
-	for _, repo := range idx.Repositories {
-		r := repo
+	for i := range idx.Repositories {
+		repo := &idx.Repositories[i]
+		r := *repo
 		r.Commits, r.Uncommitted = []v1.DiffIndexCommit{}, []v1.DiffIndexFileStatus{}
-		ok, err := budget.take(r, len(out.Repositories), len(r.Name)+len(r.Branch)+len(r.Upstream))
+		ok, err := budget.take(r, len(out.Repositories), len(r.Submodule)+len(r.Name)+len(r.Branch)+len(r.Upstream))
 		if err != nil {
 			return nil, err
 		}

@@ -20,12 +20,16 @@ test("SDK task lifecycle keeps concurrent tasks isolated", async ({ api, uniqueP
 
   await test.step("list and sync preserve task and branch identity", async () => {
     expect(await api.listTasks()).toContainEqual(expect.objectContaining({ id, initialPrompt: prompt }));
-    for (const [target, branch] of [
-      ["default", "main"],
-      ["branch", repo.branch],
+    // The fake agent commits nothing, so the default-branch sync republishes the
+    // tip main already holds and reports empty. The task branch is new to the
+    // remote, so that sync reports synced. Both carry the same task report.
+    for (const [target, branch, status] of [
+      ["default", "main", "empty"],
+      ["branch", repo.branch, "synced"],
     ] as const) {
       const result = await api.syncTask(id, { target });
-      expect(result.status).toBe("empty");
+      expect(result.status).toBe(status);
+      expect(result.diffStat?.map((file) => file.path)).toEqual(["cmd/caic/main.go", "frontend/src/App.tsx"]);
       expect(result.branch).toBe(branch);
       expect(result.safetyIssues ?? []).toEqual([]);
     }

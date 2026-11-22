@@ -389,6 +389,8 @@ test("failed refreshes retain counts and show a stale marker at desktop and mobi
   if (!primary) throw new Error("Task has no repository");
   snapshot.repoStates = [
     {
+      repository: 0,
+      submodule: "",
       name: primary.name,
       branch: primary.branch,
       stale: true,

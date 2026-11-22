@@ -95,6 +95,8 @@ type ConnectionTarget struct {
 
 // Repo describes a git repository available to a runtime instance.
 type Repo struct {
+	// GitDir selects host metadata independently of a possibly absent child worktree.
+	GitDir        string
 	GitRoot       string
 	ContainerPath string
 	Branch        string
@@ -117,6 +119,9 @@ const (
 // RepositoryStatus describes the checked-out branch and its changes relative
 // to the host checkout's original tracking branch.
 type RepositoryStatus struct {
+	// Submodules contains initialized descendants, identified relative to this mapped repository.
+	Submodules []SubmoduleStatus
+
 	Branch      string
 	Upstream    string
 	Operation   RepositoryOperation
@@ -125,6 +130,12 @@ type RepositoryStatus struct {
 	DiffStat    []GitFileStat
 	Commits     []GitCommit
 	Uncommitted []GitFileStatus
+}
+
+// SubmoduleStatus identifies an initialized descendant and its independent Git state.
+type SubmoduleStatus struct {
+	Path   string
+	Status RepositoryStatus
 }
 
 // GitCommit describes one commit unique to either side of the comparison branch.
@@ -444,6 +455,8 @@ type FetchOpts struct {
 
 // PushRefs names the ref update that a pre-push hook validates.
 type PushRefs struct {
+	// Submodule identifies the child checkout, or nil for the mapped repository.
+	Submodule *PushSubmodule
 	// Remote is the remote name passed to the hook as both its name and URL
 	// arguments; the real URL can embed credentials and never enters an instance.
 	Remote string
@@ -454,8 +467,21 @@ type PushRefs struct {
 	RemoteCommit string
 }
 
+// PushSubmodule locates a child checkout and its retained metadata for a hook.
+type PushSubmodule struct {
+	// Path is relative to the mapped checkout.
+	Path string
+	// GitDir is relative to the mapped repository's modules directory.
+	// An empty value selects the Git directory from the checked-out path.
+	GitDir string
+}
+
 // FetchedBranch identifies an exact repository branch tip observed by Fetch.
 type FetchedBranch struct {
+	// Submodule is relative to the mapped parent repository; empty for mapped roots.
+	Submodule string
+	// GitDir is the host module object store, including when its worktree is absent.
+	GitDir string
 	// RepositoryPath is the repository's absolute path inside the runtime.
 	RepositoryPath string
 	// BranchName is the short local branch name, such as "main" or "caic-1".
@@ -475,10 +501,20 @@ type TurnRepository struct {
 	StatusErr error
 }
 
+// DiffPatch selects the patch one repository reports.
+type DiffPatch struct {
+	// Path limits the patch to one file. A path inside an initialized descendant
+	// selects that descendant file instead of the parent Gitlink.
+	Path string
+	// Prefix maps patch paths under this repository. It is empty for the mapped
+	// root of a single-repository task.
+	Prefix string
+}
+
 // Repository provides repository operations inside runtime instances.
 type Repository interface {
 	TurnSnapshot(ctx context.Context, id ID, previous []FetchedBranch) ([]TurnRepository, error)
-	Diff(ctx context.Context, id ID, repoIdx int, args ...string) (string, error)
+	Diff(ctx context.Context, id ID, repoIdx int, patch DiffPatch) (string, error)
 	Fetch(ctx context.Context, id ID, opts FetchOpts) ([]FetchedBranch, error)
 	// RefreshRefs copies cached upstream refs into the instance without moving
 	// working branches or committing pending edits.
@@ -494,7 +530,7 @@ type Repository interface {
 	// receiving output. out must return promptly: a blocked Write stalls the
 	// hook.
 	RunPrePush(ctx context.Context, id ID, repoIdx int, commit string, dest PushRefs, out io.Writer) error
-	FileDiff(ctx context.Context, id ID, repoIdx int, commit, path, originalPath string) (string, error)
+	FileDiff(ctx context.Context, id ID, repoIdx int, submodule, commit, path, originalPath string) (string, error)
 	RepositoryStatus(ctx context.Context, id ID, repoIdx int) (RepositoryStatus, error)
 	// CompactRepositoryStatus returns the branch, divergence, working-tree
 	// counts, operation, and branch-diff numstat of one repository without the

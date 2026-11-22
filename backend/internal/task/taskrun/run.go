@@ -70,7 +70,7 @@ func (r *Run) PrepareRecords(_ context.Context, messages []agent.TimedMessage) (
 			if runtime.Runtimes == nil || runtime.Checkout == nil {
 				continue
 			}
-			snapshot, _ := runtime.Checkout.DiffStatAndRepoStates(r.ctx, runtime.Log, runtime.Runtimes, target) //nolint:contextcheck // Git preparation must stop with its execution, while Records survives to preserve final evidence.
+			snapshot, _ := runtime.Checkout.DiffStat(r.ctx, runtime.Log, runtime.Runtimes, target) //nolint:contextcheck // Git preparation must stop with its execution, while Records survives to preserve final evidence.
 			if err := r.ctx.Err(); err != nil {
 				return nil, err
 			}

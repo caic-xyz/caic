@@ -822,7 +822,7 @@ func (r *AgentRuntime) reviveRun(t *Task, run *Run) (*SessionHandle, error) {
 		return nil, r.finishReviveFailure(ctx, t, err, nil)
 	}
 	if r.Checkout != nil {
-		snapshot, _ := r.Checkout.DiffStatAndRepoStates(ctx, r.Log, r.Runtimes, t.GitTarget())
+		snapshot, _ := r.Checkout.DiffStat(ctx, r.Log, r.Runtimes, t.GitTarget())
 		if _, err := r.RecordRepositorySummary(ctx, t, &snapshot); err != nil {
 			return nil, err
 		}

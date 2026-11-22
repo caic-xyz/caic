@@ -228,7 +228,7 @@ func TestCompactGitStatusCommand(t *testing.T) {
 	t.Parallel()
 	t.Run("quotes repository and omits the history walk", func(t *testing.T) {
 		t.Parallel()
-		cmd := compactGitStatusCommand("/work/repo's copy", "upstream", "trunk")
+		cmd := compactGitStatusCommand("/work/repo's copy", "upstream/trunk")
 		if !strings.HasPrefix(cmd, `cd '/work/repo'"'"'s copy'`) {
 			t.Errorf("compactGitStatusCommand() does not safely quote repo: %q", cmd)
 		}
@@ -237,7 +237,7 @@ func TestCompactGitStatusCommand(t *testing.T) {
 				t.Errorf("compactGitStatusCommand() missing %q", fragment)
 			}
 		}
-		for _, fragment := range []string{gitLogMarker, gitCommitMarker, "git log", "git diff HEAD"} {
+		for _, fragment := range []string{gitLogMarker, gitCommitMarker, "git log"} {
 			if strings.Contains(cmd, fragment) {
 				t.Errorf("compactGitStatusCommand() includes history-walk fragment %q", fragment)
 			}
@@ -264,7 +264,7 @@ func TestCompactGitStatusCommand(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		out, err := newIsolatedGitCommand(t, "bash", "-c", compactGitStatusCommand(dir, "origin", "main")).Output()
+		out, err := newIsolatedGitCommand(t, "bash", "-c", compactGitStatusCommand(dir, "origin/main")).Output()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -313,7 +313,7 @@ func TestCompactGitStatusCommand(t *testing.T) {
 		runTestGit(t, dir, "add", "task.txt")
 		runTestGit(t, dir, "commit", "-m", "task change")
 
-		out, err := newIsolatedGitCommand(t, "bash", "-c", compactGitStatusCommand(dir, "origin", "usage")).Output()
+		out, err := newIsolatedGitCommand(t, "bash", "-c", compactGitStatusCommand(dir, "origin/usage")).Output()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -326,7 +326,7 @@ func TestCompactGitStatusCommand(t *testing.T) {
 		}
 	})
 
-	t.Run("unresolvable comparison reports counts without a branch stat", func(t *testing.T) {
+	t.Run("unresolvable comparison reports pending file stats", func(t *testing.T) {
 		t.Parallel()
 		dir := initStatusRepo(t)
 		runTestGit(t, dir, "checkout", "-b", "caic-42")
@@ -334,7 +334,7 @@ func TestCompactGitStatusCommand(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		out, err := newIsolatedGitCommand(t, "bash", "-c", compactGitStatusCommand(dir, "missing", "branch")).Output()
+		out, err := newIsolatedGitCommand(t, "bash", "-c", compactGitStatusCommand(dir, "missing/branch")).Output()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -343,13 +343,13 @@ func TestCompactGitStatusCommand(t *testing.T) {
 			t.Fatal(err)
 		}
 		// caic-42 has no upstream and missing/branch does not resolve, so the
-		// probe degrades to uncommitted counts instead of failing the whole
+		// probe reports pending files instead of failing the whole
 		// report and blanking the task card.
 		if status.Branch != "caic-42" || status.Upstream != "" || status.Ahead != 0 || status.Behind != 0 {
 			t.Errorf("branch status = %+v", status)
 		}
-		if len(status.DiffStat) != 0 {
-			t.Errorf("diff stat = %+v, want none", status.DiffStat)
+		if len(status.DiffStat) != 1 || status.DiffStat[0].Path != "tracked.txt" || status.DiffStat[0].LinesAdded != 1 || status.DiffStat[0].LinesDeleted != 1 {
+			t.Errorf("pending diff stat = %+v", status.DiffStat)
 		}
 		if len(status.Uncommitted) != 1 {
 			t.Errorf("uncommitted = %+v", status.Uncommitted)
@@ -375,7 +375,7 @@ func TestCompactGitStatusCommand(t *testing.T) {
 			t.Fatal("expected the merge to conflict")
 		}
 
-		out, err := newIsolatedGitCommand(t, "bash", "-c", compactGitStatusCommand(dir, "origin", "main")).Output()
+		out, err := newIsolatedGitCommand(t, "bash", "-c", compactGitStatusCommand(dir, "origin/main")).Output()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -411,7 +411,7 @@ func TestCompactGitStatusCommand(t *testing.T) {
 		}
 		runTestGit(t, dir, "add", "staged.txt")
 
-		out, err := newIsolatedGitCommand(t, "bash", "-c", compactGitStatusCommand(dir, "origin", "main")).Output()
+		out, err := newIsolatedGitCommand(t, "bash", "-c", compactGitStatusCommand(dir, "origin/main")).Output()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -425,11 +425,107 @@ func TestCompactGitStatusCommand(t *testing.T) {
 	})
 }
 
+func TestPatchArgs(t *testing.T) {
+	t.Parallel()
+	cases := map[string]struct {
+		patch runtime.DiffPatch
+		want  []string
+	}{
+		"single repo full diff": {
+			want: []string{"--src-prefix=", "--dst-prefix="},
+		},
+		"single repo path": {
+			patch: runtime.DiffPatch{Path: "main.go"},
+			want:  []string{"--src-prefix=", "--dst-prefix=", "--", "main.go"},
+		},
+		"multi repo full diff": {
+			patch: runtime.DiffPatch{Prefix: "caic"},
+			want:  []string{"--src-prefix=a/caic/", "--dst-prefix=b/caic/"},
+		},
+		"multi repo path": {
+			patch: runtime.DiffPatch{Path: "b/main.go", Prefix: "caic-xyz/caic"},
+			want:  []string{"--src-prefix=a/caic-xyz/caic/", "--dst-prefix=b/caic-xyz/caic/", "--", "b/main.go"},
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if got := patchArgs(tc.patch); !slices.Equal(got, tc.want) {
+				t.Errorf("patchArgs() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestChildPatch keeps a mapped parent patch scoped to one initialized
+// descendant without leaking paths that belong to a sibling module.
+func TestChildPatch(t *testing.T) {
+	t.Parallel()
+	cases := map[string]struct {
+		parent runtime.DiffPatch
+		module string
+		want   runtime.DiffPatch
+		ok     bool
+	}{
+		"whole parent selects whole module": {
+			module: "lib",
+			want:   runtime.DiffPatch{Prefix: "lib"},
+			ok:     true,
+		},
+		"mapped prefix extends": {
+			parent: runtime.DiffPatch{Prefix: "caic"},
+			module: "lib",
+			want:   runtime.DiffPatch{Prefix: "caic/lib"},
+			ok:     true,
+		},
+		"module path selects whole module": {
+			parent: runtime.DiffPatch{Path: "lib"},
+			module: "lib",
+			want:   runtime.DiffPatch{Prefix: "lib"},
+			ok:     true,
+		},
+		"ancestor path leaves the module whole": {
+			parent: runtime.DiffPatch{Path: "lib"},
+			module: "lib/nested",
+			want:   runtime.DiffPatch{Prefix: "lib/nested"},
+			ok:     true,
+		},
+		"descendant path narrows the filter": {
+			parent: runtime.DiffPatch{Path: "lib/nested/tracked.txt"},
+			module: "lib",
+			want:   runtime.DiffPatch{Path: "nested/tracked.txt", Prefix: "lib"},
+			ok:     true,
+		},
+		"unrelated path skips the module": {
+			parent: runtime.DiffPatch{Path: "main.go"},
+			module: "lib",
+			ok:     false,
+		},
+		"lookalike sibling path skips the module": {
+			parent: runtime.DiffPatch{Path: "library/main.go"},
+			module: "lib",
+			ok:     false,
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			got, ok := childPatch(tc.parent, tc.module)
+			if ok != tc.ok {
+				t.Fatalf("childPatch() ok = %t, want %t", ok, tc.ok)
+			}
+			if got != tc.want {
+				t.Errorf("childPatch() = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestGitStatusMergeBase(t *testing.T) {
 	t.Parallel()
 	for _, probe := range []struct {
 		name    string
-		command func(string, string, string) string
+		command func(string, string) string
 		parse   func(string) (runtime.RepositoryStatus, error)
 	}{
 		{name: "compact", command: compactGitStatusCommand, parse: parseCompactGitStatus},
@@ -475,7 +571,7 @@ func TestGitStatusMergeBase(t *testing.T) {
 						)
 					}
 
-					out, err := newIsolatedGitCommand(t, "bash", "-c", probe.command(dir, "origin", "main")).Output()
+					out, err := newIsolatedGitCommand(t, "bash", "-c", probe.command(dir, "origin/main")).Output()
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -523,7 +619,7 @@ func TestGitStatusMergeBase(t *testing.T) {
 				if err := os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("working change\n"), 0o600); err != nil {
 					t.Fatal(err)
 				}
-				out, err := newIsolatedGitCommand(t, "bash", "-c", probe.command(dir, "origin", "main")).Output()
+				out, err := newIsolatedGitCommand(t, "bash", "-c", probe.command(dir, "origin/main")).Output()
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -546,7 +642,7 @@ func TestGitStatusMergeBase(t *testing.T) {
 				t.Parallel()
 				dir := initStatusRepo(t)
 				shim := gitShim(t, `if [ "$1" = "merge-base" ]; then echo 'injected merge-base failure' >&2; exit 128; fi`)
-				cmd := newIsolatedGitCommand(t, "bash", "-c", probe.command(dir, "origin", "main"))
+				cmd := newIsolatedGitCommand(t, "bash", "-c", probe.command(dir, "origin/main"))
 				cmd.Env = append(cmd.Env, "PATH="+shim)
 				out, err := cmd.CombinedOutput()
 				exitErr, ok := errors.AsType[*exec.ExitError](err)
@@ -562,7 +658,7 @@ func TestGitStatusCommand(t *testing.T) {
 	t.Parallel()
 	t.Run("quotes repository and includes protocol", func(t *testing.T) {
 		t.Parallel()
-		cmd := gitStatusCommand("/work/repo's copy", "upstream", "trunk")
+		cmd := gitStatusCommand("/work/repo's copy", "upstream/trunk")
 		if !strings.HasPrefix(cmd, `cd '/work/repo'"'"'s copy'`) {
 			t.Errorf("gitStatusCommand() does not safely quote repo: %q", cmd)
 		}
@@ -607,7 +703,7 @@ func TestGitStatusCommand(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		out, err := newIsolatedGitCommand(t, "bash", "-c", gitStatusCommand(dir, "origin", "main")).Output()
+		out, err := newIsolatedGitCommand(t, "bash", "-c", gitStatusCommand(dir, "origin/main")).Output()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -639,7 +735,7 @@ func TestGitStatusCommand(t *testing.T) {
 			t.Errorf("cached diff after status = %q, want staged.txt", cached)
 		}
 
-		out, err = newIsolatedGitCommand(t, "bash", "-c", gitStatusCommand(dir, "missing", "branch")).Output()
+		out, err = newIsolatedGitCommand(t, "bash", "-c", gitStatusCommand(dir, "missing/branch")).Output()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -734,6 +830,53 @@ fi`)
 		}
 		if !slices.Contains(untracked, "nested/") {
 			t.Errorf("uncommitted = %v, want nested/", untracked)
+		}
+	})
+	t.Run("initial Gitlink checkout ignores a different transferred host HEAD", func(t *testing.T) {
+		t.Parallel()
+		dir := initStatusRepo(t)
+		base := runTestGitOutput(t, dir, "rev-parse", "HEAD")
+		runTestGit(t, dir, "update-ref", "refs/md/sync/HEAD", base)
+		if err := os.WriteFile(filepath.Join(dir, "host-only.txt"), []byte("host branch ahead\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		runTestGit(t, dir, "add", ".")
+		runTestGit(t, dir, "commit", "-m", "Host-only commit")
+		runTestGit(t, dir, "update-ref", "refs/md/submodule-head", "HEAD")
+		runTestGit(t, dir, "checkout", "--detach", base)
+		out, err := newIsolatedGitCommand(t, "bash", "-c", gitStatusCommand(dir, "refs/md/sync/HEAD")).Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		status, err := parseGitStatus(string(out))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status.Upstream != "refs/md/sync/HEAD" || status.Ahead != 0 || status.Behind != 0 || len(status.DiffStat) != 0 || len(status.Commits) != 0 {
+			t.Fatalf("initial child: %+v", status)
+		}
+	})
+	t.Run("newly initialized module uses cached non-origin default HEAD", func(t *testing.T) {
+		t.Parallel()
+		dir := initStatusRepo(t)
+		runTestGit(t, dir, "remote", "rename", "origin", "upstream")
+		runTestGit(t, dir, "symbolic-ref", "refs/remotes/upstream/HEAD", "refs/remotes/upstream/main")
+		runTestGit(t, dir, "checkout", "--detach")
+		if err := os.WriteFile(filepath.Join(dir, "task.txt"), []byte("new module task change\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		runTestGit(t, dir, "add", ".")
+		runTestGit(t, dir, "commit", "-m", "Task change")
+		out, err := newIsolatedGitCommand(t, "bash", "-c", gitStatusCommand(dir, "refs/md/sync/HEAD")).Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		status, err := parseGitStatus(string(out))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status.Upstream != "refs/remotes/upstream/HEAD" || status.Ahead != 1 || len(status.DiffStat) != 1 || status.DiffStat[0].Path != "task.txt" || len(status.Commits) != 1 {
+			t.Fatalf("new module: %+v", status)
 		}
 	})
 }
@@ -979,7 +1122,7 @@ func gitShim(t *testing.T, inject string) string {
 }
 
 func runGitStatusCommand(t *testing.T, dir string, env []string) (stdout, stderr string) {
-	cmd := newIsolatedGitCommand(t, "bash", "-c", gitStatusCommand(dir, "origin", "main"))
+	cmd := newIsolatedGitCommand(t, "bash", "-c", gitStatusCommand(dir, "origin/main"))
 	cmd.Env = append(slices.Clone(env), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull)
 	var out, errOut bytes.Buffer
 	cmd.Stdout = &out
@@ -1039,7 +1182,7 @@ func TestTurnGitCommand(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
-				cmd, err := turnGitCommand(dir, "origin", "main", tc.from, tc.to)
+				cmd, err := turnGitCommand(dir, "origin/main", tc.from, tc.to)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -1073,7 +1216,7 @@ func TestTurnGitCommand(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
-				cmd, err := turnGitCommand(dir, "origin", "main", tc.from, tc.to)
+				cmd, err := turnGitCommand(dir, "origin/main", tc.from, tc.to)
 				if err != nil {
 					return
 				}
@@ -1103,7 +1246,7 @@ func TestTurnGitCommandRewrittenExistingTip(t *testing.T) {
 	runTestGit(t, dir, "add", ".")
 	runTestGit(t, dir, "commit", "-m", "rewritten tip")
 	to := runTestGitOutput(t, dir, "rev-parse", "HEAD")
-	cmd, err := turnGitCommand(dir, "origin", "main", old, to)
+	cmd, err := turnGitCommand(dir, "origin/main", old, to)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1173,7 +1316,7 @@ func BenchmarkTurnGitCommands(b *testing.B) {
 	runTestGit(b, dir, "commit", "-m", "turn")
 	to := runTestGitOutput(b, dir, "rev-parse", "HEAD")
 	b.Run("separate", func(b *testing.B) {
-		branch := compactGitStatusCommand(dir, "origin", "main")
+		branch := compactGitStatusCommand(dir, "origin/main")
 		turn := "cd " + shellQuote(dir) + " && git diff --numstat --stat -z " + shellQuote(from) + " " + shellQuote(to) + " --"
 		b.ReportAllocs()
 		for b.Loop() {
@@ -1185,7 +1328,7 @@ func BenchmarkTurnGitCommands(b *testing.B) {
 		}
 	})
 	b.Run("combined", func(b *testing.B) {
-		cmd, err := turnGitCommand(dir, "origin", "main", from, to)
+		cmd, err := turnGitCommand(dir, "origin/main", from, to)
 		if err != nil {
 			b.Fatal(err)
 		}

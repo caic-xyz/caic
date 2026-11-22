@@ -31,25 +31,26 @@ type ViewRepository = Omit<DiffIndexRepository, "commits" | "uncommitted"> & {
 };
 
 function indexedRepositories(repositories: DiffIndexRepository[]): ViewRepository[] {
-  return repositories.map(({ commits, uncommitted, ...repo }, repositoryIndex) => {
+  return repositories.map(({ commits, uncommitted, ...repo }) => {
+    const identity = `${repo.repository}\0${repo.submodule}`;
     const indexedCommits = (commits ?? []).map((commit) => ({
       ...commit,
-      id: `${repo.name}\0${commit.sha}`,
+      id: `${identity}\0${commit.sha}`,
       stat: (commit.stat ?? []).map((file) => ({
         ...file,
-        id: `${repo.name}\0${commit.sha}\0${file.path}`,
+        id: `${identity}\0${commit.sha}\0${file.path}`,
       })),
     }));
     return {
       ...repo,
-      id: `${repositoryIndex}\0${repo.name}`,
+      id: identity,
       commitGroups: [
         { id: "ahead", commits: indexedCommits.filter((commit) => !commit.behind) },
         { id: "behind", commits: indexedCommits.filter((commit) => commit.behind) },
       ],
       uncommitted: (uncommitted ?? []).map((file) => ({
         ...file,
-        id: `${repo.name}\0${file.originalPath ?? ""}\0${file.path}`,
+        id: `${identity}\0${file.originalPath ?? ""}\0${file.path}`,
       })),
     };
   });
@@ -171,15 +172,17 @@ export default function DiffDetail(props: Props) {
         <Show when={!loading() && !error()}>
           <div class={styles.statusList}>
             <For each={repositories}>
-              {(repo, repositoryIndex) => (
-                <section class={styles.repoStatus}>
+              {(repo) => (
+                <section class={styles.repoStatus} aria-label={repo.name}>
                   <div class={styles.repoHeading}>
                     <span class={styles.headerRepo}>{repo.name}</span>
                     <span class={styles.branchName}>{repo.branch || "detached HEAD"}</span>
                     <span class={styles.branchArrow} aria-hidden="true">
                       →
                     </span>
-                    <span class={styles.upstreamName}>{repo.upstream ?? "no upstream"}</span>
+                    <span class={styles.upstreamName}>
+                      {repo.upstream === "refs/md/sync/HEAD" ? "last sync" : (repo.upstream ?? "no upstream")}
+                    </span>
                   </div>
                   <div class={styles.divergence}>
                     <Show when={repo.upstream} fallback="No upstream tracking branch configured">
@@ -230,7 +233,8 @@ export default function DiffDetail(props: Props) {
                                                 loadDiff={() =>
                                                   taskDiffCache.loadPatch({
                                                     taskId: props.taskId,
-                                                    repository: String(repositoryIndex()),
+                                                    repository: String(repo.repository),
+                                                    submodule: repo.submodule,
                                                     commit: commit.sha,
                                                     path: file.path,
                                                     originalPath: "",
@@ -283,7 +287,8 @@ export default function DiffDetail(props: Props) {
                                 loadDiff={() =>
                                   taskDiffCache.loadPatch({
                                     taskId: props.taskId,
-                                    repository: String(repositoryIndex()),
+                                    repository: String(repo.repository),
+                                    submodule: repo.submodule,
                                     commit: "",
                                     path: file.path,
                                     originalPath: file.originalPath ?? "",

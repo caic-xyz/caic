@@ -29,7 +29,10 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/gittest"
+	"github.com/caic-xyz/caic/backend/internal/logtest"
+	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	"github.com/caic-xyz/caic/metrics"
 )
 
 // fakeMDContainer is a fake mdContainer that records driven operations and
@@ -38,6 +41,7 @@ type fakeMDContainer struct {
 	name    string
 	vncPort int32
 	repo    []md.Repo
+	modules md.SubmoduleTree
 	diffIdx int
 
 	launchOpts  *md.StartOpts
@@ -99,13 +103,18 @@ func (f *fakeMDContainer) Diff(_ context.Context, _, _ io.Writer, repoIdx int, o
 	return nil
 }
 
-func (f *fakeMDContainer) Fetch(_ context.Context, _, _ io.Writer, repoIdx int, opts *md.FetchOpts) ([]md.FetchedBranch, error) {
-	f.calls = append(f.calls, "Fetch")
+func (f *fakeMDContainer) FetchRecursive(_ context.Context, _, _ io.Writer, repoIdx int, opts *md.FetchOpts) (md.FetchedRepository, error) {
+	f.calls = append(f.calls, "FetchRecursive")
 	f.fetchOpts = opts
-	if repoIdx >= len(f.fetchResults) {
-		return nil, nil
+	result := md.FetchedRepository{Submodules: f.modules}
+	if repoIdx < len(f.fetchResults) {
+		result.Branches = slices.Clone(f.fetchResults[repoIdx])
 	}
-	return slices.Clone(f.fetchResults[repoIdx]), nil
+	return result, nil
+}
+
+func (f *fakeMDContainer) DiscoverSubmodules(context.Context, int) (md.SubmoduleTree, error) {
+	return f.modules, nil
 }
 
 func (f *fakeMDContainer) SyncDefaultBranch(_ context.Context, repoIdx int) error {
@@ -857,7 +866,7 @@ func TestBackend(t *testing.T) {
 		}}
 		fc := &fakeMDClient{getResult: ctr}
 		b := newTestBackend(fc)
-		if _, err := b.Diff(t.Context(), "docker:ctr-1", 1, "--numstat"); err != nil {
+		if _, err := b.Diff(t.Context(), "docker:ctr-1", 1, runtime.DiffPatch{Path: "file.txt", Prefix: "genai"}); err != nil {
 			t.Fatalf("Diff: %v", err)
 		}
 		if fc.getCalls != 1 || fc.getName != "ctr-1" {
@@ -869,11 +878,113 @@ func TestBackend(t *testing.T) {
 		if ctr.diffIdx != 1 {
 			t.Errorf("Diff repoIdx = %d, want 1", ctr.diffIdx)
 		}
-		if ctr.diffOpts == nil || !ctr.diffOpts.Full || !slices.Equal(ctr.diffOpts.Args, []string{"--numstat"}) {
-			t.Errorf("Diff opts = %+v, want the whole branch with --numstat", ctr.diffOpts)
+		if ctr.diffOpts == nil || !ctr.diffOpts.Full || !slices.Equal(ctr.diffOpts.Args, []string{"--src-prefix=a/genai/", "--dst-prefix=b/genai/", "--", "file.txt"}) {
+			t.Errorf("Diff opts = %+v, want a whole-branch patch with scoped paths", ctr.diffOpts)
 		}
+		t.Run("raw diff contains child file content", func(t *testing.T) {
+			t.Parallel()
+			f := newSubmoduleBackend(t)
+			diff, err := f.backend.Diff(t.Context(), "docker:ctr", 0, runtime.DiffPatch{})
+			if err != nil || !strings.Contains(diff, "lib with space/nested/tracked.txt") || !strings.Contains(diff, "+committed child content") {
+				t.Fatalf("diff: %q, %v", diff, err)
+			}
+		})
 	})
 
+	checkSubmoduleStatus := func(t *testing.T, status *runtime.RepositoryStatus) {
+		want := []string{"lib with space", "lib with space/nested"}
+		if len(status.Submodules) != len(want) {
+			t.Fatalf("children: %+v", status.Submodules)
+		}
+		for i := range status.Submodules {
+			sub := &status.Submodules[i]
+			if sub.Path != want[i] || sub.Status.Ahead != 1 || len(sub.Status.DiffStat) != 1 || sub.Status.DiffStat[0].Path != "tracked.txt" {
+				t.Fatalf("child: %+v", sub)
+			}
+		}
+	}
+	t.Run("RepositoryStatus", func(t *testing.T) {
+		t.Parallel()
+		f := newSubmoduleBackend(t)
+		status, err := f.backend.RepositoryStatus(t.Context(), "docker:ctr", 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkSubmoduleStatus(t, &status)
+	})
+	t.Run("CompactRepositoryStatus", func(t *testing.T) {
+		t.Parallel()
+		f := newSubmoduleBackend(t)
+		status, err := f.backend.CompactRepositoryStatus(t.Context(), "docker:ctr", 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkSubmoduleStatus(t, &status)
+
+		t.Run("checkout statistics contain qualified files and never patch rows", func(t *testing.T) {
+			t.Parallel()
+			f := newSubmoduleBackend(t)
+			if err := os.WriteFile(filepath.Join(f.child, "tabbed.txt"), []byte("1\t1\tbogus-from-patch.go\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			router, err := runtime.NewRouter([]runtime.System{f.backend}, metrics.Nop{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			checkout, err := repo.NewCheckout(t.Context(), logtest.Logger(t), f.root, "main", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			target := repo.GitTarget{InstanceID: "docker:ctr", Repos: []runtime.Repo{{GitRoot: f.root, ContainerPath: f.root, Branch: "main"}}}
+			snapshot, err := checkout.DiffStat(t.Context(), logtest.Logger(t), router, target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(snapshot.DiffStat) != 3 {
+				t.Fatalf("statistics contain patch rows or omit child files: %+v", snapshot.DiffStat)
+			}
+			paths := make([]string, 0, 3)
+			for _, file := range snapshot.DiffStat {
+				paths = append(paths, file.Path)
+			}
+			slices.Sort(paths)
+			want := []string{"lib with space/nested/tracked.txt", "lib with space/tabbed.txt", "lib with space/tracked.txt"}
+			if !slices.Equal(paths, want) {
+				t.Fatalf("qualified statistics: %v", paths)
+			}
+		})
+	})
+
+	t.Run("FileDiff", func(t *testing.T) {
+		t.Parallel()
+		f := newSubmoduleBackend(t)
+		if err := os.WriteFile(filepath.Join(f.nested, "new.txt"), []byte("untracked child line\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		for _, test := range []struct{ module, commit, path, want string }{{"lib with space", f.childCommit, "tracked.txt", "+committed child content"}, {"lib with space/nested", "", "new.txt", "+untracked child line"}} {
+			patch, err := f.backend.FileDiff(t.Context(), "docker:ctr", 0, test.module, test.commit, test.path, "")
+			if err != nil || !strings.Contains(patch, test.want) {
+				t.Fatalf("patch %s: %q, %v", test.module, patch, err)
+			}
+		}
+		if _, err := f.backend.FileDiff(t.Context(), "docker:ctr", 0, "../outside", "", "tracked.txt", ""); err == nil {
+			t.Fatal("uninitialized child accepted")
+		}
+	})
+	t.Run("TurnSnapshot", func(t *testing.T) {
+		t.Parallel()
+		f := newSubmoduleBackend(t)
+		measured, err := f.backend.TurnSnapshot(t.Context(), "docker:ctr", f.previous)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(measured) != 1 || len(measured[0].Branches) != 3 || len(measured[0].Status.Submodules) != 2 || len(measured[0].TurnDiff) != 2 {
+			t.Fatalf("turn: %+v", measured)
+		}
+		if measured[0].TurnDiff[1].Path != "lib with space/nested/tracked.txt" {
+			t.Fatalf("delta paths: %+v", measured[0].TurnDiff)
+		}
+	})
 	t.Run("RefreshRefs", func(t *testing.T) {
 		t.Parallel()
 		t.Run("valid", func(t *testing.T) {
@@ -935,7 +1046,7 @@ func TestBackend(t *testing.T) {
 		}
 		gotFetchCalls := 0
 		for _, call := range ctr.calls {
-			if call == "Fetch" {
+			if call == "FetchRecursive" {
 				gotFetchCalls++
 			}
 		}
@@ -1534,6 +1645,29 @@ func TestRunPrePush(t *testing.T) {
 		}
 	})
 
+	t.Run("RetainedSubmodule", func(t *testing.T) {
+		t.Parallel()
+		b, root, _, _ := newRepo(t, "#!/bin/sh\nexit 1\n")
+		source := initStatusRepo(t)
+		commit := runTestGitOutput(t, source, "rev-parse", "HEAD")
+		runTestGitOutput(t, root, "-c", "protocol.file.allow=always", "submodule", "add", "--name", "retained-name", source, "child with space")
+		runTestGitOutput(t, root, "rm", "-f", "child with space")
+		gitDir := filepath.Join(root, ".git", "modules", "retained-name")
+		hook := "#!/bin/sh\ngit rev-parse HEAD\n"
+		if err := os.WriteFile(filepath.Join(gitDir, "hooks", "pre-push"), []byte(hook), 0o700); err != nil { //nolint:gosec // Fixture-owned executable hook.
+			t.Fatal(err)
+		}
+		refs := dest(commit)
+		refs.Submodule = &runtime.PushSubmodule{Path: "child with space", GitDir: "retained-name"}
+		var out bytes.Buffer
+		if err := b.RunPrePush(t.Context(), "docker:ctr", 0, commit, refs, &out); err != nil {
+			t.Fatal(err)
+		}
+		if got := out.String(); got != commit+"\n" {
+			t.Fatalf("submodule hook output = %q, want commit %s", got, commit)
+		}
+	})
+
 	t.Run("Streams", func(t *testing.T) {
 		t.Parallel()
 		release := filepath.Join(t.TempDir(), "release")
@@ -1672,7 +1806,7 @@ func TestTurnSnapshotBackend(t *testing.T) {
 		if measured[0].TurnDiff == nil || len(measured[0].TurnDiff) != 0 {
 			t.Fatalf("clean delta unavailable: %+v", measured[0])
 		}
-		if !slices.Equal(ct.calls, []string{"Fetch"}) {
+		if !slices.Equal(ct.calls, []string{"FetchRecursive"}) {
 			t.Fatalf("duplicated reference synchronization: %v", ct.calls)
 		}
 		if ct.fetchOpts.Commit {
@@ -1695,7 +1829,7 @@ func TestTurnSnapshotBackend(t *testing.T) {
 		if measured[0].StatusErr == nil {
 			t.Fatal("moving HEAD was published as current")
 		}
-		if !slices.Equal(ct.calls, []string{"Fetch"}) {
+		if !slices.Equal(ct.calls, []string{"FetchRecursive"}) {
 			t.Fatalf("duplicated reference synchronization: %v", ct.calls)
 		}
 		if ct.fetchOpts.Commit {
@@ -1758,4 +1892,66 @@ func BenchmarkReadFile(b *testing.B) {
 			}
 		})
 	}
+}
+
+type submoduleBackendFixture struct {
+	root        string
+	backend     *Backend
+	child       string
+	childCommit string
+	previous    []runtime.FetchedBranch
+	nested      string
+}
+
+func newSubmoduleBackend(t *testing.T) *submoduleBackendFixture {
+	root, child, nested := initStatusRepo(t), initStatusRepo(t), initStatusRepo(t)
+	previous := make([]runtime.FetchedBranch, 0, 3)
+	parent := &md.Submodule{
+		GitlinkPath: "lib with space", ContainerPath: child,
+		Children: md.SubmoduleTree{&md.Submodule{GitlinkPath: "nested", ContainerPath: nested}},
+	}
+	modules := md.SubmoduleTree{parent}
+	for _, module := range modules.ParentFirst() {
+		baseline := runTestGitOutput(t, module.ContainerPath, "rev-parse", "HEAD")
+		runTestGit(t, module.ContainerPath, "update-ref", "refs/md/sync/HEAD", baseline)
+		runTestGit(t, module.ContainerPath, "checkout", "--detach")
+		if err := os.WriteFile(filepath.Join(module.ContainerPath, "tracked.txt"), []byte("committed child content\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		runTestGit(t, module.ContainerPath, "add", ".")
+		runTestGit(t, module.ContainerPath, "commit", "-m", "Change child")
+		module.CommitHash = runTestGitOutput(t, module.ContainerPath, "rev-parse", "HEAD")
+		previous = append(previous, runtime.FetchedBranch{RepositoryPath: module.ContainerPath, CommitHash: baseline})
+	}
+	rootTip := runTestGitOutput(t, root, "rev-parse", "HEAD")
+	previous = append(previous, runtime.FetchedBranch{RepositoryPath: root, BranchName: "main", CommitHash: rootTip})
+	ct := &gitCommandContainer{repo: []md.Repo{{ContainerPath: root, Branches: []string{"main"}, DefaultRemote: "origin", DefaultBranch: "main"}}, modules: modules, fetchResults: [][]md.FetchedBranch{{{BranchName: "main", CommitHash: rootTip}}}}
+	backend := newTestBackend(&fakeMDClient{getResult: ct})
+
+	return &submoduleBackendFixture{root: root, backend: backend, child: child, childCommit: parent.CommitHash, previous: previous, nested: nested}
+}
+
+// BenchmarkBackend measures the local Git work for recursive compact
+// probes. Each descendant adds one independent Git probe; SSH discovery and
+// network latency are excluded by the local command fixture.
+func BenchmarkBackend(b *testing.B) {
+	b.Run("CompactRepositoryStatus", func(b *testing.B) {
+		for _, count := range []int{0, 1, 3} {
+			b.Run(fmt.Sprintf("children=%d", count), func(b *testing.B) {
+				root := initStatusRepo(b)
+				modules := make(md.SubmoduleTree, 0, count)
+				for i := range count {
+					modules = append(modules, &md.Submodule{GitlinkPath: fmt.Sprintf("lib-%d", i), ContainerPath: initStatusRepo(b)})
+				}
+				ct := &gitCommandContainer{repo: []md.Repo{{ContainerPath: root, DefaultRemote: "origin", DefaultBranch: "main"}}, modules: modules}
+				backend := newTestBackend(&fakeMDClient{getResult: ct})
+				b.ReportAllocs()
+				for b.Loop() {
+					if _, err := backend.CompactRepositoryStatus(b.Context(), "docker:ctr", 0); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+		}
+	})
 }

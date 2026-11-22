@@ -875,6 +875,26 @@ func TestNew(t *testing.T) {
 	})
 }
 
+// syncedSummaryBackend models the upstream advancing after successful publication.
+type syncedSummaryBackend struct {
+	runtimetest.FakeBackend
+
+	refreshed atomic.Bool
+}
+
+func (b *syncedSummaryBackend) RefreshRefs(context.Context, runtime.ID) error {
+	b.refreshed.Store(true)
+	return nil
+}
+
+func (b *syncedSummaryBackend) CompactRepositoryStatus(context.Context, runtime.ID, int) (runtime.RepositoryStatus, error) {
+	status := runtime.RepositoryStatus{Branch: "caic-0", DiffStat: []runtime.GitFileStat{{Path: "pending.go", LinesAdded: 1}}}
+	if !b.refreshed.Load() {
+		status.DiffStat = append(status.DiffStat, runtime.GitFileStat{Path: "committed.go", LinesAdded: 3})
+	}
+	return status, nil
+}
+
 func TestManager(t *testing.T) {
 	t.Run("TaskChanges", func(t *testing.T) {
 		t.Parallel()
@@ -3879,11 +3899,8 @@ func TestManager(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			backend := &runtimetest.FakeBackend{
-				DiffOutput:            "3\t0\tcommitted.go\n1\t0\tpending.go\n",
-				FetchedBranches:       []runtime.FetchedBranch{{RepositoryPath: "/home/user/src/repo", BranchName: "caic-0", CommitHash: strings.TrimSpace(string(out))}},
-				RepositoryStatusValue: runtime.RepositoryStatus{Branch: "caic-0", DiffStat: []runtime.GitFileStat{{Path: "pending.go", LinesAdded: 1}}},
-			}
+			backend := &syncedSummaryBackend{
+				FetchedBranches: []runtime.FetchedBranch{{RepositoryPath: "/home/user/src/repo", BranchName: "caic-0", CommitHash: strings.TrimSpace(string(out))}}}
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, backend, nil)})
 			registerCheckout(t, m.Checkouts, "repo", checkout)
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
@@ -3899,7 +3916,9 @@ func TestManager(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result.Status != "synced" || len(result.DiffStat) != 2 {
+			// The task branch is already published, so the push moves no ref and
+			// reports empty while still carrying the pre-push task report.
+			if result.Status != "empty" || len(result.DiffStat) != 2 {
 				t.Fatalf("sync must preserve its pre-push report: %+v", result)
 			}
 			if got := tk.Snapshot().DiffStat; len(got) != 1 || got[0].Path != "pending.go" {

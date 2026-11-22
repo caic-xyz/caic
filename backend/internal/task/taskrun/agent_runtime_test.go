@@ -1429,7 +1429,7 @@ else:
 				if err != nil {
 					t.Fatal(err)
 				}
-				compact, err := checkout.DiffStatAndRepoStates(t.Context(), logtest.Logger(t), runtimes, tk.GitTarget())
+				compact, err := checkout.DiffStat(t.Context(), logtest.Logger(t), runtimes, tk.GitTarget())
 				if err != nil {
 					t.Fatal(err)
 				}

@@ -386,6 +386,7 @@ func (h *taskHandlers) handleGetFileDiff(w http.ResponseWriter, r *http.Request)
 	}
 	resp, err := h.taskSvc.taskFileDiff(r.Context(), entry, v1.FileDiffReq{
 		Repository:   repository,
+		Submodule:    r.URL.Query().Get("submodule"),
 		Commit:       r.URL.Query().Get("commit"),
 		Path:         r.URL.Query().Get("path"),
 		OriginalPath: r.URL.Query().Get("originalPath"),

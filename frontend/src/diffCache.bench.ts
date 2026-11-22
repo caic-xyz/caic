@@ -60,7 +60,7 @@ bench(
         const taskId = `task-${task}`;
         return Promise.all([
           cache.loadIndex(taskId),
-          cache.loadPatch({ taskId, repository: "0", commit: "", path: "file.go", originalPath: "" }),
+          cache.loadPatch({ taskId, repository: "0", submodule: "", commit: "", path: "file.go", originalPath: "" }),
         ]);
       }),
     );
@@ -87,6 +87,7 @@ bench(
       await cache.loadPatch({
         taskId: "task",
         repository: "0",
+        submodule: "",
         commit: "immutable",
         path: `file-${file}`,
         originalPath: "",

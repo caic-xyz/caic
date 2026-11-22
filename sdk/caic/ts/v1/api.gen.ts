@@ -150,7 +150,7 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
     /** Returns repository and changed-file metadata without loading patch bodies. */
     getTaskDiffIndex: (id: string, signal?: AbortSignal): Promise<TaskDiffIndexResp> => request<TaskDiffIndexResp>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/diff/index`, undefined, undefined, signal),
     /** Returns one committed or uncommitted file patch. */
-    getTaskFileDiff: (id: string, repository: string, commit: string, path: string, originalPath: string, signal?: AbortSignal): Promise<FileDiffResp> => request<FileDiffResp>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/diff/file?repository=${encodeURIComponent(repository)}&commit=${encodeURIComponent(commit)}&path=${encodeURIComponent(path)}&originalPath=${encodeURIComponent(originalPath)}`, undefined, undefined, signal),
+    getTaskFileDiff: (id: string, repository: string, submodule: string, commit: string, path: string, originalPath: string, signal?: AbortSignal): Promise<FileDiffResp> => request<FileDiffResp>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/diff/file?repository=${encodeURIComponent(repository)}&submodule=${encodeURIComponent(submodule)}&commit=${encodeURIComponent(commit)}&path=${encodeURIComponent(path)}&originalPath=${encodeURIComponent(originalPath)}`, undefined, undefined, signal),
     /** Returns compact Git state for every repository mapped to a task. */
     getTaskRepoStatus: (id: string, signal?: AbortSignal): Promise<TaskRepoStatusResp> => request<TaskRepoStatusResp>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/repo-status`, undefined, undefined, signal),
     /** Returns the list of running processes inside the task's runtime instance. */

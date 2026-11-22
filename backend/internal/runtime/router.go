@@ -133,7 +133,7 @@ func (r *Router) Connect(ctx context.Context, id ID, opts *StartOptions) (conn C
 }
 
 // Diff returns a diff from the owning backend.
-func (r *Router) Diff(ctx context.Context, id ID, repoIdx int, args ...string) (out string, err error) {
+func (r *Router) Diff(ctx context.Context, id ID, repoIdx int, patch DiffPatch) (out string, err error) {
 	start := time.Now()
 	defer func() {
 		attrs := r.runtimeAttrs(id.RuntimeName())
@@ -146,7 +146,7 @@ func (r *Router) Diff(ctx context.Context, id ID, repoIdx int, args ...string) (
 	if err != nil {
 		return "", err
 	}
-	return rt.Diff(ctx, id, repoIdx, args...)
+	return rt.Diff(ctx, id, repoIdx, patch)
 }
 
 // TurnSnapshot fetches once and measures branch and turn changes on the owning backend.
@@ -161,14 +161,14 @@ func (r *Router) TurnSnapshot(ctx context.Context, id ID, previous []FetchedBran
 }
 
 // FileDiff returns one committed or uncommitted file patch from the owning backend.
-func (r *Router) FileDiff(ctx context.Context, id ID, repoIdx int, commit, path, originalPath string) (out string, err error) {
+func (r *Router) FileDiff(ctx context.Context, id ID, repoIdx int, submodule, commit, path, originalPath string) (out string, err error) {
 	start := time.Now()
 	defer func() { r.observe(ctx, metricRepoFileDiff, start, err, r.runtimeAttrs(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return "", err
 	}
-	return rt.FileDiff(ctx, id, repoIdx, commit, path, originalPath)
+	return rt.FileDiff(ctx, id, repoIdx, submodule, commit, path, originalPath)
 }
 
 // RepositoryStatus returns git branch, commit, and working-tree state from the

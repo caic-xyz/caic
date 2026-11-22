@@ -4,7 +4,7 @@ import { defined } from "@tests/history";
 import assert from "node:assert/strict";
 import type { JSX } from "solid-js";
 import { beforeEach, describe, it } from "node:test";
-import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import { fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { expect, vi } from "@tests/expect";
 
@@ -58,6 +58,7 @@ describe("DiffDetail", () => {
     expect(getTaskFileDiffMock).toHaveBeenCalledWith(
       "task-1",
       "0",
+      "",
       "1234567890abcdef1234567890abcdef12345678",
       "committed.go",
       "",
@@ -80,7 +81,7 @@ describe("DiffDetail", () => {
 
     expect(await screen.findByText("+new")).toBeInTheDocument();
     expect(getTaskFileDiffMock).toHaveBeenCalledTimes(1);
-    expect(getTaskFileDiffMock).toHaveBeenCalledWith("task-1", "0", "", "working.go", "old.go");
+    expect(getTaskFileDiffMock).toHaveBeenCalledWith("task-1", "0", "", "", "working.go", "old.go");
   });
 
   it("groups missing upstream commits separately and loads their patches on demand", async () => {
@@ -111,6 +112,7 @@ describe("DiffDetail", () => {
     expect(getTaskFileDiffMock).toHaveBeenCalledWith(
       "task-1",
       "0",
+      "",
       "abcdef1234567890abcdef1234567890abcdef12",
       "upstream.go",
       "",
@@ -120,6 +122,8 @@ describe("DiffDetail", () => {
   it("selects a file from the second repository by index", async () => {
     const index = diffIndexFixture();
     defined(index.repositories).push({
+      repository: 1,
+      submodule: "",
       name: "tools",
       branch: "feature",
       ahead: 0,
@@ -145,7 +149,50 @@ describe("DiffDetail", () => {
     fireEvent.click(await screen.findByRole("button", { name: "second.go" }));
 
     expect(await screen.findByText("+second")).toBeInTheDocument();
-    expect(getTaskFileDiffMock).toHaveBeenCalledWith("task-1", "1", "", "second.go", "");
+    expect(getTaskFileDiffMock).toHaveBeenCalledWith("task-1", "1", "", "", "second.go", "");
+  });
+
+  it("selects nested module patches by stable path and isolates the cache", async () => {
+    const index = diffIndexFixture();
+    const root = defined(index.repositories)[0];
+    assert.ok(root !== undefined);
+    const child = {
+      ...root,
+      submodule: "lib with space/nested",
+      upstream: "refs/md/sync/HEAD",
+      name: "caic/lib with space/nested",
+      branch: "",
+    };
+    defined(index.repositories).unshift(child);
+    getTaskDiffIndexMock.mockResolvedValueOnce(index);
+    getTaskFileDiffMock.mockImplementation(async (_id, _repository, submodule) => ({
+      diff: "@@ -0,0 +1 @@\n+" + (submodule ? "child content" : "root content"),
+    }));
+    renderWithRouter(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    const childRegion = await screen.findByRole("region", { name: child.name });
+    const rootRegion = screen.getByRole("region", { name: "caic" });
+    await userEvent.setup().click(within(childRegion).getByRole("button", { name: "committed.go" }));
+    expect(await screen.findByText("+child content")).toBeInTheDocument();
+    await userEvent.setup().click(within(rootRegion).getByRole("button", { name: "committed.go" }));
+    expect(await screen.findByText("+root content")).toBeInTheDocument();
+    expect(getTaskFileDiffMock).toHaveBeenCalledWith(
+      "task-1",
+      "0",
+      "lib with space/nested",
+      "1234567890abcdef1234567890abcdef12345678",
+      "committed.go",
+      "",
+    );
+    expect(getTaskFileDiffMock).toHaveBeenCalledWith(
+      "task-1",
+      "0",
+      "",
+      "1234567890abcdef1234567890abcdef12345678",
+      "committed.go",
+      "",
+    );
+    expect(within(childRegion).getByText("detached HEAD")).toBeInTheDocument();
+    expect(within(childRegion).getByText("last sync")).toBeInTheDocument();
   });
 
   it("keeps retry focus during loading and restores it to the row", async () => {
@@ -391,8 +438,8 @@ describe("DiffDetail", () => {
     fireEvent.click(row);
     const firstCall = getTaskFileDiffMock.mock.calls[0];
     assert.ok(firstCall !== undefined);
-    const [taskId, repository, commit, path, originalPath] = firstCall;
-    const settled = taskDiffCache.loadPatch({ taskId, repository, commit, path, originalPath });
+    const [taskId, repository, submodule, commit, path, originalPath] = firstCall;
+    const settled = taskDiffCache.loadPatch({ taskId, repository, submodule, commit, path, originalPath });
     fireEvent.click(row);
     pending.resolve({ diff: "@@ -0,0 +1 @@\n+" + "oversized".repeat(120_000) });
     await settled;
@@ -416,8 +463,8 @@ describe("DiffDetail", () => {
       fireEvent.click(row);
       const firstCall = getTaskFileDiffMock.mock.calls[0];
       assert.ok(firstCall !== undefined);
-      const [taskId, repository, commit, path, originalPath] = firstCall;
-      const settled = taskDiffCache.loadPatch({ taskId, repository, commit, path, originalPath });
+      const [taskId, repository, submodule, commit, path, originalPath] = firstCall;
+      const settled = taskDiffCache.loadPatch({ taskId, repository, submodule, commit, path, originalPath });
       fireEvent.click(row);
       pending.reject(Object.assign(new Error("obsolete collapsed failure"), { status }));
       await expect(settled).rejects.toThrow("obsolete collapsed failure");
@@ -427,7 +474,7 @@ describe("DiffDetail", () => {
       expect(getTaskFileDiffMock).toHaveBeenCalledTimes(2);
       expect(screen.queryByText("obsolete collapsed failure")).not.toBeInTheDocument();
       expect(screen.getByText("Loading file diff...")).toBeInTheDocument();
-      const current = taskDiffCache.loadPatch({ taskId, repository, commit, path, originalPath });
+      const current = taskDiffCache.loadPatch({ taskId, repository, submodule, commit, path, originalPath });
       const err = Object.assign(new Error("current expanded failure"), { status });
       reopened.reject(err);
       await expect(current).rejects.toThrow("current expanded failure");
@@ -450,8 +497,8 @@ describe("DiffDetail", () => {
     fireEvent.click(await screen.findByRole("button", { name: "committed.go" }));
     const firstCall = getTaskFileDiffMock.mock.calls[0];
     assert.ok(firstCall !== undefined);
-    const [taskId, repository, commit, path, originalPath] = firstCall;
-    const settled = taskDiffCache.loadPatch({ taskId, repository, commit, path, originalPath });
+    const [taskId, repository, submodule, commit, path, originalPath] = firstCall;
+    const settled = taskDiffCache.loadPatch({ taskId, repository, submodule, commit, path, originalPath });
     old.unmount();
     taskDiffCache.clear();
     const err = Object.assign(new Error("old account task missing"), { status: 404 });
@@ -481,8 +528,8 @@ describe("DiffDetail", () => {
     expect(getTaskFileDiffMock).toHaveBeenCalledTimes(1);
     const firstCall = getTaskFileDiffMock.mock.calls[0];
     assert.ok(firstCall !== undefined);
-    const [taskId, repository, commit, path, originalPath] = firstCall;
-    const settled = taskDiffCache.loadPatch({ taskId, repository, commit, path, originalPath });
+    const [taskId, repository, submodule, commit, path, originalPath] = firstCall;
+    const settled = taskDiffCache.loadPatch({ taskId, repository, submodule, commit, path, originalPath });
 
     taskDiffCache.invalidate("task-1");
     expect(await screen.findByText(/1 commit ahead · 2 behind/)).toBeInTheDocument();
@@ -519,6 +566,8 @@ describe("DiffDetail", () => {
     getTaskDiffIndexMock.mockResolvedValueOnce({
       repositories: [
         {
+          repository: 0,
+          submodule: "",
           name: "caic",
           branch: "caic-42",
           upstream: "origin/main",
@@ -585,7 +634,7 @@ describe("DiffDetail", () => {
         },
       ],
     });
-    getTaskFileDiffMock.mockImplementation(async (_id, _repository, _commit, path) => ({
+    getTaskFileDiffMock.mockImplementation(async (_id, _repository, _submodule, _commit, path) => ({
       diff:
         path === "frontend/view.tsx"
           ? "@@ -1 +1 @@\n-old view\n+new view"
@@ -634,6 +683,8 @@ describe("DiffDetail", () => {
     getTaskDiffIndexMock.mockResolvedValueOnce({
       repositories: [
         {
+          repository: 0,
+          submodule: "",
           name: "caic",
           branch: "feature",
           upstream: "origin/main",
@@ -678,6 +729,8 @@ describe("DiffDetail", () => {
     getTaskDiffIndexMock.mockResolvedValueOnce({
       repositories: [
         {
+          repository: 0,
+          submodule: "",
           name: "caic",
           branch,
           upstream,
@@ -734,6 +787,8 @@ function diffIndexFixture(): TaskDiffIndexResp {
   return {
     repositories: [
       {
+        repository: 0,
+        submodule: "",
         name: "caic",
         branch: "feature",
         upstream: "origin/main",

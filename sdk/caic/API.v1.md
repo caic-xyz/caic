@@ -1102,6 +1102,8 @@ GitRepositoryState summarizes the compact Git state of one task repository.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
+| `repository` | `int` | Repository indexes the task's mapped repositories, independently of response ordering. | yes |
+| `submodule` | `string` | Submodule is an initialized descendant path relative to that mapping, or empty for the mapped root. | yes |
 | `stale` | `boolean` | Last known data retained after a failed refresh. |  |
 | `name` | `string` |  | yes |
 | `branch` | `string` |  | yes |
@@ -1470,7 +1472,7 @@ SyncResp is the response for POST /api/caic/v1/tasks/{id}/sync.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `status` | `string` | "synced", "blocked", or "empty" | yes |
+| `status` | `string` | "synced", "blocked", or "empty" when no destination ref moved | yes |
 | `branch` | `string` |  |  |
 | `diffStat` | `DiffStat` |  |  |
 | `safetyIssues` | `SafetyIssue[]` |  |  |
@@ -1537,6 +1539,8 @@ GitRepositoryStatus describes the checked-out state of one task repository.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
+| `repository` | `int` | Repository indexes the task's mapped repositories, independently of response ordering. | yes |
+| `submodule` | `string` | Submodule is an initialized descendant path relative to that mapping, or empty for the mapped root. | yes |
 | `name` | `string` |  | yes |
 | `branch` | `string` |  | yes |
 | `upstream` | `string` |  |  |
@@ -1600,6 +1604,8 @@ DiffIndexRepository describes one repository in a diff index.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
+| `repository` | `int` | Repository indexes the task's mapped repositories, independently of response ordering. | yes |
+| `submodule` | `string` | Submodule is an initialized descendant path relative to that mapping, or empty for the mapped root. | yes |
 | `name` | `string` |  | yes |
 | `branch` | `string` |  | yes |
 | `upstream` | `string` |  |  |

@@ -130,7 +130,7 @@ func (f *FakeBackend) Connect(ctx context.Context, id runtime.ID, opts *runtime.
 }
 
 // Diff implements runtime.Repository.
-func (f *FakeBackend) Diff(ctx context.Context, id runtime.ID, repoIdx int, args ...string) (string, error) {
+func (f *FakeBackend) Diff(ctx context.Context, id runtime.ID, repoIdx int, patch runtime.DiffPatch) (string, error) {
 	return f.DiffOutput, nil
 }
 
@@ -155,7 +155,7 @@ func (f *FakeBackend) TurnSnapshot(ctx context.Context, id runtime.ID, previous 
 }
 
 // FileDiff implements runtime.Repository.
-func (f *FakeBackend) FileDiff(context.Context, runtime.ID, int, string, string, string) (string, error) {
+func (f *FakeBackend) FileDiff(context.Context, runtime.ID, int, string, string, string, string) (string, error) {
 	return f.FileDiffOutput, nil
 }
 
@@ -370,7 +370,7 @@ func (s *RepositorySpy) RepositoryStatus(ctx context.Context, id runtime.ID, i i
 }
 
 // FileDiff records a patch read and delegates to the fake.
-func (s *RepositorySpy) FileDiff(ctx context.Context, id runtime.ID, i int, sha, p, old string) (string, error) {
+func (s *RepositorySpy) FileDiff(ctx context.Context, id runtime.ID, i int, submodule, sha, p, old string) (string, error) {
 	s.PatchReads.Add(1)
-	return s.FakeBackend.FileDiff(ctx, id, i, sha, p, old)
+	return s.FakeBackend.FileDiff(ctx, id, i, submodule, sha, p, old)
 }

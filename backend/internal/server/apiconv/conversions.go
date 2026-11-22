@@ -311,6 +311,7 @@ func RepoStates(states []logv3.RepoState, repos []v1.TaskRepo) []v1.GitRepositor
 			continue
 		}
 		out = append(out, v1.GitRepositoryState{
+			Repository:       state.RepoIndex,
 			Name:             repos[state.RepoIndex].Name,
 			Stale:            state.Stale,
 			Branch:           state.Branch,

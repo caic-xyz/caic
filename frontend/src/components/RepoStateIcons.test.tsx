@@ -37,6 +37,8 @@ it("renders dense markers with an accessible state summary", () => {
   renderWithRouter(() => (
     <RepoStateIcons
       state={{
+        repository: 0,
+        submodule: "",
         name: "repo",
         branch: "main",
         ahead: 2,
@@ -65,6 +67,8 @@ it("does not render a clean repository", () => {
   renderWithRouter(() => (
     <RepoStateIcons
       state={{
+        repository: 0,
+        submodule: "",
         name: "repo",
         branch: "main",
         ahead: 0,
@@ -85,6 +89,8 @@ it("elides line totals when its row overflows", async () => {
   renderWithRouter(() => (
     <RepoStateIcons
       state={{
+        repository: 0,
+        submodule: "",
         name: "repo",
         branch: "main",
         ahead: 1,
@@ -118,6 +124,8 @@ it("accepts a parent layout request to elide line totals", () => {
     <RepoStateIcons
       elideDiffStats
       state={{
+        repository: 0,
+        submodule: "",
         name: "repo",
         branch: "main",
         ahead: 1,
@@ -141,6 +149,8 @@ it("links a state marker to its repository diff", () => {
     <RepoStateIcons
       href="/task/@abc+task/diff"
       state={{
+        repository: 0,
+        submodule: "",
         name: "repo",
         branch: "main",
         ahead: 1,
@@ -169,6 +179,8 @@ it("reports keyboard and pointer navigation intent", () => {
       href="/task/@abc+task/diff"
       onNavigateIntent={onNavigateIntent}
       state={{
+        repository: 0,
+        submodule: "",
         name: "repo",
         branch: "main",
         ahead: 1,
@@ -192,6 +204,8 @@ it("keeps stale clean summaries visible and explains retained counts", () => {
   renderWithRouter(() => (
     <RepoStateIcons
       state={{
+        repository: 0,
+        submodule: "",
         name: "repo",
         branch: "main",
         stale: true,

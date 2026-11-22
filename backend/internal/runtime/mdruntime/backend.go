@@ -77,11 +77,12 @@ type mdContainer interface {
 	SetName(name string)
 	VNCPort() int32
 	Repos() []md.Repo
+	DiscoverSubmodules(ctx context.Context, repoIdx int) (md.SubmoduleTree, error)
+	FetchRecursive(ctx context.Context, stdout, stderr io.Writer, repoIdx int, opts *md.FetchOpts) (md.FetchedRepository, error)
 	AgentMounts(paths ...md.AgentPaths) ([]md.Mount, error)
 	Launch(ctx context.Context, stdout, stderr io.Writer, opts *md.StartOpts) error
 	Connect(ctx context.Context, stdout, stderr io.Writer, opts *md.StartOpts) (*md.StartResult, error)
 	Diff(ctx context.Context, stdout, stderr io.Writer, repoIdx int, opts *md.DiffOpts) error
-	Fetch(ctx context.Context, stdout, stderr io.Writer, repoIdx int, opts *md.FetchOpts) ([]md.FetchedBranch, error)
 	SyncDefaultBranch(ctx context.Context, repoIdx int) error
 	Stop(ctx context.Context) error
 	Purge(ctx context.Context, stdout, stderr io.Writer) error
@@ -382,11 +383,15 @@ func (a mdContainerAdapter) Connect(ctx context.Context, stdout, stderr io.Write
 }
 
 func (a mdContainerAdapter) Diff(ctx context.Context, stdout, stderr io.Writer, repoIdx int, opts *md.DiffOpts) error {
-	return a.c.Diff(ctx, stdout, stderr, repoIdx, opts)
+	return a.c.Diff(ctx, stdout, stderr, md.RepoTarget{RepoIndex: repoIdx}, opts)
 }
 
-func (a mdContainerAdapter) Fetch(ctx context.Context, stdout, stderr io.Writer, repoIdx int, opts *md.FetchOpts) ([]md.FetchedBranch, error) {
-	return a.c.Fetch(ctx, stdout, stderr, repoIdx, opts)
+func (a mdContainerAdapter) DiscoverSubmodules(ctx context.Context, repoIdx int) (md.SubmoduleTree, error) {
+	return a.c.DiscoverSubmodules(ctx, repoIdx)
+}
+
+func (a mdContainerAdapter) FetchRecursive(ctx context.Context, stdout, stderr io.Writer, repoIdx int, opts *md.FetchOpts) (md.FetchedRepository, error) {
+	return a.c.FetchRecursive(ctx, stdout, stderr, repoIdx, opts)
 }
 
 func (a mdContainerAdapter) SyncDefaultBranch(ctx context.Context, repoIdx int) error {
@@ -544,34 +549,8 @@ func (b *Backend) Connect(ctx context.Context, id runtime.ID, opts *runtime.Star
 }
 
 // Diff implements runtime.Repository.
-func (b *Backend) Diff(ctx context.Context, id runtime.ID, repoIdx int, args ...string) (string, error) {
+func (b *Backend) Diff(ctx context.Context, id runtime.ID, repoIdx int, patch runtime.DiffPatch) (string, error) {
 	defer trace.StartRegion(ctx, "instance.diff").End()
-	localID, err := b.localID(id)
-	if err != nil {
-		return "", err
-	}
-	name := string(localID)
-	ct, err := b.container(ctx, name)
-	if err != nil {
-		return "", err
-	}
-	repos := ct.Repos()
-	if repoIdx < 0 || repoIdx >= len(repos) {
-		return "", fmt.Errorf("repo index %d out of range for %d repos", repoIdx, len(repos))
-	}
-	repo := &repos[repoIdx]
-	b.log.DebugContext(ctx, "md diff", "ctr", name, "dir", repo.GitRoot, "br", primaryBranch(repo), "args", args)
-	var stdout bytes.Buffer
-	// The task view shows everything the task did, so it asks for the whole
-	// branch rather than the work since md last synchronized with the host.
-	if err := ct.Diff(ctx, &stdout, &SlogWriter{Context: ctx, Logger: b.log, Phase: "diff"}, repoIdx, &md.DiffOpts{Args: args, Full: true}); err != nil {
-		return "", err
-	}
-	return stdout.String(), nil
-}
-
-// FileDiff implements runtime.Repository.
-func (b *Backend) FileDiff(ctx context.Context, id runtime.ID, repoIdx int, commit, path, originalPath string) (string, error) {
 	localID, err := b.localID(id)
 	if err != nil {
 		return "", err
@@ -584,7 +563,79 @@ func (b *Backend) FileDiff(ctx context.Context, id runtime.ID, repoIdx int, comm
 	if repoIdx < 0 || repoIdx >= len(repos) {
 		return "", fmt.Errorf("repo index %d out of range for %d repos", repoIdx, len(repos))
 	}
-	cmd, err := gitFileDiffCommand(repos[repoIdx].ContainerPath, commit, path, originalPath)
+	var stdout bytes.Buffer
+	if err := ct.Diff(ctx, &stdout, &SlogWriter{Context: ctx, Logger: b.log, Phase: "diff"}, repoIdx, &md.DiffOpts{Args: patchArgs(patch), Full: true}); err != nil {
+		return "", err
+	}
+	modules, err := ct.DiscoverSubmodules(ctx, repoIdx)
+	if err != nil {
+		return "", err
+	}
+	for modulePath, module := range modules.ParentFirst() {
+		child, ok := childPatch(patch, modulePath)
+		if !ok {
+			continue
+		}
+		args := patchArgs(child)
+		quoted := make([]string, len(args))
+		for i, arg := range args {
+			quoted[i] = shellQuote(arg)
+		}
+		cmd := "{ " + gitStatusHeader(module.ContainerPath, "refs/md/sync/HEAD") + "; } >/dev/null && " + untrackedDiffSetup() +
+			` && untracked_diff ` + gitPatchCommand("diff") + ` "${diff_base:-HEAD}" ` + strings.Join(quoted, " ")
+		res, err := b.commandOutput(ctx, ct, cmd)
+		if err != nil {
+			return "", fmt.Errorf("diff submodule %s: %w", modulePath, commandOutputError("git diff", ct, err, res.Stderr))
+		}
+		stdout.Write(res.Stdout)
+	}
+	return stdout.String(), nil
+}
+
+// childPatch narrows parent to the descendant at modulePath. It reports false
+// when parent selects a path outside that descendant.
+func childPatch(parent runtime.DiffPatch, modulePath string) (runtime.DiffPatch, bool) {
+	mapped := runtime.DiffPatch{Prefix: modulePath}
+	if parent.Prefix != "" {
+		mapped.Prefix = parent.Prefix + "/" + modulePath
+	}
+	switch {
+	case parent.Path == "", parent.Path == modulePath, strings.HasPrefix(modulePath, parent.Path+"/"):
+		return mapped, true
+	case strings.HasPrefix(parent.Path, modulePath+"/"):
+		mapped.Path = strings.TrimPrefix(parent.Path, modulePath+"/")
+		return mapped, true
+	}
+	return runtime.DiffPatch{}, false
+}
+
+// FileDiff implements runtime.Repository.
+func (b *Backend) FileDiff(ctx context.Context, id runtime.ID, repoIdx int, submodule, commit, path, originalPath string) (string, error) {
+	localID, err := b.localID(id)
+	if err != nil {
+		return "", err
+	}
+	ct, err := b.container(ctx, string(localID))
+	if err != nil {
+		return "", err
+	}
+	repos := ct.Repos()
+	if repoIdx < 0 || repoIdx >= len(repos) {
+		return "", fmt.Errorf("repo index %d out of range for %d repos", repoIdx, len(repos))
+	}
+	dir := repos[repoIdx].ContainerPath
+	if submodule != "" {
+		modules, err := ct.DiscoverSubmodules(ctx, repoIdx)
+		if err != nil {
+			return "", err
+		}
+		module, ok := modules.Find(submodule)
+		if !ok {
+			return "", fmt.Errorf("submodule %q is not initialized", submodule)
+		}
+		dir = module.ContainerPath
+	}
+	cmd, err := gitFileDiffCommand(dir, commit, path, originalPath)
 	if err != nil {
 		return "", err
 	}
@@ -626,15 +677,16 @@ func (b *Backend) TurnSnapshot(ctx context.Context, id runtime.ID, previous []ru
 		r := &repos[i]
 		entry := &out[i]
 		entry.RepoIndex = i
-		branches, err := ct.Fetch(ctx, &SlogWriter{Context: ctx, Logger: b.log, Phase: "turn-fetch"}, &SlogWriter{Context: ctx, Logger: b.log, Phase: "turn-fetch"}, i, &md.FetchOpts{})
+		fetched, err := ct.FetchRecursive(ctx, &SlogWriter{Context: ctx, Logger: b.log, Phase: "turn-fetch"}, &SlogWriter{Context: ctx, Logger: b.log, Phase: "turn-fetch"}, i, &md.FetchOpts{})
 		if err != nil {
 			return nil, fmt.Errorf("fetch turn repository %s: %w", r.ContainerPath, err)
 		}
+		entry.Branches = appendFetchedBranches(entry.Branches, r.ContainerPath, &fetched)
 		to := ""
-		for _, branch := range branches {
-			entry.Branches = append(entry.Branches, runtime.FetchedBranch{RepositoryPath: r.ContainerPath, BranchName: branch.BranchName, CommitHash: branch.CommitHash})
+		for _, branch := range fetched.Branches {
 			if branch.BranchName == primaryBranch(r) {
 				to = branch.CommitHash
+				break
 			}
 		}
 		from := ""
@@ -644,13 +696,52 @@ func (b *Backend) TurnSnapshot(ctx context.Context, id runtime.ID, previous []ru
 				break
 			}
 		}
-		cmd, err := turnGitCommand(r.ContainerPath, r.DefaultRemote, r.DefaultBranch, from, to)
+		cmd, err := turnGitCommand(r.ContainerPath, gitComparisonRef(r.DefaultRemote, r.DefaultBranch), from, to)
 		if err == nil {
 			res, runErr := b.commandOutput(ctx, ct, cmd)
 			if runErr != nil {
 				err = commandOutputError("turn git snapshot", ct, runErr, res.Stderr)
 			} else {
 				entry.Status, entry.TurnDiff, err = parseTurnGit(string(res.Stdout))
+			}
+		}
+		if err == nil {
+			for _, child := range entry.Branches {
+				if child.Submodule == "" {
+					continue
+				}
+				childFrom := ""
+				for _, prior := range previous {
+					if prior.RepositoryPath == child.RepositoryPath {
+						childFrom = prior.CommitHash
+						break
+					}
+				}
+				childCmd, childErr := turnGitCommand(child.RepositoryPath, "refs/md/sync/HEAD", childFrom, child.CommitHash)
+				var childStatus runtime.RepositoryStatus
+				var childDiff []runtime.GitFileStat
+				if childErr == nil {
+					result, runErr := b.commandOutput(ctx, ct, childCmd)
+					if runErr != nil {
+						childErr = commandOutputError("turn submodule snapshot", ct, runErr, result.Stderr)
+					} else {
+						childStatus, childDiff, childErr = parseTurnGit(string(result.Stdout))
+					}
+				}
+				if childErr != nil {
+					err = fmt.Errorf("submodule %s: %w", child.Submodule, childErr)
+					break
+				}
+				entry.Status.Submodules = append(entry.Status.Submodules, runtime.SubmoduleStatus{Path: child.Submodule, Status: childStatus})
+				if childFrom == "" || childDiff == nil {
+					entry.TurnDiff = nil
+					from = ""
+				} else if entry.TurnDiff != nil {
+					for _, file := range childDiff {
+						file.Path = child.Submodule + "/" + file.Path
+						entry.TurnDiff = append(entry.TurnDiff, file)
+					}
+				}
 			}
 		}
 		if err == nil && from != "" && entry.TurnDiff == nil {
@@ -679,7 +770,7 @@ func (b *Backend) RunPrePush(ctx context.Context, id runtime.ID, repoIdx int, co
 	if repoIdx < 0 || repoIdx >= len(repos) {
 		return fmt.Errorf("repo index %d out of range for %d repos", repoIdx, len(repos))
 	}
-	cmd, err := prePushCommand(repos[repoIdx].ContainerPath, commit, dest)
+	cmd, err := prePushCommand(md.ResolveContainerPath(repos[repoIdx].ContainerPath), commit, dest)
 	if err != nil {
 		return err
 	}
@@ -721,17 +812,11 @@ func (b *Backend) Fetch(ctx context.Context, id runtime.ID, opts runtime.FetchOp
 	mdOpts := &md.FetchOpts{Provider: b.Provider, Commit: opts.Commit}
 	fetched := make([]runtime.FetchedBranch, 0, len(repos))
 	for i := range repos {
-		branches, err := ct.Fetch(ctx, &SlogWriter{Context: ctx, Logger: b.log, Phase: "fetch"}, &SlogWriter{Context: ctx, Logger: b.log, Phase: "fetch"}, i, mdOpts)
+		snapshot, err := ct.FetchRecursive(ctx, &SlogWriter{Context: ctx, Logger: b.log, Phase: "fetch"}, &SlogWriter{Context: ctx, Logger: b.log, Phase: "fetch"}, i, mdOpts)
 		if err != nil {
 			return nil, err
 		}
-		for _, branch := range branches {
-			fetched = append(fetched, runtime.FetchedBranch{
-				RepositoryPath: repos[i].ContainerPath,
-				BranchName:     branch.BranchName,
-				CommitHash:     branch.CommitHash,
-			})
-		}
+		fetched = appendFetchedBranches(fetched, repos[i].ContainerPath, &snapshot)
 	}
 	return fetched, nil
 }
@@ -1398,13 +1483,34 @@ func (b *Backend) commandOutput(ctx context.Context, ct mdContainer, command str
 	return commandResult{Stdout: stdout.Bytes(), Stderr: stderr.Bytes()}, err
 }
 
+// appendFetchedBranches projects md's tree and root tips into runtime entries.
+func appendFetchedBranches(out []runtime.FetchedBranch, repoPath string, fetched *md.FetchedRepository) []runtime.FetchedBranch {
+	for modulePath, child := range fetched.Submodules.ParentFirst() {
+		out = append(out, runtime.FetchedBranch{
+			RepositoryPath: child.ContainerPath,
+			Submodule:      modulePath,
+			GitDir:         child.GitDir,
+			BranchName:     child.BranchName,
+			CommitHash:     child.CommitHash,
+		})
+	}
+	for _, branch := range fetched.Branches {
+		out = append(out, runtime.FetchedBranch{
+			RepositoryPath: repoPath,
+			BranchName:     branch.BranchName,
+			CommitHash:     branch.CommitHash,
+		})
+	}
+	return out
+}
+
 // repositoryStatusFromProbe runs one git status command in the container and
 // parses its report.
 func (b *Backend) repositoryStatusFromProbe(
 	ctx context.Context,
 	id runtime.ID,
 	repoIdx int,
-	command func(repo, defaultRemote, defaultBranch string) string,
+	command func(repo, comparison string) string,
 	parse func(string) (runtime.RepositoryStatus, error),
 ) (runtime.RepositoryStatus, error) {
 	localID, err := b.localID(id)
@@ -1420,13 +1526,28 @@ func (b *Backend) repositoryStatusFromProbe(
 		return runtime.RepositoryStatus{}, fmt.Errorf("repo index %d out of range for %d repos", repoIdx, len(repos))
 	}
 	repo := &repos[repoIdx]
-	res, err := b.commandOutput(ctx, ct, command(repo.ContainerPath, repo.DefaultRemote, repo.DefaultBranch))
+	res, err := b.commandOutput(ctx, ct, command(repo.ContainerPath, gitComparisonRef(repo.DefaultRemote, repo.DefaultBranch)))
 	if err != nil {
 		return runtime.RepositoryStatus{}, commandOutputError("git status", ct, err, res.Stderr)
 	}
 	status, err := parse(string(res.Stdout))
 	if err != nil {
 		return runtime.RepositoryStatus{}, fmt.Errorf("parse git status in container %s: %w", ct.Name(), err)
+	}
+	modules, err := ct.DiscoverSubmodules(ctx, repoIdx)
+	if err != nil {
+		return runtime.RepositoryStatus{}, err
+	}
+	for modulePath, module := range modules.ParentFirst() {
+		res, err := b.commandOutput(ctx, ct, command(module.ContainerPath, "refs/md/sync/HEAD"))
+		if err != nil {
+			return runtime.RepositoryStatus{}, fmt.Errorf("submodule %s: %w", modulePath, commandOutputError("git status", ct, err, res.Stderr))
+		}
+		child, err := parse(string(res.Stdout))
+		if err != nil {
+			return runtime.RepositoryStatus{}, fmt.Errorf("submodule %s: %w", modulePath, err)
+		}
+		status.Submodules = append(status.Submodules, runtime.SubmoduleStatus{Path: modulePath, Status: child})
 	}
 	return status, nil
 }

@@ -1978,6 +1978,10 @@ public struct DiffFileStat: Codable {
 
 /// GitRepositoryState summarizes the compact Git state of one task repository.
 public struct GitRepositoryState: Codable {
+    /// Repository indexes the task's mapped repositories, independently of response ordering.
+    public let repository: Int
+    /// Submodule is an initialized descendant path relative to that mapping, or empty for the mapped root.
+    public let submodule: String
     /// Last known data retained after a failed refresh.
     public let stale: Bool?
     public let name: String
@@ -1991,7 +1995,9 @@ public struct GitRepositoryState: Codable {
     public let conflicts: Int
     public let operation: GitOperation?
 
-    public init(stale: Bool? = nil, name: String, branch: String, ahead: Int, behind: Int, changedFiles: Int, linesAdded: Int, linesDeleted: Int, uncommittedFiles: Int, conflicts: Int, operation: GitOperation? = nil) {
+    public init(repository: Int, submodule: String, stale: Bool? = nil, name: String, branch: String, ahead: Int, behind: Int, changedFiles: Int, linesAdded: Int, linesDeleted: Int, uncommittedFiles: Int, conflicts: Int, operation: GitOperation? = nil) {
+        self.repository = repository
+        self.submodule = submodule
         self.stale = stale
         self.name = name
         self.branch = branch
@@ -2810,7 +2816,7 @@ public struct SafetyIssue: Codable {
 
 /// SyncResp is the response for POST /api/caic/v1/tasks/{id}/sync.
 public struct SyncResp: Codable {
-    /// "synced", "blocked", or "empty"
+    /// "synced", "blocked", or "empty" when no destination ref moved
     public let status: String
     public let branch: String?
     public let diffStat: DiffStat?
@@ -2952,6 +2958,10 @@ public struct GitFileStatus: Codable {
 
 /// GitRepositoryStatus describes the checked-out state of one task repository.
 public struct GitRepositoryStatus: Codable {
+    /// Repository indexes the task's mapped repositories, independently of response ordering.
+    public let repository: Int
+    /// Submodule is an initialized descendant path relative to that mapping, or empty for the mapped root.
+    public let submodule: String
     public let name: String
     public let branch: String
     public let upstream: String?
@@ -2961,6 +2971,8 @@ public struct GitRepositoryStatus: Codable {
     public let uncommitted: [GitFileStatus]?
 
     private enum CodingKeys: String, CodingKey {
+        case repository
+        case submodule
         case name
         case branch
         case upstream
@@ -2970,7 +2982,9 @@ public struct GitRepositoryStatus: Codable {
         case uncommitted
     }
 
-    public init(name: String, branch: String, upstream: String? = nil, ahead: Int, behind: Int, commits: [GitCommit]?, uncommitted: [GitFileStatus]?) {
+    public init(repository: Int, submodule: String, name: String, branch: String, upstream: String? = nil, ahead: Int, behind: Int, commits: [GitCommit]?, uncommitted: [GitFileStatus]?) {
+        self.repository = repository
+        self.submodule = submodule
         self.name = name
         self.branch = branch
         self.upstream = upstream
@@ -2982,6 +2996,8 @@ public struct GitRepositoryStatus: Codable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.repository = try c.decode(Int.self, forKey: .repository)
+        self.submodule = try c.decode(String.self, forKey: .submodule)
         self.name = try c.decode(String.self, forKey: .name)
         self.branch = try c.decode(String.self, forKey: .branch)
         self.upstream = try c.decodeIfPresent(String.self, forKey: .upstream)
@@ -2993,6 +3009,8 @@ public struct GitRepositoryStatus: Codable {
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.repository, forKey: .repository)
+        try c.encode(self.submodule, forKey: .submodule)
         try c.encode(self.name, forKey: .name)
         try c.encode(self.branch, forKey: .branch)
         try c.encodeIfPresent(self.upstream, forKey: .upstream)
@@ -3126,6 +3144,10 @@ public struct DiffIndexFileStatus: Codable {
 
 /// DiffIndexRepository describes one repository in a diff index.
 public struct DiffIndexRepository: Codable {
+    /// Repository indexes the task's mapped repositories, independently of response ordering.
+    public let repository: Int
+    /// Submodule is an initialized descendant path relative to that mapping, or empty for the mapped root.
+    public let submodule: String
     public let name: String
     public let branch: String
     public let upstream: String?
@@ -3135,6 +3157,8 @@ public struct DiffIndexRepository: Codable {
     public let uncommitted: [DiffIndexFileStatus]?
 
     private enum CodingKeys: String, CodingKey {
+        case repository
+        case submodule
         case name
         case branch
         case upstream
@@ -3144,7 +3168,9 @@ public struct DiffIndexRepository: Codable {
         case uncommitted
     }
 
-    public init(name: String, branch: String, upstream: String? = nil, ahead: Int, behind: Int, commits: [DiffIndexCommit]?, uncommitted: [DiffIndexFileStatus]?) {
+    public init(repository: Int, submodule: String, name: String, branch: String, upstream: String? = nil, ahead: Int, behind: Int, commits: [DiffIndexCommit]?, uncommitted: [DiffIndexFileStatus]?) {
+        self.repository = repository
+        self.submodule = submodule
         self.name = name
         self.branch = branch
         self.upstream = upstream
@@ -3156,6 +3182,8 @@ public struct DiffIndexRepository: Codable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.repository = try c.decode(Int.self, forKey: .repository)
+        self.submodule = try c.decode(String.self, forKey: .submodule)
         self.name = try c.decode(String.self, forKey: .name)
         self.branch = try c.decode(String.self, forKey: .branch)
         self.upstream = try c.decodeIfPresent(String.self, forKey: .upstream)
@@ -3167,6 +3195,8 @@ public struct DiffIndexRepository: Codable {
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.repository, forKey: .repository)
+        try c.encode(self.submodule, forKey: .submodule)
         try c.encode(self.name, forKey: .name)
         try c.encode(self.branch, forKey: .branch)
         try c.encodeIfPresent(self.upstream, forKey: .upstream)

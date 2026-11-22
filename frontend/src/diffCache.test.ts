@@ -10,6 +10,7 @@ const emptyIndex = (): TaskDiffIndexResp => ({ repositories: [] });
 const selector = (taskId: string, commit: string): FileDiffSelector => ({
   taskId,
   repository: "0",
+  submodule: "",
   commit,
   path: "file.go",
   originalPath: "",
@@ -91,6 +92,8 @@ describe("DiffCache", () => {
     const refreshed: TaskDiffIndexResp = {
       repositories: [
         {
+          repository: 0,
+          submodule: "",
           name: "repo",
           branch: "main",
           ahead: 0,
@@ -222,6 +225,8 @@ describe("DiffCache", () => {
     resolveOld({
       repositories: [
         {
+          repository: 0,
+          submodule: "",
           name: "obsolete",
           branch: "main",
           ahead: 0,
@@ -248,7 +253,16 @@ describe("DiffCache", () => {
     });
     loadIndex.mockResolvedValue({
       repositories: [
-        { name: "index-metadata-".repeat(3), branch: "main", ahead: 0, behind: 0, commits: [], uncommitted: [] },
+        {
+          repository: 0,
+          submodule: "",
+          name: "index-metadata-".repeat(3),
+          branch: "main",
+          ahead: 0,
+          behind: 0,
+          commits: [],
+          uncommitted: [],
+        },
       ],
     });
     loadPatch.mockResolvedValue({ diff: "unique-patch-body-".repeat(3) });
@@ -271,7 +285,16 @@ describe("DiffCache", () => {
     });
     const large: TaskDiffIndexResp = {
       repositories: [
-        { name: "oversized-metadata-".repeat(20), branch: "main", ahead: 0, behind: 0, commits: [], uncommitted: [] },
+        {
+          repository: 0,
+          submodule: "",
+          name: "oversized-metadata-".repeat(20),
+          branch: "main",
+          ahead: 0,
+          behind: 0,
+          commits: [],
+          uncommitted: [],
+        },
       ],
     };
     loadIndex.mockResolvedValue(large);
@@ -307,7 +330,16 @@ describe("DiffCache", () => {
     expect(cache.loadIndex("task")).toBe(load);
     pending.resolve({
       repositories: [
-        { name: "oversized-metadata-".repeat(20), branch: "main", ahead: 0, behind: 0, commits: [], uncommitted: [] },
+        {
+          repository: 0,
+          submodule: "",
+          name: "oversized-metadata-".repeat(20),
+          branch: "main",
+          ahead: 0,
+          behind: 0,
+          commits: [],
+          uncommitted: [],
+        },
       ],
     });
     await load;

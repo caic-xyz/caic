@@ -110,7 +110,7 @@ const (
 
 // SyncResult holds the outcome of a Sync operation.
 type SyncResult struct {
-	Status       string // "synced", "empty", "blocked"
+	Status       string // "synced", "blocked", or "empty" when no destination ref moved
 	Branch       string
 	DiffStat     v3.DiffStat
 	SafetyIssues []repo.SafetyIssue

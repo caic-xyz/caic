@@ -139,6 +139,9 @@ test-e2e: frontend-deps generate-sdks playwright-browser
 
 # Real runtime smoke tests exercise the md container path and cannot run
 # without that runtime (see the smoke build tag sources for what they need).
+# A full run takes about 15 minutes on rootless Podman (847 s in Nov 2026). The
+# specialized image build in the first fixture takes most of it; the fixtures
+# share one md configuration, so later fixtures reuse that image.
 test-smoke:
 	@go test -tags="smoke" -run TestSmoke -v -timeout 30m -coverprofile=coverage.out ./backend/cmd/caic/
 

@@ -1,4 +1,4 @@
-// Smoke tests group real md lifecycle, native replay, pushes, and container-free helper checks.
+// Smoke tests group real md lifecycle, native replay, submodule synchronization, pushes, and container-free helper checks.
 
 // Copyright 2026 Marc-Antoine Ruel. All Rights Reserved. Use of this
 // source code is governed by the Apache v2 license that can be found in the
@@ -19,6 +19,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -576,6 +577,137 @@ func TestSmoke(t *testing.T) {
 		if dirty, err := os.ReadFile(filepath.Join(root, "host-dirty")); err != nil || string(dirty) != "keep" { //nolint:gosec // The path is inside the test-owned repository.
 			t.Fatalf("host untracked file changed: %q, %v", dirty, err)
 		}
+	})
+
+	t.Run("Submodules", func(t *testing.T) { //nolint:paralleltest // Fixtures set process-wide XDG_CONFIG_HOME and share one md configuration.
+		smoke := startSmokeServer(t, mdConfigDir)
+		var repos []v1.Repo
+		getJSON(t, smoke.baseURL, "/api/caic/v1/server/repos", &repos)
+		root := filepath.Join(smoke.rootDir, repos[0].Path)
+		runGit := func(dir string, args ...string) string {
+			out, err := (&git.Checkout{Root: dir, Logger: logtest.Logger(t)}).RunGit(t.Context(), args...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return out
+		}
+		// Sources live outside the explored repo tree. Both modules have independent
+		// origins, and their host checkouts stay at the initial pinned commits.
+		initModule := func(name string) (string, string) {
+			tmp := t.TempDir()
+			source := filepath.Join(tmp, name)
+			remote := filepath.Join(tmp, name+".git")
+			runGit(tmp, "init", "--bare", "--initial-branch=main", remote)
+			runGit(tmp, "clone", remote, source)
+			runGit(source, "config", "user.name", "Smoke")
+			runGit(source, "config", "user.email", "smoke@example.com")
+			if err := os.WriteFile(filepath.Join(source, "README.md"), []byte(name+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			runGit(source, "add", ".")
+			runGit(source, "commit", "-m", "Initial "+name)
+			runGit(source, "push", "-u", "origin", "main")
+			return source, remote
+		}
+		_, nestedRemote := initModule("nested")
+		childSource, childRemote := initModule("child")
+		runGit(childSource, "-c", "protocol.file.allow=always", "submodule", "add", nestedRemote, "nested")
+		runGit(childSource, "commit", "-m", "Add nested module")
+		runGit(childSource, "push", "origin", "main")
+		runGit(root, "-c", "protocol.file.allow=always", "submodule", "add", childRemote, "lib with space")
+		runGit(root, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "--recursive")
+		runGit(root, "-c", "user.name=Smoke", "-c", "user.email=smoke@example.com", "commit", "-am", "Add child module")
+		runGit(root, "push", "origin", "main")
+		hostChild := filepath.Join(root, "lib with space")
+		hostNested := filepath.Join(hostChild, "nested")
+		before := map[string]string{}
+		for _, dir := range []string{root, hostChild, hostNested} {
+			before[dir] = runGit(dir, "rev-parse", "HEAD")
+		}
+		var task v1.Task
+		postJSON(t, smoke.baseURL, "/api/caic/v1/tasks", v1.CreateTaskReq{InitialPrompt: v1.Prompt{Text: "nested module smoke"}, Repos: []v1.RepoSpec{{Name: repos[0].Path}}, Harness: v1.HarnessCodex, RuntimeName: smoke.runtimeName}, &task)
+		id := task.ID.String()
+		task = waitForTaskState(t, smoke, id, "waiting")
+		container := string(runtime.ID(task.Runtime.ID).InstanceID())
+		containerRoot := "/home/user/src/" + filepath.Base(repos[0].Path)
+		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+		t.Cleanup(cancel)
+		script := `set -eu; cd "$1/lib with space/nested"; test -z "$(git branch --show-current)"; test -n "$(git remote get-url origin)"; printf 'nested runtime content\n' > nested.txt; git add .; git -c user.name=Smoke -c user.email=smoke@example.com commit -m 'Change nested module'; cd ..; git -c user.name=Smoke -c user.email=smoke@example.com commit -am 'Record nested module'; cd ..; git -c user.name=Smoke -c user.email=smoke@example.com commit -am 'Record child module'`
+		cmd := exec.CommandContext(ctx, smoke.runtimeName, "exec", "--user", "user", container, "sh", "-c", script, "sh", containerRoot) //nolint:gosec // fixture-owned container and script.
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("container changes: %v: %s", err, out)
+		}
+		var index v1.TaskDiffIndexResp
+		getJSON(t, smoke.baseURL, "/api/caic/v1/tasks/"+id+"/diff/index", &index)
+		if len(index.Repositories) != 3 {
+			t.Fatalf("diff identities: %+v", index)
+		}
+		nested := index.Repositories[2]
+		if nested.Repository != 0 || nested.Submodule != "lib with space/nested" || len(nested.Commits) != 1 {
+			t.Fatalf("nested diff: %+v", nested)
+		}
+		var patch v1.FileDiffResp
+		getJSON(t, smoke.baseURL, "/api/caic/v1/tasks/"+id+"/diff/file?repository=0&submodule="+url.QueryEscape(nested.Submodule)+"&commit="+nested.Commits[0].SHA+"&path=nested.txt", &patch)
+		if !strings.Contains(patch.Diff, "+nested runtime content") {
+			t.Fatalf("nested patch: %s", patch.Diff)
+		}
+		var combined v1.DiffResp
+		getJSON(t, smoke.baseURL, "/api/caic/v1/tasks/"+id+"/diff", &combined)
+		if len(combined.Repositories) != 3 || !strings.Contains(combined.Repositories[2].Commits[0].Stat[0].Diff, "+nested runtime content") {
+			t.Fatalf("combined nested diff: %+v", combined)
+		}
+		var sync v1.SyncResp
+		postJSON(t, smoke.baseURL, "/api/caic/v1/tasks/"+id+"/sync", v1.SyncReq{Target: v1.SyncTargetDefault}, &sync)
+		if sync.Status != "synced" {
+			t.Fatalf("sync: %+v", sync)
+		}
+		wantFiles := map[string]bool{"lib with space": true, "lib with space/nested": true, "lib with space/nested/nested.txt": true}
+		for _, file := range sync.DiffStat {
+			if !wantFiles[file.Path] {
+				t.Fatalf("unexpected sync statistic: %+v", file)
+			}
+			delete(wantFiles, file.Path)
+		}
+		if len(wantFiles) != 0 {
+			t.Fatalf("missing module-qualified sync statistics: %v (got %+v)", wantFiles, sync.DiffStat)
+		}
+		childTip := runGit(childRemote, "rev-parse", "refs/heads/"+task.Repos[0].Branch)
+		nestedTip := runGit(nestedRemote, "rev-parse", "refs/heads/"+task.Repos[0].Branch)
+		if childTip == before[hostChild] || nestedTip == before[hostNested] {
+			t.Fatal("child commits were not published")
+		}
+		if !strings.Contains(runGit(childRemote, "ls-tree", childTip, "--", "nested"), nestedTip) {
+			t.Fatal("published child does not reference published nested commit")
+		}
+		var states v1.TaskRepoStatusResp
+		getJSON(t, smoke.baseURL, "/api/caic/v1/tasks/"+id+"/repo-status", &states)
+		if len(states.Repositories) != 3 {
+			t.Fatalf("states: %+v", states)
+		}
+		// Task-branch sync commits pending descendants deepest-first while preserving
+		// detached child checkouts and the host's original checkout on every side.
+		script = `set -eu; cd "$1/lib with space/nested"; printf 'pending nested content\n' > pending.txt`
+		cmd = exec.CommandContext(ctx, smoke.runtimeName, "exec", "--user", "user", container, "sh", "-c", script, "sh", containerRoot) //nolint:gosec // fixture-owned container and script.
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("pending changes: %v: %s", err, out)
+		}
+		postJSON(t, smoke.baseURL, "/api/caic/v1/tasks/"+id+"/sync", v1.SyncReq{}, &sync)
+		if sync.Status != "synced" {
+			t.Fatalf("commit-pending sync: %+v", sync)
+		}
+		newNested := runGit(nestedRemote, "rev-parse", "refs/heads/"+task.Repos[0].Branch)
+		if got := runGit(nestedRemote, "show", newNested+":pending.txt"); got != "pending nested content" {
+			t.Fatalf("pending child data: %q", got)
+		}
+		for dir, want := range before {
+			if got := runGit(dir, "rev-parse", "HEAD"); got != want {
+				t.Fatalf("host %s moved: %s, want %s", dir, got, want)
+			}
+		}
+		if got := runGit(root, "status", "--porcelain"); got != "" {
+			t.Fatalf("host checkout changed: %q", got)
+		}
+		t.Logf("published independent module commits %s and %s on %s", childTip, nestedTip, task.Repos[0].Branch)
 	})
 }
 

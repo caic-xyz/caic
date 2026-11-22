@@ -303,11 +303,11 @@ func (r *modelRefreshRuntime) Connect(_ context.Context, id runtime.ID, _ *runti
 	return runtime.ConnectionInfo{AgentTarget: runtime.ConnectionTarget{SSHHost: string(id.InstanceID())}}, nil
 }
 
-func (*modelRefreshRuntime) Diff(_ context.Context, _ runtime.ID, _ int, _ ...string) (string, error) {
+func (*modelRefreshRuntime) Diff(_ context.Context, _ runtime.ID, _ int, _ runtime.DiffPatch) (string, error) {
 	return "", nil
 }
 
-func (*modelRefreshRuntime) FileDiff(_ context.Context, _ runtime.ID, _ int, _, _, _ string) (string, error) {
+func (*modelRefreshRuntime) FileDiff(_ context.Context, _ runtime.ID, _ int, _, _, _, _ string) (string, error) {
 	return "", nil
 }
 

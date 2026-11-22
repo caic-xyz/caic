@@ -103,13 +103,58 @@ func (*RuntimeBackend) Connect(_ context.Context, id runtime.ID, _ *runtime.Star
 	return runtime.ConnectionInfo{AgentTarget: runtime.ConnectionTarget{SSHHost: string(id.InstanceID())}}, nil
 }
 
-// Diff implements runtime.Repository.
-func (*RuntimeBackend) Diff(_ context.Context, _ runtime.ID, _ int, _ ...string) (string, error) {
-	return "", nil
+// fixtureFiles is the fake change set. RepositoryStatus, Diff, and FileDiff all
+// read it so card statistics and the patch a task view renders cannot disagree.
+var fixtureFiles = [2][]runtime.GitFileStat{
+	{
+		{Path: "cmd/caic/main.go", LinesAdded: 8},
+		{Path: "frontend/src/App.tsx", LinesAdded: 4, LinesDeleted: 2},
+	},
+	{
+		{Path: "internal/service/api.go", LinesAdded: 6, LinesDeleted: 1},
+		{Path: "README.md", LinesAdded: 3, LinesDeleted: 4},
+	},
+}
+
+// Diff implements runtime.Repository. It renders the fixture change set as one
+// whole-branch patch, honoring the requested path filter and mapped prefix.
+func (*RuntimeBackend) Diff(_ context.Context, _ runtime.ID, repoIdx int, patch runtime.DiffPatch) (string, error) {
+	if repoIdx < 0 || repoIdx >= len(fixtureFiles) {
+		return "", fmt.Errorf("repo index %d out of range for %d repos", repoIdx, len(fixtureFiles))
+	}
+	var out strings.Builder
+	for _, file := range fixtureFiles[repoIdx] {
+		if patch.Path != "" && patch.Path != file.Path {
+			continue
+		}
+		out.WriteString(fixturePatch(patch.Prefix, file))
+	}
+	return out.String(), nil
+}
+
+// fixturePatch renders one hunk for a fixture file, mapped under prefix.
+func fixturePatch(prefix string, file runtime.GitFileStat) string {
+	name := file.Path
+	if prefix != "" {
+		name = prefix + "/" + name
+	}
+	start := 0
+	if file.LinesDeleted > 0 {
+		start = 1
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\n@@ -%d,%d +%d,%d @@\n", name, name, name, name, start, file.LinesDeleted, start, file.LinesAdded)
+	for range file.LinesDeleted {
+		b.WriteString("-removed fixture line\n")
+	}
+	for range file.LinesAdded {
+		b.WriteString("+added fixture line\n")
+	}
+	return b.String()
 }
 
 // FileDiff implements runtime.Repository.
-func (*RuntimeBackend) FileDiff(_ context.Context, _ runtime.ID, repoIdx int, commit, path, _ string) (string, error) {
+func (*RuntimeBackend) FileDiff(_ context.Context, _ runtime.ID, repoIdx int, _, commit, path, _ string) (string, error) {
 	switch {
 	case repoIdx == 0 && commit != "" && path == "cmd/caic/main.go":
 		return `diff --git a/cmd/caic/main.go b/cmd/caic/main.go
@@ -182,10 +227,7 @@ func (b *RuntimeBackend) RepositoryStatus(_ context.Context, id runtime.ID, repo
 	status := runtime.RepositoryStatus{Branch: repos[repoIdx].Branch, Upstream: upstream}
 	if repoIdx == 0 {
 		status.Ahead = 1
-		status.DiffStat = []runtime.GitFileStat{
-			{Path: "cmd/caic/main.go", LinesAdded: 8},
-			{Path: "frontend/src/App.tsx", LinesAdded: 4, LinesDeleted: 2},
-		}
+		status.DiffStat = slices.Clone(fixtureFiles[0])
 		status.Commits = []runtime.GitCommit{{
 			SHA:          "7b14c36e1f5a0d2c9e8f4b6a3c1d0e9f8a7b6c5d",
 			Subject:      "Add task activity summary",
@@ -201,10 +243,7 @@ func (b *RuntimeBackend) RepositoryStatus(_ context.Context, id runtime.ID, repo
 		return status, nil
 	}
 	status.Behind = 1
-	status.DiffStat = []runtime.GitFileStat{
-		{Path: "internal/service/api.go", LinesAdded: 6, LinesDeleted: 1},
-		{Path: "README.md", LinesAdded: 3, LinesDeleted: 4},
-	}
+	status.DiffStat = slices.Clone(fixtureFiles[1])
 	status.Uncommitted = []runtime.GitFileStatus{
 		{Path: "internal/service/api.go", WorktreeStatus: "M", LinesAdded: 6, LinesDeleted: 1},
 		{Path: "README.md", WorktreeStatus: "M", LinesAdded: 3, LinesDeleted: 4},

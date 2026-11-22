@@ -36,6 +36,8 @@ for (const workload of [
           json: {
             repositories: [
               {
+                repository: 0,
+                submodule: "",
                 name: "repo",
                 branch: "feature",
                 ahead: 1,
@@ -106,6 +108,8 @@ for (const width of [390, 1280]) {
           json: {
             repositories: [
               {
+                repository: 0,
+                submodule: "",
                 name: "repo",
                 branch: "feature",
                 ahead: 1,

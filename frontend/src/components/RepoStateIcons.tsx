@@ -44,6 +44,8 @@ export function repoStateLabel(state?: GitRepositoryState): string {
 export function diffStatState(files?: readonly DiffFileStat[]): GitRepositoryState | undefined {
   if (!files?.length) return undefined;
   return {
+    repository: 0,
+    submodule: "",
     name: "",
     branch: "",
     ahead: 0,

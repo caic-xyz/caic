@@ -6,6 +6,7 @@ import { api } from "./api";
 export interface FileDiffSelector {
   taskId: string;
   repository: string;
+  submodule: string;
   commit: string;
   path: string;
   originalPath: string;
@@ -326,7 +327,14 @@ function estimatePayloadBytes(value: unknown): number {
 }
 
 function patchKey(selector: FileDiffSelector): string {
-  return [selector.taskId, selector.repository, selector.commit, selector.path, selector.originalPath].join("\0");
+  return [
+    selector.taskId,
+    selector.repository,
+    selector.submodule,
+    selector.commit,
+    selector.path,
+    selector.originalPath,
+  ].join("\0");
 }
 
 export const taskDiffCache = new DiffCache({
@@ -339,7 +347,14 @@ export const taskDiffCache = new DiffCache({
   maxPatchCharacters: 1_000_000,
   maxRetainedBytes: 16 << 20,
   loadPatch: (selector) =>
-    api.getTaskFileDiff(selector.taskId, selector.repository, selector.commit, selector.path, selector.originalPath),
+    api.getTaskFileDiff(
+      selector.taskId,
+      selector.repository,
+      selector.submodule,
+      selector.commit,
+      selector.path,
+      selector.originalPath,
+    ),
 });
 
 export const prefetchTaskDiff = (taskId: string) => taskDiffCache.loadIndex(taskId);

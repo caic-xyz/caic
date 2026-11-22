@@ -1,4 +1,4 @@
-// Discovers and reconciles app-managed repositories below the checkout root.
+// Discovers and reconciles topmost app-managed repositories below the checkout root.
 
 package app
 
@@ -117,9 +117,27 @@ func (w *repoWatcher) poll(ctx context.Context, mtimes map[string]time.Time) {
 	for _, dir := range dirs {
 		dirSet[dir] = struct{}{}
 	}
+	rootRepos, err := git.DiscoverCheckouts(w.absRoot, 0)
+	if err != nil {
+		w.log.DebugContext(ctx, "root checkout scan failed", "err", err)
+	}
+	// A directory can become a repository after nested checkouts were registered.
+	// Remove those checkouts even on the first poll after server startup.
+	for checkout := range w.checkouts.Checkouts() {
+		if checkout.Dir == w.absRoot || !strings.HasPrefix(checkout.Dir, w.absRoot+string(filepath.Separator)) {
+			continue
+		}
+		if _, ok := dirSet[filepath.Dir(checkout.Dir)]; !ok || len(rootRepos) != 0 {
+			w.checkouts.UnregisterCheckout(checkout.RelPath)
+			w.log.InfoContext(ctx, "unregistered nested checkout", "path", checkout.RelPath)
+		}
+	}
 	for dir := range mtimes {
 		if _, ok := dirSet[dir]; !ok {
 			delete(mtimes, dir)
+			// A new .git changes the repository directory's mtime, not its
+			// parent's. Rescan the parent to discover this new boundary.
+			delete(mtimes, filepath.Dir(dir))
 			w.unregisterUnder(ctx, dir)
 		}
 	}
@@ -150,20 +168,39 @@ func (w *repoWatcher) unregisterUnder(ctx context.Context, dir string) {
 }
 
 func collectRepoWatchDirs(ctx context.Context, log *slog.Logger, root string, maxDepth int) []string {
-	dirs := []string{root}
-	if maxDepth <= 0 {
-		return dirs
-	}
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		log.DebugContext(ctx, "watch dirs: read dir failed", "path", root, "err", err)
-		return dirs
-	}
-	for _, entry := range entries {
-		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
-			continue
+	var dirs []string
+	var walk func(string, int)
+	walk = func(dir string, depth int) {
+		// Match startup discovery's repository boundary, including gitfiles and
+		// bare repositories. Watching inside it would discover its submodules
+		// and nested repositories as independent checkouts on later polls.
+		repos, err := git.DiscoverCheckouts(dir, 0)
+		if err != nil {
+			log.DebugContext(ctx, "watch dirs: discover checkout failed", "path", dir, "err", err)
+			return
 		}
-		dirs = append(dirs, collectRepoWatchDirs(ctx, log, filepath.Join(root, entry.Name()), maxDepth-1)...)
+		if len(repos) != 0 {
+			if dir == root {
+				dirs = append(dirs, dir)
+			}
+			return
+		}
+		dirs = append(dirs, dir)
+		if depth <= 0 {
+			return
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			log.DebugContext(ctx, "watch dirs: read dir failed", "path", dir, "err", err)
+			return
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+				continue
+			}
+			walk(filepath.Join(dir, entry.Name()), depth-1)
+		}
 	}
+	walk(root, maxDepth)
 	return dirs
 }

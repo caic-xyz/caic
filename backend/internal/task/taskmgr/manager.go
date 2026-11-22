@@ -2460,7 +2460,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	// do not run the post-reconnect refresh below. Without this restore its card
 	// stays blank until its next mutating tool call.
 	if checkout != nil {
-		snapshot, err := checkout.DiffStatAndRepoStates(ctx, m.log, m.Runtimes, t.GitTarget())
+		snapshot, err := checkout.DiffStat(ctx, m.log, m.Runtimes, t.GitTarget())
 		if snapshot.Read.NewerThan(repo.GitRead{}) {
 			t.RestoreRepositorySummary(&snapshot)
 		}

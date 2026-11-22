@@ -93,6 +93,8 @@ getTaskFileDiffMock.mockImplementation(() => Promise.resolve({ diff: "" }));
 
 const pushedRepoStates = [
   {
+    repository: 0,
+    submodule: "",
     name: "my-repo",
     branch: "task-branch",
     ahead: 1,

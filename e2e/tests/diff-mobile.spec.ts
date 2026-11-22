@@ -1,4 +1,5 @@
 // End-to-end tests for repository-diff missing commits, file-path containment at any pane width, and patch retry focus.
+import { ok } from "node:assert/strict";
 import { createTaskAPI, expect, test, waitForTaskState } from "../helpers";
 import type { ErrorResponse, FileDiffResp, TaskDiffIndexResp } from "../../sdk/caic/ts/v1/types.gen";
 
@@ -21,6 +22,8 @@ for (const width of [390, 1280]) {
           json: {
             repositories: [
               {
+                repository: 0,
+                submodule: "",
                 name: "caic-xyz/caic",
                 branch: "feature",
                 upstream: "origin/main",
@@ -80,6 +83,8 @@ test("long diff paths use middle elision on mobile", async ({ page, api }) => {
         json: {
           repositories: [
             {
+              repository: 0,
+              submodule: "",
               name: "caic-xyz/caic",
               branch: "caic-26",
               upstream: "origin/main",
@@ -163,6 +168,8 @@ test("long diff paths stay inside the row on a wide viewport", async ({ page, ap
         json: {
           repositories: [
             {
+              repository: 0,
+              submodule: "",
               name: "gomode",
               branch: "caic-1",
               upstream: "origin/main",
@@ -219,6 +226,8 @@ test("file patch retry preserves keyboard focus", async ({ page, api }) => {
         json: {
           repositories: [
             {
+              repository: 0,
+              submodule: "",
               name: "caic-xyz/caic",
               branch: "caic-27",
               upstream: "origin/main",
@@ -291,3 +300,88 @@ test("file patch retry preserves keyboard focus", async ({ page, api }) => {
     indexGate.resolve();
   }
 });
+
+for (const width of [390, 1280]) {
+  test(`nested module patches keep their repository identity at ${width}px`, async ({ page, api }, testInfo) => {
+    await page.setViewportSize({ width, height: 844 });
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("console", (message) => {
+      if (message.type() === "error") errors.push(message.text());
+    });
+    const id = await createTaskAPI(api, "Inspect nested module changes");
+    await waitForTaskState(api, id, "waiting");
+    const module = "lib with space/nested";
+    const sha = "a".repeat(40);
+    const repository = {
+      repository: 0,
+      submodule: "",
+      name: "repo",
+      branch: "caic-1",
+      ahead: 1,
+      behind: 0,
+      uncommitted: [],
+      commits: [
+        {
+          sha,
+          subject: "Root commit",
+          authoredDate: "2026-10-15",
+          stat: [{ path: "same.txt", linesAdded: 1, linesDeleted: 0, oldSize: -1, newSize: -1 }],
+        },
+      ],
+    };
+    const commit = repository.commits[0];
+    ok(commit);
+    await page.route(
+      (url) => url.pathname === `/api/caic/v1/tasks/${id}/diff/index`,
+      async (route) => {
+        await route.fulfill({
+          json: {
+            repositories: [
+              {
+                ...repository,
+                submodule: module,
+                upstream: "refs/md/sync/HEAD",
+                name: `repo/${module}`,
+                branch: "",
+                commits: [{ ...commit, subject: "Nested module commit" }],
+              },
+              repository,
+            ],
+          } satisfies TaskDiffIndexResp,
+        });
+      },
+    );
+    const requests: string[] = [];
+    await page.route(
+      (url) => url.pathname === `/api/caic/v1/tasks/${id}/diff/file`,
+      async (route) => {
+        const query = new URL(route.request().url()).searchParams;
+        expect(query.get("repository")).toBe("0");
+        expect(query.get("commit")).toBe(sha);
+        expect(query.get("path")).toBe("same.txt");
+        const submodule = query.get("submodule") ?? "";
+        requests.push(submodule);
+        await route.fulfill({
+          json: {
+            diff: `@@ -0,0 +1 @@\n+${submodule ? "nested module content" : "root content"}`,
+          } satisfies FileDiffResp,
+        });
+      },
+    );
+    await page.goto(`/task/@${id}/diff`);
+    const child = page.getByRole("region", { name: `repo/${module}`, exact: true });
+    const root = page.getByRole("region", { name: "repo", exact: true });
+    await expect(child.getByText("detached HEAD")).toBeVisible();
+    await expect(child.getByText("last sync")).toBeVisible();
+    expect(requests).toEqual([]);
+    await child.getByRole("button", { name: "same.txt", exact: true }).press("Enter");
+    await expect(child.getByText("+nested module content", { exact: true })).toBeVisible();
+    await root.getByRole("button", { name: "same.txt", exact: true }).press("Enter");
+    await expect(root.getByText("+root content", { exact: true })).toBeVisible();
+    expect(requests).toEqual([module, ""]);
+    await expect.poll(async () => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath("nested-module-diffs.png"), fullPage: true });
+    expect(errors).toEqual([]);
+  });
+}
