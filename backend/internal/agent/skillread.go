@@ -5,8 +5,10 @@ package agent
 import (
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 
+	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/syntax"
 )
 
@@ -80,9 +82,9 @@ func (f *SkillFile) inferred(msgs []Message, sourceID string) []Message {
 //
 // The caller must pass a command, not a whole tool input. Only simple
 // file-reading commands are considered; shell listings, searches, and globs
-// are not evidence that the skill file was opened. Relative operands resolve
-// against cwd and a literal cd target; unresolved paths retain only the skill
-// name.
+// are not evidence that the skill file was opened. Brace expansion can supply
+// multiple operands. Relative operands resolve against cwd and a literal cd
+// target; unresolved paths retain only the skill name.
 //
 // A read counts when its statement certainly ran before the result: a `;` list,
 // a newline, an `&&` chain, every pipeline stage, and the left side of `||`
@@ -209,6 +211,12 @@ func (s *commandScanner) changeDir(verb string, args []*syntax.Word) {
 // reads appends the skills named by a read command's operands. A redirection
 // target is never an operand here, so a write to a skill path stays uncounted.
 func (s *commandScanner) reads(verb string, args []*syntax.Word) {
+	for i, arg := range args {
+		if syntax.SplitBraces(arg) {
+			args = expandReadArgs(args, i)
+			break
+		}
+	}
 	scriptSeen := verb != "sed"
 	for i := 0; i < len(args); i++ {
 		word, dynamic := wordText(args[i])
@@ -221,6 +229,9 @@ func (s *commandScanner) reads(verb string, args []*syntax.Word) {
 		}
 		if !scriptSeen {
 			scriptSeen = true // sed's first positional operand is its script
+			continue
+		}
+		if word == "" {
 			continue
 		}
 		// Resolve before matching so a cd into a skills root reveals a relative
@@ -244,6 +255,36 @@ func (s *commandScanner) reads(verb string, args []*syntax.Word) {
 		}
 		s.files = append(s.files, f)
 	}
+}
+
+// expandReadArgs resolves Bash braces starting at the first split argument.
+// Bound the work per read command because the product of brace lists can be
+// much larger than the logged command. Ignore that read if it exceeds the cap.
+func expandReadArgs(args []*syntax.Word, start int) []*syntax.Word {
+	const maxExpandedArgs = 256
+	expanded := make([]*syntax.Word, 0, len(args))
+	expanded = append(expanded, args[:start]...)
+	n := 0
+	for i, arg := range args[start:] {
+		if i != 0 && !syntax.SplitBraces(arg) {
+			expanded = append(expanded, arg)
+			continue
+		}
+		for word, err := range expand.BracesSeq(nil, arg) {
+			if err != nil || n == maxExpandedArgs {
+				return nil
+			}
+			n++
+			// Bash drops empty unquoted words before assigning argument slots.
+			if slices.ContainsFunc(word.Parts, func(part syntax.WordPart) bool {
+				lit, ok := part.(*syntax.Lit)
+				return !ok || lit.Value != ""
+			}) {
+				expanded = append(expanded, word)
+			}
+		}
+	}
+	return expanded
 }
 
 // wordText returns a word's literal text and whether any part of it expands at
