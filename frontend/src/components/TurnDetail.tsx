@@ -7,7 +7,7 @@ import NextIcon from "@material-symbols/svg-400/outlined/chevron_right.svg?solid
 
 import type { HistoryRunningTurn, HistoryTurn, HistoryTurnTimeline } from "@sdk/types.gen";
 import { formatChangeStat, formatMoney, formatTime, formatTokens, formatUSD } from "../formatting";
-import { formatExactSeconds, formatTimingDuration, formatTotalDuration } from "../timing";
+import { durationTickStep, formatExactSeconds, formatTimingDuration, formatTotalDuration } from "../timing";
 import { useTaskTimeline } from "../TaskTimelineContext";
 import { createTurnTimelineLoad } from "../turnTimelineLoad";
 import ActionButton from "./ActionButton";
@@ -17,7 +17,7 @@ import Table from "./Table";
 import TurnCalls from "./TurnCalls";
 import TurnResources from "./TurnResources";
 import TurnStrip, { createRunningElapsed } from "./TurnStrip";
-import TurnTimeline, { tickStep } from "./TurnTimeline";
+import TurnTimeline from "./TurnTimeline";
 import TurnTools from "./TurnTools";
 import styles from "./TurnDetail.module.css";
 
@@ -124,10 +124,6 @@ export default function TurnDetail(props: {
   };
   const completedRows = (turn: HistoryTurn) => {
     const usage = turn.usage;
-    const apiShare =
-      turn.durationMs > 0 && turn.durationAPIMs > 0
-        ? `${Math.round((turn.durationAPIMs / turn.durationMs) * 100)}%`
-        : "—";
     return (
       <>
         {row("Model", turn.model || "Unknown", false)}
@@ -135,7 +131,6 @@ export default function TurnDetail(props: {
         {row("Started", started(), false)}
         {row("Turn time", exactDuration(turn.durationMs), false)}
         {row("API time", exactDuration(turn.durationAPIMs), false)}
-        {row("API share of turn time", apiShare, false)}
         {row("New input tokens", usage.inputTokens.toLocaleString(), false)}
         {row("Cache write tokens", usage.cacheCreationInputTokens.toLocaleString(), false)}
         {row("Cache read tokens", usage.cacheReadInputTokens.toLocaleString(), false)}
@@ -179,7 +174,6 @@ export default function TurnDetail(props: {
           turns={props.turns}
           running={props.running}
           runningMs={runningMs()}
-          scaleMs={0}
           current={number()}
           href={props.href}
         />
@@ -224,10 +218,9 @@ export default function TurnDetail(props: {
               <TurnTimeline timeline={ready()} runningMs={viewedRunningMs()} conversationHref={props.conversationHref}>
                 <TurnResources
                   stats={history.stats()}
-                  retained={history.statsRetained()}
                   startMs={Date.parse(ready().startedAt)}
                   durationMs={axisMs(ready())}
-                  tickShare={axisMs(ready()) > 0 ? tickStep(axisMs(ready())) / axisMs(ready()) : 1}
+                  tickShare={axisMs(ready()) > 0 ? durationTickStep(axisMs(ready()), 5) / axisMs(ready()) : 1}
                 />
               </TurnTimeline>
               <TurnCalls timeline={ready()} costUpdating={props.costUpdating} />

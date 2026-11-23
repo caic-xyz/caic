@@ -6,7 +6,7 @@ import { useNavigate } from "@solidjs/router";
 
 import type { HistoryTurnSpan, HistoryTurnSpanKind, HistoryTurnTimeline } from "@sdk/types.gen";
 import { isChildEvent, toolIdentity } from "../grouping";
-import { formatExactSeconds, formatTotalDuration } from "../timing";
+import { durationTickStep, formatExactSeconds, formatTotalDuration } from "../timing";
 import { useTranscriptLinks } from "../TaskTimelineContext";
 import { nativeLinkKey, toolLinkKey, type TranscriptTarget } from "../transcriptLinks";
 import { boundTooltipText } from "../tooltipText";
@@ -16,7 +16,7 @@ import styles from "./TurnTimeline.module.css";
 type LaneID = "model" | "tools" | "subagents" | "childTools" | "background";
 
 const laneNames: Record<LaneID, string> = {
-  model: "Model (inferred)",
+  model: "Model",
   tools: "Tools",
   subagents: "Subagents",
   childTools: "Subagent tools",
@@ -77,7 +77,7 @@ function provisional(span: HistoryTurnSpan): boolean {
 // or not at all yet. A running turn's axis ends now, so no span ends after it.
 function endText(span: HistoryTurnSpan, duration: number, running: boolean): string {
   if (span.endMs === undefined) {
-    if (provisional(span)) return `so far ${formatExactSeconds(duration - span.startMs)}, provisional`;
+    if (provisional(span)) return `so far ${formatExactSeconds(duration - span.startMs)}`;
     if (span.kind === "tool") return running ? "still running" : "open at turn end";
     return span.status === "running" ? "still running" : "end unknown";
   }
@@ -91,7 +91,7 @@ function outcome(span: HistoryTurnSpan): string {
 }
 
 function spanName(span: HistoryTurnSpan): string {
-  if (span.kind === "model") return provisional(span) ? "Model time (inferred, provisional)" : "Model time (inferred)";
+  if (span.kind === "model") return "Model time";
   const label = span.label || (span.kind === "background" ? span.commandID : span.activityID) || span.kind;
   return span.detail ? `${label} ${span.detail}` : label;
 }
@@ -151,18 +151,6 @@ function pack(spans: readonly TimelineSpan[], duration: number): TimelineSpan[][
     } else rows.push({ end, spans: [item] });
   }
   return rows.map((row) => row.spans);
-}
-
-// tickStep is the round step that divides the axis into at most five parts.
-export function tickStep(duration: number): number {
-  const rough = duration / 5;
-  for (const step of [
-    1, 2, 5, 10, 20, 50, 100, 200, 500, 1_000, 2_000, 5_000, 10_000, 15_000, 30_000, 60_000, 120_000, 300_000, 600_000,
-    900_000, 1_800_000, 3_600_000,
-  ]) {
-    if (step >= rough) return step;
-  }
-  return Math.ceil(rough / 3_600_000) * 3_600_000;
 }
 
 // tickLabel names a gridline; below a one-second step, rounding to whole
@@ -232,7 +220,7 @@ export default function TurnTimeline(props: {
     setView("lanes", reconcile(timelineLanes(props.timeline, duration(), running()), { key: "key", merge: false })),
   );
   const lanes = () => view.lanes;
-  const step = () => tickStep(duration());
+  const step = () => durationTickStep(duration(), 5);
   // The end label and room for one tick label own the last stretch of the
   // axis, as a share of its width.
   const [reserve, setReserve] = createSignal(0.15);
@@ -338,10 +326,6 @@ export default function TurnTimeline(props: {
     <figure class={styles.timeline} data-testid="turn-timeline">
       <figcaption class={styles.caption}>
         <span class={styles.title}>Timeline</span>
-        <span class={styles.note}>
-          Model time is inferred: API calls report only their end.
-          {running() ? " The turn is running: its latest model time is provisional." : ""}
-        </span>
       </figcaption>
       <div
         ref={plot}

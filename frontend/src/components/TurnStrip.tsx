@@ -1,15 +1,67 @@
-// TurnStrip plots turn durations on one scale, the running turn's as it grows; each bar links to its turn view, and the strip is one Tab stop.
+// TurnStrip plots turn durations on a round-tick axis, the running turn's as it grows, with turn numbers and an optional second per-turn lane; each bar links to its turn view, and the strip is one Tab stop.
 
-import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show, type Accessor } from "solid-js";
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  on,
+  onCleanup,
+  onMount,
+  Show,
+  type Accessor,
+  type JSX,
+} from "solid-js";
 
 import type { HistoryRunningTurn, HistoryTurn } from "@sdk/types.gen";
 import { createLiveDuration } from "../liveDuration";
-import { formatExactSeconds, formatTotalDuration } from "../timing";
+import { durationTickStep, formatExactSeconds, formatTotalDuration } from "../timing";
 import styles from "./TurnStrip.module.css";
 
 // Below the sparse bar's minimum width plus its gap, bars drop the gap and
 // shrink to 1px so dense tasks still fit.
 const sparseBarPx = 6;
+
+// The duration axis has at most this many intervals; the strip is short.
+const durationParts = 3;
+
+// TurnStripLane draws a second per-turn quantity in the bars' columns, under
+// the durations, on its own axis from zero to top in steps of step. The
+// running turn's column stays empty.
+export interface TurnStripLane {
+  top: number;
+  step: number;
+  format: (value: number) => string;
+  cell: (turn: HistoryTurn) => JSX.Element;
+}
+
+// labelStep labels every column of a short strip and round turn numbers of a
+// long one, so labels never touch at the narrowest column width.
+function labelStep(count: number): number {
+  if (count <= 12) return 1;
+  if (count <= 30) return 5;
+  return count <= 60 ? 10 : 25;
+}
+
+// Axis stacks its tick labels in one grid cell, so the widest sets the
+// column width, and lifts each to its share of the axis height.
+function Axis(props: { top: number; step: number; format: (value: number) => string; class: string }) {
+  const ticks = () => {
+    const step = props.step;
+    return Array.from({ length: Math.round(props.top / step) + 1 }, (_, index) => index * step);
+  };
+  return (
+    <div class={props.class}>
+      <For each={ticks()}>
+        {(value) => (
+          <span class={styles.tick} style={{ "--at": value / props.top }}>
+            {value === 0 ? "0" : props.format(value)}
+          </span>
+        )}
+      </For>
+    </div>
+  );
+}
 
 interface StripView {
   dense: boolean;
@@ -40,17 +92,25 @@ export default function TurnStrip(props: {
   // on the clock of the view that shows the turn's other running figures.
   running: HistoryRunningTurn | null;
   runningMs: number | null;
-  // scaleMs is the least top of the scale, so strips of a part of the task
-  // share the task's scale.
-  scaleMs: number;
-  // The turn shown beside the strip, or null in the overview.
+  // The turn shown beside the strip, or null in the overview and context views.
   current: number | null;
   href: (turn: number) => string;
+  lane?: TurnStripLane;
 }) {
   const elapsed = () => (props.running ? props.runningMs : null);
   const longest = createMemo(() =>
-    props.turns.reduce((max, turn) => Math.max(max, turn.durationMs), Math.max(props.scaleMs, elapsed() ?? 0)),
+    props.turns.reduce((max, turn) => Math.max(max, turn.durationMs), Math.max(1_000, elapsed() ?? 0)),
   );
+  // The axis tops out at the first round step at or above the longest turn.
+  const step = () => durationTickStep(longest(), durationParts);
+  const top = () => Math.ceil(longest() / step()) * step();
+  // Each column paints its gridlines, one per tick interval of each axis.
+  const stripParts = () => Math.round(top() / step());
+  const laneParts = () => (props.lane ? Math.round(props.lane.top / props.lane.step) : 1);
+  const labelled = (number: number) => {
+    const every = labelStep(count());
+    return every === 1 || number % every === 0;
+  };
   const count = () => props.turns.length + (props.running ? 1 : 0);
   // Keyboard positions count bars from 1; a bar's turn number can differ in a
   // strip of a part of the task.
@@ -150,8 +210,15 @@ export default function TurnStrip(props: {
     reveal(target);
     strip?.querySelector<HTMLElement>(`[data-turn="${target}"] a`)?.focus();
   };
-  const bar = (number: number, label: () => string, title: () => string, share: () => number, running: boolean) => (
-    <li class={styles.item} data-turn={number}>
+  const bar = (
+    number: number,
+    turn: HistoryTurn | null,
+    label: () => string,
+    title: () => string,
+    share: () => number,
+    running: boolean,
+  ) => (
+    <li class={styles.item} data-turn={number} style={{ "--strip-parts": stripParts(), "--lane-parts": laneParts() }}>
       <a
         link
         href={props.href(number)}
@@ -165,15 +232,34 @@ export default function TurnStrip(props: {
       >
         <span class={styles.fill} style={{ "--turn-share": share() }} />
       </a>
+      <Show when={props.lane}>
+        {(lane) => (
+          <div class={styles.laneCell} aria-hidden="true">
+            {turn ? lane().cell(turn) : null}
+          </div>
+        )}
+      </Show>
+      <span class={styles.label} aria-hidden="true">
+        {labelled(number) ? number : ""}
+      </span>
     </li>
   );
 
   return (
     <Show when={count() > 0} fallback={<p class={styles.empty}>No completed turns yet.</p>}>
-      <div class={styles.chart}>
+      <div class={styles.chart} classList={{ [styles.withLane]: props.lane !== undefined }}>
         <div class={styles.scale} aria-hidden="true">
-          <span>{formatTotalDuration(longest())}</span>
-          <span>0</span>
+          <Axis top={top()} step={step()} format={formatTotalDuration} class={styles.axis} />
+          <Show when={props.lane}>
+            {(lane) => (
+              <Axis
+                top={lane().top}
+                step={lane().step}
+                format={lane().format}
+                class={`${styles.axis} ${styles.laneAxis}`}
+              />
+            )}
+          </Show>
         </div>
         <ol
           ref={strip}
@@ -192,9 +278,10 @@ export default function TurnStrip(props: {
             {(turn) =>
               bar(
                 turn.number,
+                turn,
                 () => `Turn ${turn.number}, ${formatExactSeconds(turn.durationMs)}`,
                 () => `Turn ${turn.number} · ${formatTotalDuration(turn.durationMs)}`,
-                () => (longest() > 0 ? turn.durationMs / longest() : 0),
+                () => turn.durationMs / top(),
                 false,
               )
             }
@@ -203,9 +290,10 @@ export default function TurnStrip(props: {
             {(running) =>
               bar(
                 running.number,
+                null,
                 () => `Turn ${running.number}, running, ${formatExactSeconds(elapsed() ?? 0)} so far`,
                 () => `Turn ${running.number} · running · ${formatTotalDuration(elapsed() ?? 0)}`,
-                () => (longest() > 0 ? (elapsed() ?? 0) / longest() : 0),
+                () => (elapsed() ?? 0) / top(),
                 true,
               )
             }

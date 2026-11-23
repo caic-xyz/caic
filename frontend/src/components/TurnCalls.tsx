@@ -80,7 +80,6 @@ export default function TurnCalls(props: {
   const outputMax = createMemo(() => Math.max(1, ...calls().map((call) => call.outputTokens)));
   const windowed = createMemo(() => calls().some((call) => (call.contextWindow ?? 0) > 0));
   const subagents = createMemo(() => calls().some((call) => isChildEvent(call)));
-  const estimated = createMemo(() => calls().some((call) => call.cost?.source === "estimated"));
   // Labels go on the first column, every step-th one, and the last one unless
   // it would crowd the previous label. Positions, not call numbers, set the
   // spacing because the cap can leave gaps in the numbering.
@@ -285,7 +284,7 @@ export default function TurnCalls(props: {
           )}
         </Show>
         <ChartDataTable
-          caption={`Call tokens${estimated() ? ", ~ marks estimated costs" : ""}`}
+          caption="Call tokens"
           regionLabel="Call tokens"
           columns={columns}
           textColumns={textColumns}

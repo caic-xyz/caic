@@ -50,8 +50,8 @@ for (const width of [1280, 390]) {
     const links = conversation.getByTestId("context-performance-link");
     await expect(links).toHaveCount(2);
     // Each archived context's toggle names how it ended with an icon.
-    await expect(conversation.getByRole("button", { name: /^Ended by compaction 1 turn/ })).toBeVisible();
-    await expect(conversation.getByRole("button", { name: /^Ended by a context clear 1 turn/ })).toBeVisible();
+    await expect(conversation.getByRole("button", { name: /^Compacted session 1 turn/ })).toBeVisible();
+    await expect(conversation.getByRole("button", { name: /^Cleared session 1 turn/ })).toBeVisible();
     await conversation.screenshot({ path: testInfo.outputPath(`context-ends-${width}.png`) });
     // A link, styled like the turn durations: dotted underline.
     expect(await links.first().evaluate((el) => getComputedStyle(el).textDecorationStyle)).toBe("dotted");
@@ -62,7 +62,7 @@ for (const width of [1280, 390]) {
     const breadcrumb = pane.getByRole("navigation", { name: "Breadcrumb" });
     await expect(breadcrumb).toHaveText(/Performance\s*›?\s*Context 1 of 3/);
     const detail = pane.getByTestId("context-detail");
-    await expect(detail.getByTestId("context-end")).toHaveText("Ended by compaction from 150,000 to 20,000 tokens");
+    await expect(detail.getByTestId("context-end")).toHaveText("Compacted session · 150,000 → 20,000 tokens");
     await expect(detail.getByTestId("context-summary-line")).toHaveText(/^1 turn · /);
     await expect(detail.getByTestId("turn-strip").getByRole("link")).toHaveCount(1);
     const growth = detail.getByTestId("context-growth");
@@ -78,7 +78,7 @@ for (const width of [1280, 390]) {
     await detail.getByRole("button", { name: "Next context" }).click();
     await expect(page).toHaveURL(/\/perf\/contexts\/2$/);
     await expect(breadcrumb).toContainText("Context 2 of 3");
-    await expect(detail.getByTestId("context-end")).toHaveText("Ended by a context clear");
+    await expect(detail.getByTestId("context-end")).toHaveText("Cleared session");
     await expect(detail.getByTestId("turn-strip").getByRole("link")).toHaveAccessibleName(/^Turn 2, /);
     await expectContained(page);
     await page.screenshot({ path: testInfo.outputPath(`context-cleared-${width}.png`), fullPage: true });

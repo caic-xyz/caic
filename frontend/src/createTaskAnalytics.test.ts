@@ -20,7 +20,6 @@ function setup(readCosts: TaskHistory["readCosts"]) {
       manifest,
       messages: () => [],
       stats: () => [],
-      statsRetained: () => 0,
       through: () => 0,
       epoch: () => 0,
       loading: () => false,
@@ -245,16 +244,16 @@ it("keeps charts mounted for unrelated manifests and redraws an earlier correcte
     }),
   );
   try {
-    const token = await view.findByLabelText("Token volume by turn");
-    const tool = await view.findByLabelText("Cumulative tool time by tool kind");
+    const token = await view.findByLabelText("Tokens by turn");
+    const tool = await view.findByLabelText("Tool time");
     const before = state.snapshot();
     const unrelated = structuredClone(value);
     unrelated.metadata.todo = { toolUseID: "todo", todos: [] };
     state.setManifest(unrelated);
     assert.equal(state.snapshot().turns, before.turns);
     assert.equal(state.snapshot().tools, before.tools);
-    assert.equal(view.getByLabelText("Token volume by turn"), token);
-    assert.equal(view.getByLabelText("Cumulative tool time by tool kind"), tool);
+    assert.equal(view.getByLabelText("Tokens by turn"), token);
+    assert.equal(view.getByLabelText("Tool time"), tool);
     const corrected = structuredClone(unrelated);
     const last = before.turns[1];
     assert.ok(last);
@@ -272,8 +271,8 @@ it("keeps charts mounted for unrelated manifests and redraws an earlier correcte
     state.setManifest(corrected);
     assert.notEqual(state.snapshot().turns, before.turns);
     assert.equal(state.snapshot().turns[0]?.cost?.usd, 4);
-    await waitFor(() => assert.notEqual(view.getByLabelText("Token volume by turn"), token));
-    assert.equal(view.getByLabelText("Cumulative tool time by tool kind"), tool);
+    await waitFor(() => assert.notEqual(view.getByLabelText("Tokens by turn"), token));
+    assert.equal(view.getByLabelText("Tool time"), tool);
   } finally {
     view.unmount();
     state.dispose();

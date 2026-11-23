@@ -7,9 +7,9 @@ import type { HistorySection } from "@sdk/types.gen";
 export type ContextEndCause = "compaction" | "clear" | "session";
 
 export const contextEndLabels: Record<ContextEndCause, string> = {
-  compaction: "Ended by compaction",
-  clear: "Ended by a context clear",
-  session: "Ended by a new session",
+  compaction: "Compacted session",
+  clear: "Cleared session",
+  session: "Previous session",
 };
 
 // contextEndCause classifies the event that ended section; null for the
@@ -32,6 +32,6 @@ export function contextEndDetail(section: HistorySection): string {
   if (system?.subtype !== "compact_boundary") return label;
   const before = system.contextTokensBefore ?? 0;
   const after = system.contextTokensAfter ?? 0;
-  if (before > 0 && after > 0) return `${label} from ${before.toLocaleString()} to ${after.toLocaleString()} tokens`;
-  return before > 0 ? `${label} of ${before.toLocaleString()} tokens` : label;
+  if (before > 0 && after > 0) return `${label} · ${before.toLocaleString()} → ${after.toLocaleString()} tokens`;
+  return before > 0 ? `${label} · from ${before.toLocaleString()} tokens` : label;
 }

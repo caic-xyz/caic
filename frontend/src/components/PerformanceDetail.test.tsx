@@ -1,7 +1,7 @@
 // Tests the Performance view's section naming, usage summary, charts, resource samples, and their text alternatives.
 
 import { afterEach, describe, it } from "node:test";
-import { render, within } from "@solidjs/testing-library";
+import { render, waitFor, within } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { expect, vi } from "@tests/expect";
 
@@ -122,7 +122,7 @@ describe("PerformanceContent", () => {
         usage={{ ...usage, costUSD: 0, costKnown: true, costComplete: false }}
       />
     ));
-    expect(view.getByText("$0 known subtotal")).toBeInTheDocument();
+    expect(view.getByText("≥ $0")).toBeInTheDocument();
     expect(view.queryByText("Effective")).not.toBeInTheDocument();
   });
 
@@ -373,32 +373,23 @@ describe("PerformanceContent", () => {
     const { findByRole } = render(() => <PerformanceContent tools={[]} stats={stats} turns={turns} usage={usage} />);
 
     expect(await findByRole("img", { name: "CPU utilization over time" })).toBeInTheDocument();
-    expect(await findByRole("img", { name: "Token volume by turn" })).toBeInTheDocument();
+    expect(await findByRole("img", { name: "Tokens by turn" })).toBeInTheDocument();
   });
 
-  it("qualifies what the token chart aggregates", async () => {
-    const { findByRole } = render(() => <PerformanceContent tools={[]} stats={[]} turns={turns} usage={usage} />);
-
-    expect(await findByRole("img", { name: "Token volume by turn" })).toHaveAttribute(
-      "aria-description",
-      expect.stringContaining("cache reads usually dominate"),
-    );
-  });
-
-  it("switches the token chart between volume and each turn's share", async () => {
-    const user = userEvent.setup();
-    const { findByRole, findByTestId } = render(() => (
-      <PerformanceContent tools={[]} stats={[]} turns={turns} usage={usage} />
-    ));
+  it("gives each token category its own lane, labelled with the peak that scales it", async () => {
+    const { findByTestId } = render(() => <PerformanceContent tools={[]} stats={[]} turns={turns} usage={usage} />);
     const figure = await findByTestId("turn-token-chart");
-    expect(await findByRole("img", { name: "Token volume by turn" })).toBeInTheDocument();
 
-    await user.click(within(figure).getByLabelText("Show each turn as a share of its own tokens"));
-
-    expect(await findByRole("img", { name: "Token share by turn" })).toBeInTheDocument();
-    expect(
-      Array.from(figure.querySelectorAll('[aria-label="y-axis tick label"] text'), (label) => label.textContent),
-    ).toEqual(["0%", "50%", "100%"]);
+    await waitFor(() =>
+      expect(Array.from(figure.querySelectorAll("svg text"), (label) => label.textContent)).toEqual(
+        expect.arrayContaining([
+          "New input · peak 1kt",
+          "Cache write · peak 2kt",
+          "Cache read · peak 7kt",
+          "Output · peak 500t",
+        ]),
+      ),
+    );
   });
 
   it("lists the exact turn token counts as the chart's text alternative", async () => {
@@ -415,17 +406,13 @@ describe("PerformanceContent", () => {
     expect(table).toHaveTextContent("10.5kt");
   });
 
-  it("lists cumulative tool time as the chart's text alternative", async () => {
-    const user = userEvent.setup();
+  it("lists cumulative tool time per tool", async () => {
     const { findByTestId } = render(() => (
       <PerformanceContent tools={[{ name: "Bash", calls: 1, durationMs: 1000 }]} stats={[]} turns={[]} usage={usage} />
     ));
     const figure = await findByTestId("tool-time-chart");
 
-    await user.click(within(figure).getByText("Tool timings (1)"));
-
-    const table = within(figure).getByRole("table");
-    expect(table).toHaveTextContent("Bash");
+    expect(within(figure).getByRole("region", { name: "Tool time" })).toHaveTextContent("Bash");
   });
 });
 

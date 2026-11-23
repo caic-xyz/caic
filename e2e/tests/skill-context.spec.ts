@@ -24,7 +24,7 @@ for (const width of [390, 1280]) {
     await expect(current).toHaveCount(0);
     const prior = page.getByRole("navigation", { name: "Previous context skills", exact: true });
     await expect(prior).toHaveCount(0);
-    await page.getByRole("button", { name: /Ended by compaction/ }).click();
+    await page.getByRole("button", { name: /Compacted session/ }).click();
     await expect(prior.getByRole("link")).toHaveCount(2);
     await prior.getByRole("link", { name: "review", exact: true }).click();
     await expect(pane.getByRole("heading", { name: "Review", exact: true })).toBeVisible();
@@ -32,11 +32,11 @@ for (const width of [390, 1280]) {
     await page.reload();
     await expect(current).toHaveCount(0);
     await expect(prior).toHaveCount(0);
-    await page.getByRole("button", { name: /Ended by compaction/ }).click();
+    await page.getByRole("button", { name: /Compacted session/ }).click();
     await expect(prior.getByRole("link")).toHaveCount(2);
-    await page.getByRole("button", { name: /Ended by compaction/ }).click();
+    await page.getByRole("button", { name: /Compacted session/ }).click();
     await expect(prior).toHaveCount(0);
-    await page.getByRole("button", { name: /Ended by compaction/ }).click();
+    await page.getByRole("button", { name: /Compacted session/ }).click();
     await expect(prior.getByRole("link")).toHaveCount(2);
     // A later root completion must not replace a disclosed older context or
     // steal focus while the user is reading its skills.
@@ -44,7 +44,7 @@ for (const width of [390, 1280]) {
     // Skill metadata appears before the disclosed transcript finishes loading.
     await expect(turns).toHaveCount(1);
     const turnCount = await turns.count();
-    const context = page.getByRole("button", { name: /Ended by compaction/ });
+    const context = page.getByRole("button", { name: /Compacted session/ });
     await context.focus();
     await api.sendInput(id, { prompt: { text: "continue current context" } });
     await waitForTaskState(api, id, "waiting");
@@ -57,7 +57,7 @@ for (const width of [390, 1280]) {
     await prior.getByRole("link", { name: "review", exact: true }).focus();
     await api.sendInput(id, { prompt: { text: "FAKE_SKILLS compact" } });
     await waitForTaskState(api, id, "waiting");
-    await expect(page.getByRole("button", { name: /Ended by compaction/ })).toHaveCount(2);
+    await expect(page.getByRole("button", { name: /Compacted session/ })).toHaveCount(2);
     expect(await oldHeader?.evaluate((element) => element.isConnected)).toBe(true);
     expect(await oldSkill?.evaluate((element) => element.isConnected && element === document.activeElement)).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -110,7 +110,7 @@ for (const width of [390, 1280]) {
         await expect(area).toHaveCount(0);
       }
       await selectTask(id, previous);
-      await expect(page.getByRole("button", { name: /Ended by compaction/ })).toHaveCount(12);
+      await expect(page.getByRole("button", { name: /Compacted session/ })).toHaveCount(12);
       await expect.poll(() => viewport.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
       await atBottom();
       if (width === 390) {

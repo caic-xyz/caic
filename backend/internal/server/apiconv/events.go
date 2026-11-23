@@ -348,6 +348,12 @@ func (tt *ToolTimingTracker) convertMessage(recordID uint64, messageIndex int, m
 		}
 		result := m.Result
 		nativeDuration, _ := agent.NativeDuration(m)
+		// A root result takes the turn's API time from the task's fold of
+		// the harness's running total.
+		apiMs := m.DurationAPIMs
+		if !m.Source.IsChild() {
+			apiMs = tt.cost.TurnAPIMs
+		}
 		if result == "" && !m.Source.IsChild() && len(m.PendingToolUseIDs) == 0 {
 			result = tt.window.Value()
 		}
@@ -368,7 +374,7 @@ func (tt *ToolTimingTracker) convertMessage(recordID uint64, messageIndex int, m
 				DiffStat:          DiffStat(m.DiffStat),
 				TotalCostUSD:      m.TotalCostUSD,
 				Duration:          nativeDuration.Seconds(),
-				DurationAPI:       float64(m.DurationAPIMs) / 1e3,
+				DurationAPI:       float64(apiMs) / 1e3,
 				NumTurns:          m.NumTurns,
 				Usage: v1.EventUsage{
 					InputTokens:              m.Usage.InputTokens,

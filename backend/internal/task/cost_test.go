@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -553,6 +554,35 @@ func TestCostTracker(t *testing.T) {
 			}
 			if snap := c.Snapshot(); c.Complete() || snap.USD != 12 || snap.ReportedUSD != 12 {
 				t.Errorf("snapshot = %+v, complete = %v; want 12 reported and the restarted turn unknown", snap, c.Complete())
+			}
+		})
+
+		t.Run("ClaudeRunningAPITimeGivesEachTurnItsPart", func(t *testing.T) {
+			// Minimized from a task log: duration_api_ms grew across turns,
+			// restarted with the cost after the agent crashed, and a context
+			// clear starts a new session total.
+			t.Parallel()
+			c := CostTracker{Harness: harness.Claude}
+			var got []int64
+			for _, m := range []agent.Message{
+				&agent.ResultMessage{DurationAPIMs: 300},
+				&agent.ResultMessage{DurationAPIMs: 480},
+				&agent.InitMessage{SessionID: "s"},
+				&agent.ResultMessage{DurationAPIMs: 150},
+				&agent.ResultMessage{DurationAPIMs: 160},
+				&agent.ResultMessage{Source: taskslogv3.MessageSource{DelegationToolUseID: "child"}, DurationAPIMs: 9},
+				&agent.SystemMessage{Subtype: "context_cleared"},
+				&agent.ResultMessage{DurationAPIMs: 40},
+			} {
+				if _, ok := m.(*agent.ResultMessage); !ok || m.Provenance().IsChild() {
+					c.Observe(m, at, nil)
+					continue
+				}
+				c.Observe(m, at, nil)
+				got = append(got, c.TurnAPIMs)
+			}
+			if want := []int64{300, 180, 0, 10, 40}; !slices.Equal(got, want) {
+				t.Errorf("turn API times = %v, want %v", got, want)
 			}
 		})
 

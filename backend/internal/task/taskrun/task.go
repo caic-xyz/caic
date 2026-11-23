@@ -2385,7 +2385,7 @@ func (t *Task) observeRollupMessageLocked(m agent.Message, at, producerAt time.T
 		return
 	}
 	model, effort := t.rollupAttributionLocked(m)
-	e, ok := rollupEvent(m, at, producerAt, replayed, model, effort, t.costTracker.Snapshot())
+	e, ok := rollupEvent(m, at, producerAt, replayed, model, effort, t.costTracker.Snapshot(), t.costTracker.TurnAPIMs)
 	if ok {
 		t.Rollup.Observe(t.rollupMetaLocked(), &e)
 	}

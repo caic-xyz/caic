@@ -114,7 +114,7 @@ func TestLocalUsage(t *testing.T) {
 						if tc.mixed && tc.reported == 0 && !strings.HasPrefix(text, "1h cost: unknown (") {
 							t.Fatalf("partial zero looks free: %s", text)
 						}
-						if tc.mixed && tc.reported > 0 && !strings.HasPrefix(text, "1h cost: $0.25 known subtotal; total unknown (") {
+						if tc.mixed && tc.reported > 0 && !strings.HasPrefix(text, "1h cost: ≥ $0.25 (") {
 							t.Fatalf("subtotal hidden: %s", text)
 						}
 						if !tc.mixed && !strings.HasPrefix(text, "1h cost: $0.00 (") {

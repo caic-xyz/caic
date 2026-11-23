@@ -754,7 +754,7 @@ func TestMCPTools(t *testing.T) {
 		insertTestTask(s, priced.ID, priced)
 		result = c.handleGetUsage(t.Context(), &mcp.ToolRequest[struct{}]{})
 		got = strings.Split(toolTextOutput(t, result.Structured), "\n")
-		want = []string{"1h cost: $0.25 known subtotal; total unknown (0 tokens)", "6h cost: $0.25 known subtotal; total unknown (0 tokens)", "24h cost: $0.25 known subtotal; total unknown (0 tokens)"}
+		want = []string{"1h cost: ≥ $0.25 (0 tokens)", "6h cost: ≥ $0.25 (0 tokens)", "24h cost: ≥ $0.25 (0 tokens)"}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("mixed local usage lines = %q; want %q", got, want)
 		}

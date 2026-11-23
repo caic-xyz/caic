@@ -4,7 +4,6 @@ declare const classes: {
   readonly "caption": string;
   readonly "empty": string;
   readonly "name": string;
-  readonly "note": string;
   readonly "title": string;
   readonly "tools": string;
 };

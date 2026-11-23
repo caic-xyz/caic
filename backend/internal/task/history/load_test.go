@@ -350,22 +350,26 @@ func TestLoadLogHeader(t *testing.T) {
 	t.Run("CostlessTrailerFoldsRestartedRunningTotal", func(t *testing.T) {
 		// Minimized from a task log: the agent crashed, and the resumed process
 		// restarted its running total, so the last result alone loses the cost
-		// reported before the crash.
+		// reported before the crash and the usage of every earlier turn.
 		t.Parallel()
 		path := writePhysicalTestLog(t, false,
 			`{"t":"caic_meta","version":3,"harness":"claude","prompt":"task","repos":[]}`,
-			`{"t":"agent","ts":102.000,"msg":{"type":"result","subtype":"success","total_cost_usd":10}}`,
+			`{"t":"agent","ts":102.000,"msg":{"type":"result","subtype":"success","total_cost_usd":10,"usage":{"cache_read_input_tokens":1000,"output_tokens":10}}}`,
 			`{"t":"agent","ts":150.000,"msg":{"type":"system","subtype":"init","session_id":"s"}}`,
-			`{"t":"agent","ts":202.000,"msg":{"type":"result","subtype":"success","total_cost_usd":1}}`,
-			`{"t":"agent","ts":302.000,"msg":{"type":"result","subtype":"success","total_cost_usd":3}}`,
+			`{"t":"agent","ts":202.000,"msg":{"type":"result","subtype":"success","total_cost_usd":1,"usage":{"cache_read_input_tokens":2000,"output_tokens":20}}}`,
+			`{"t":"agent","ts":302.000,"msg":{"type":"result","subtype":"success","total_cost_usd":3,"usage":{"cache_read_input_tokens":3000,"output_tokens":30}}}`,
 			`{"t":"result","state":"failed","error":"agent exited: exit status 255"}`,
 		)
 		loaded, err := loadLogHeader(testlog.New(t), path, true, backends.Default("", nil))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if r := loaded.LastTrailer; r == nil || r.CostUSD != 12 || !r.CostKnown || r.CostComplete {
+		r := loaded.LastTrailer
+		if r == nil || r.CostUSD != 12 || !r.CostKnown || r.CostComplete {
 			t.Fatalf("trailer = %+v; want 12 known and incomplete", r)
+		}
+		if r.Usage.CacheReadInputTokens != 6000 || r.Usage.OutputTokens != 60 {
+			t.Errorf("usage = %+v; want every turn's tokens summed", r.Usage)
 		}
 	})
 	t.Run("NativeDSHMetricsColdCacheAndFull", func(t *testing.T) {
@@ -516,6 +520,8 @@ func TestLoadLogHeader(t *testing.T) {
 	})
 	t.Run("NativeMetadataLifecycle", func(t *testing.T) {
 		t.Parallel()
+		// A revival trailer without accounting sums every root result, as the
+		// live task does: Claude reports each turn's usage, not a running total.
 		for _, tc := range []struct {
 			name, state, accounting string
 			cost                    float64
@@ -524,13 +530,13 @@ func TestLoadLogHeader(t *testing.T) {
 			usage                   agent.Usage
 		}{
 			{"interrupted revival", "running", "", 1.25, 3500 * time.Millisecond, 4,
-				agent.Usage{InputTokens: 100, OutputTokens: 40, CacheCreationInputTokens: 12,
+				agent.Usage{InputTokens: 110, OutputTokens: 44, CacheCreationInputTokens: 12,
 					CacheWrites:          tokens.CacheWrites{{TTL: 5 * time.Minute, Tokens: 4}, {TTL: time.Hour, Tokens: 8}},
-					CacheReadInputTokens: 14, ReasoningOutputTokens: 9, CacheTTLSeconds: 300}},
+					CacheReadInputTokens: 14, ReasoningOutputTokens: 9}},
 			{"failed revival", "failed", "", 1.25, 3500 * time.Millisecond, 4,
-				agent.Usage{InputTokens: 100, OutputTokens: 40, CacheCreationInputTokens: 12,
+				agent.Usage{InputTokens: 110, OutputTokens: 44, CacheCreationInputTokens: 12,
 					CacheWrites:          tokens.CacheWrites{{TTL: 5 * time.Minute, Tokens: 4}, {TTL: time.Hour, Tokens: 8}},
-					CacheReadInputTokens: 14, ReasoningOutputTokens: 9, CacheTTLSeconds: 300}},
+					CacheReadInputTokens: 14, ReasoningOutputTokens: 9}},
 			{"authoritative trailer", "purged", `,"cost_usd":2.5,"duration":5,"num_turns":6,"input_tokens":200,"output_tokens":80,"cache_creation_input_tokens":20,"cache_writes":[{"ttl_seconds":3600,"tokens":20}],"cache_read_input_tokens":28,"reasoning_output_tokens":18`,
 				2.5, 5 * time.Second, 6, agent.Usage{InputTokens: 200, OutputTokens: 80, CacheCreationInputTokens: 20,
 					CacheWrites: tokens.CacheWrites{{TTL: time.Hour, Tokens: 20}}, CacheReadInputTokens: 28, ReasoningOutputTokens: 18}},

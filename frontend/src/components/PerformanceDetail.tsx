@@ -207,9 +207,7 @@ export default function PerformanceContent(props: PerformanceContentProps) {
             </span>
             <span class="updating-value" aria-busy={props.costUpdating ? "true" : undefined}>
               <span class={styles.usageLabel}>Cost </span>
-              {usage().costKnown
-                ? `${formatUSD(usage().costUSD)}${usage().costComplete ? "" : " known subtotal"}`
-                : "—"}
+              {usage().costKnown ? `${usage().costComplete ? "" : "≥ "}${formatUSD(usage().costUSD)}` : "—"}
             </span>
             <Show when={usage().costComplete && usage().costUSD > 0}>
               <span

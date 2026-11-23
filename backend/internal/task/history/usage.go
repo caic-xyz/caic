@@ -188,6 +188,10 @@ func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[usagedbv1.Usag
 				attributedEffort = ""
 			}
 			delta, ok := usageDelta(confirmed)
+			if r, isResult := confirmed.(*agent.ResultMessage); isResult && !r.Source.IsChild() {
+				// Claude reports a running total; the cost fold derives each turn's part.
+				delta.APIMs = costs.TurnAPIMs
+			}
 			switch m := confirmed.(type) {
 			case *agent.ToolUseMessage:
 				key := agent.ToolKeyForSource(m.Provenance(), m.ToolUseID)
@@ -315,7 +319,6 @@ func usageDelta(m agent.Message) (usagedbv1.Delta, bool) {
 		if m.IsError {
 			d.ErroredTurns = 1
 		}
-		d.APIMs = m.DurationAPIMs
 		d.WallMs = m.DurationMs
 		d.ContextWindow = m.ContextWindow
 	case *agent.SystemMessage:

@@ -50,7 +50,6 @@ export function createTaskHistory(id: string): TaskHistory {
   const [messages, setMessages] = createSignal<EventMessage[]>([], { equals: false });
   const [manifest, setManifest] = createSignal<HistoryManifest | null>(null);
   const [stats, setStats] = createSignal<EventStats[]>([]);
-  const [statsRetained, setStatsRetained] = createSignal(0);
   const [through, setThrough] = createSignal(0);
   const [epoch, setEpoch] = createSignal(0);
   const [loading, setLoading] = createSignal(true);
@@ -231,7 +230,6 @@ export function createTaskHistory(id: string): TaskHistory {
           setEpoch((revision) => revision + 1);
         setManifest(owner.manifest ?? value);
         setStats(owner.incomingStats?.samples ?? (sameScope ? untrack(stats) : []));
-        setStatsRetained(owner.incomingStats?.retained ?? (sameScope ? untrack(statsRetained) : 0));
         setThrough(owner.observedThrough);
         setMessages(decoded);
         publish(owner);
@@ -355,11 +353,7 @@ export function createTaskHistory(id: string): TaskHistory {
             alive(owner);
             const retained = snapshot.retained;
             owner.incomingStats = { samples: mergeStats([], snapshot.samples ?? [], retained), retained };
-            if (owner.bootstrap.kind === "live")
-              batch(() => {
-                setStats(owner.incomingStats?.samples ?? []);
-                setStatsRetained(retained);
-              });
+            if (owner.bootstrap.kind === "live") setStats(owner.incomingStats?.samples ?? []);
           }
         },
         onStats: (sample) => {
@@ -433,7 +427,6 @@ export function createTaskHistory(id: string): TaskHistory {
       setMessages([]);
       setManifest(null);
       setStats([]);
-      setStatsRetained(0);
     });
   });
   void discover();
@@ -441,7 +434,6 @@ export function createTaskHistory(id: string): TaskHistory {
     messages,
     manifest,
     stats,
-    statsRetained,
     through,
     epoch,
     loading,

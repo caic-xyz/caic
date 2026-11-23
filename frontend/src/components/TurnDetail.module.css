@@ -37,7 +37,9 @@
   color: var(--color-text-secondary);
 }
 
+/* Each value stays near its label instead of across a wide pane. */
 .details {
+  max-width: 36rem;
   margin-top: 0.6rem;
 }
 

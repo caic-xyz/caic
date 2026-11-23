@@ -1,22 +1,23 @@
-/* Turn-duration strip: bars on one scale; the current turn adds a band, a darker fill, and a base marker, and the running turn a hatched fill.
+/* Turn-duration strip: bars on a round-tick axis with gridlines and turn numbers, and an optional second lane in the same columns; the current turn adds a band, a darker fill, and a base marker, and the running turn a hatched fill.
    Dense strips drop the gap; a strip that still overflows fades its clipped edges. */
 
 .chart {
   --strip-height: 4rem;
   --strip-marker: 3px;
   --strip-marker-width: 0.5rem;
+  --lane-height: 6rem;
+  --lane-gap: 1rem;
+  --label-height: 0.9rem;
+  --grid-line: var(--color-border-light);
 
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 0.4rem;
 }
 
-/* The scale labels the top and the zero baseline of the bars. */
 .scale {
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  height: var(--strip-height);
   font-size: 0.66rem;
   font-variant-numeric: tabular-nums;
   line-height: 1;
@@ -24,21 +25,41 @@
   text-align: right;
 }
 
+/* Every tick label shares one grid cell; each rises from the baseline by its
+   share of the axis and centers on its gridline. */
+.axis {
+  --axis-height: var(--strip-height);
+
+  display: grid;
+  height: var(--axis-height);
+}
+
+.tick {
+  --at: 0;
+
+  grid-area: 1 / 1;
+  align-self: end;
+  margin-bottom: calc(var(--at) * var(--axis-height));
+  transform: translateY(50%);
+}
+
+.laneAxis {
+  --axis-height: var(--lane-height);
+
+  margin-top: var(--lane-gap);
+}
+
 .strip {
   position: relative;
   display: flex;
-  gap: 1px;
 
-  /* The inline padding keeps the end bars' wider markers inside the scroll box. */
-  padding: 0 calc(var(--strip-marker-width) / 2) calc(var(--strip-marker) + 1px);
+  /* The inline padding keeps the end bars' wider markers inside the scroll
+     box, and the end padding the last column's centered four-digit label. */
+  padding: 0 0.8rem 0 calc(var(--strip-marker-width) / 2);
   margin: 0;
   overflow-x: auto;
   list-style: none;
   scrollbar-width: thin;
-}
-
-.dense {
-  gap: 0;
 }
 
 .clipStart {
@@ -59,14 +80,71 @@
   );
 }
 
-/* Bars widen to fill the strip; many turns scroll at their minimum width. */
+/* Bars widen to fill the strip; many turns scroll at their minimum width.
+   Each column paints the gridlines behind its bar, and its leading padding is
+   the gap between bars, so the lines run unbroken across the strip. */
 .item {
+  --strip-parts: 1;
+  --lane-parts: 1;
+  --strip-grid: repeating-linear-gradient(
+    to bottom,
+    var(--grid-line) 0 1px,
+    transparent 1px calc(100% / var(--strip-parts))
+  );
+  --lane-grid: repeating-linear-gradient(
+    to bottom,
+    var(--grid-line) 0 1px,
+    transparent 1px calc(100% / var(--lane-parts))
+  );
+
+  display: flex;
   flex: 1 0 0.3rem;
+  flex-direction: column;
+  min-width: 0;
   max-width: 2rem;
+  background: var(--strip-grid) 0 0 / 100% var(--strip-height) no-repeat;
+}
+
+.item + .item {
+  padding-left: 1px;
+}
+
+.withLane .item {
+  background:
+    var(--strip-grid) 0 0 / 100% var(--strip-height) no-repeat,
+    var(--lane-grid) 0 calc(var(--strip-height) + var(--lane-gap)) / 100% var(--lane-height) no-repeat;
 }
 
 .dense .item {
   flex-basis: 1px;
+}
+
+.dense .item + .item {
+  padding-left: 0;
+}
+
+.laneCell {
+  height: var(--lane-height);
+  margin-top: var(--lane-gap);
+}
+
+/* Labels center on narrow columns without widening them and clear the
+   current turn's marker below its bar. */
+.label {
+  display: flex;
+  justify-content: center;
+  height: var(--label-height);
+  margin-top: calc(var(--strip-marker) + 1px);
+  overflow: visible;
+  font-size: 0.66rem;
+  font-variant-numeric: tabular-nums;
+  line-height: var(--label-height);
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+}
+
+.withLane .label {
+  margin-top: 0;
 }
 
 .bar {

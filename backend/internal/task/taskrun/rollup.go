@@ -16,7 +16,8 @@ import (
 //
 // Adapters identify additive usage and context-only result snapshots so live
 // and restored rollups count the same token contributions for every harness.
-func rollupEvent(m agent.Message, at, producerAt time.Time, replayed bool, model, effort string, cost task.CostSnapshot) (usagedb.Event, bool) {
+// turnAPIMs is the task's API time for the turn a root result ends.
+func rollupEvent(m agent.Message, at, producerAt time.Time, replayed bool, model, effort string, cost task.CostSnapshot, turnAPIMs int64) (usagedb.Event, bool) {
 	e := usagedb.Event{At: at, Replayed: replayed, Model: model, Effort: effort, CostUSD: cost.USD,
 		CostProvenance: usagedbv1.CostProvenance{ReportedUSD: cost.ReportedUSD, EstimatedUSD: cost.EstimatedUSD, ReportedParts: cost.ReportedParts, EstimatedParts: cost.EstimatedParts, UnknownParts: cost.UnknownParts}}
 	switch m := m.(type) {
@@ -38,7 +39,7 @@ func rollupEvent(m agent.Message, at, producerAt time.Time, replayed bool, model
 		if m.IsError {
 			e.Delta.ErroredTurns++
 		}
-		e.Delta.APIMs = m.DurationAPIMs
+		e.Delta.APIMs = turnAPIMs
 		e.Delta.WallMs = m.DurationMs
 		e.Delta.ContextWindow = m.ContextWindow
 		// Turn boundary: the sink flushes so a crash never loses

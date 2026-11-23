@@ -72,19 +72,19 @@ test("compacted bodies stay unloaded until disclosure while the current session 
     await expect(page.getByTestId("task-analytics-charts")).toBeVisible();
     expect(requested).toBe(false);
     await page.goBack();
-    await page.getByRole("button", { name: /Ended by compaction/ }).click();
+    await page.getByRole("button", { name: /Compacted session/ }).click();
     await expect.poll(() => requested).toBe(true);
     await expect(page.getByRole("status", { name: "Loading session history" })).toBeVisible();
     // Other pages in this four-request batch can already be decoded while its
     // first page is gated. Closing must release those partial results too.
     await expect.poll(async () => (await retainedChildOutputs(page, cdp)).count).toBeGreaterThan(100);
-    await page.getByRole("button", { name: /Ended by compaction/ }).click();
+    await page.getByRole("button", { name: /Compacted session/ }).click();
     await expect(page.getByRole("status", { name: "Loading session history" })).toHaveCount(0);
     expect((await retainedChildOutputs(page, cdp)).count).toBe(0);
     release.resolve();
     await finished.promise;
     expect((await retainedChildOutputs(page, cdp)).count).toBe(0);
-    await page.getByRole("button", { name: /Ended by compaction/ }).click();
+    await page.getByRole("button", { name: /Compacted session/ }).click();
     await expect(page.getByRole("navigation", { name: "Previous context skills" })).toBeVisible();
     await expect(page.getByTestId("history-section").locator('[data-anchor-key^="turn:"]').first()).toBeVisible();
     await expect(page.getByRole("status", { name: "Loading session history" })).toHaveCount(0);
@@ -274,7 +274,7 @@ for (const width of [390, 1280]) {
     const baseline = await retainedChildOutputs(page, cdp);
     expect(baseline.count).toBe(0);
     const section = page.locator(`[data-testid="history-section"][data-section-id="${archived.id}"]`);
-    const toggle = section.getByRole("button", { name: /Ended by compaction/ });
+    const toggle = section.getByRole("button", { name: /Compacted session/ });
     const bodyTransfers = () =>
       page.evaluate(() =>
         (performance.getEntriesByType("resource") as PerformanceResourceTiming[])

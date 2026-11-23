@@ -132,7 +132,6 @@ describe("TurnDetail", () => {
     expect(detail("Effort")).toBe("high");
     expect(detail("Turn time")).toBe("80.000 s");
     expect(detail("API time")).toBe("60.000 s");
-    expect(detail("API share of turn time")).toBe("75%");
     expect(detail("New input tokens")).toBe("1,200");
     expect(detail("Cache write tokens")).toBe("2,000");
     expect(detail("Cache read tokens")).toBe("40,000");
@@ -285,7 +284,6 @@ describe("TurnDetail", () => {
     expect(screen.queryByRole("rowheader", { name: "Effort" })).not.toBeInTheDocument();
     expect(screen.queryByRole("rowheader", { name: "Cost source" })).not.toBeInTheDocument();
     expect(detail("API time")).toBe("—");
-    expect(detail("API share of turn time")).toBe("—");
     expect(detail("Thinking tokens")).toBe("300");
     expect(detail("Cost")).toBe("Unavailable");
   });

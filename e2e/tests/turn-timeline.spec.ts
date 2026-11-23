@@ -79,13 +79,12 @@ async function expectCallsAndTools(pane: Locator, path: string) {
   );
   expect(labels.map((label) => label.text)).toEqual(["1", "5", "10", "15", "20", "25", "29"]);
   for (const [i, label] of labels.slice(1).entries()) expect(label.left).toBeGreaterThan(labels[i]?.right ?? 0);
-  await calls.getByText(/^Call tokens, ~ marks estimated costs \(29\)$/).click();
+  await calls.getByText(/^Call tokens \(29\)$/).click();
   const table = calls.getByRole("region", { name: "Call tokens" });
   await expect(table.getByRole("row")).toHaveCount(30);
   await expect(table.getByRole("row").nth(1)).toContainText("~$");
 
   const tools = pane.getByTestId("turn-tools");
-  await expect(tools).toContainText("Concurrent calls overlap, so totals can exceed the turn time.");
   await expect(tools.getByTestId("turn-tool")).toHaveCount(11);
   // Every column fits the pane, even beside a long MCP tool name.
   const toolTable = tools.getByRole("region", { name: "Tool time" });
@@ -123,7 +122,7 @@ for (const width of [1280, 390]) {
     const spans = timeline.getByTestId("turn-timeline-span");
     await expect(spans.first()).toBeVisible();
     await expect(timeline.getByTestId("turn-timeline-lane")).toHaveText([
-      /^Model \(inferred\) /,
+      /^Model /,
       /^Tools 24 calls · /,
       /^Subagents 1$/,
       /^Subagent tools 4 calls$/,
@@ -213,10 +212,7 @@ for (const width of [1280, 390]) {
     await page.goto(`/task/@${id}/perf/turns/1`);
     const timeline = page.getByTestId("task-view-pane").getByTestId("turn-timeline");
     await expect(timeline.getByTestId("turn-timeline-span").first()).toBeVisible();
-    await expect(timeline.getByTestId("turn-timeline-lane")).toHaveText([
-      /^Model \(inferred\) /,
-      /^Tools \d+ calls? · /,
-    ]);
+    await expect(timeline.getByTestId("turn-timeline-lane")).toHaveText([/^Model /, /^Tools \d+ calls? · /]);
     await expectContained(page);
     await timeline.scrollIntoViewIfNeeded();
     await page.screenshot({ path: testInfo.outputPath(`turn-timeline-simple-${width}.png`) });
@@ -262,7 +258,6 @@ for (const width of [1280, 390]) {
       pane.getByTestId("turn-strip").getByRole("link", { name: /^Turn 1, running, \d+\.\d{3} s so far$/ }),
     ).toHaveAttribute("aria-current", "page");
     await expect(pane.getByTestId("turn-summary-line")).toHaveText(/^Running · \d+:\d\d so far/);
-    await expect(timeline).toContainText("The turn is running: its latest model time is provisional.");
     await expect(timeline.getByText(/^now /)).toBeVisible();
     await expect(read).toHaveAccessibleName(/, still running$/);
     await page.screenshot({ path: testInfo.outputPath(`turn-live-running-${width}.png`) });
@@ -334,7 +329,6 @@ for (const width of [1280, 390]) {
       "CPU peak 310.0% · scale 0–400%, 100% = 1 CPU",
       /^Memory peak 24\.\d% of limit · scale 0–100%$/,
     ]);
-    await expect(resources.getByTestId("turn-resources-note")).toHaveCount(0);
     const tracks = await page.getByTestId("turn-timeline-plot").evaluate((plot) => {
       const box = (el: Element | null | undefined) => {
         if (!el) throw new Error("missing track");

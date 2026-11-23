@@ -1,4 +1,4 @@
-// ContextDetail shows one context section from its server-derived summary: its turns on the task's strip scale, why it ended, context growth per turn, and totals.
+// ContextDetail shows one context section from its server-derived summary: each turn's duration and end context on one turn axis, why it ended, and totals.
 
 import { createMemo, For, Show } from "solid-js";
 import PreviousIcon from "@material-symbols/svg-400/outlined/chevron_left.svg?solid";
@@ -12,7 +12,7 @@ import ActionButton from "./ActionButton";
 import ChartDataTable from "./ChartDataTable";
 import { PerformanceBody, PerformanceSection, useArrowStepping } from "./PerformanceDetail";
 import Table from "./Table";
-import TurnStrip, { createRunningElapsed } from "./TurnStrip";
+import TurnStrip, { createRunningElapsed, type TurnStripLane } from "./TurnStrip";
 import styles from "./ContextDetail.module.css";
 
 const growthColumns = [
@@ -27,12 +27,12 @@ const growthColumns = [
   "Cost",
 ] as const;
 
-// labelStep labels every column of a short context and round turn positions
-// of a long one, so labels never touch at the narrowest column width.
-function labelStep(count: number): number {
-  if (count <= 12) return 1;
-  if (count <= 30) return 5;
-  return count <= 60 ? 10 : 25;
+// tokenTickStep is the 1, 2, or 5 power-of-ten step that divides a token
+// axis into at most parts intervals.
+function tokenTickStep(max: number, parts: number): number {
+  const rough = Math.max(1, max / parts);
+  const magnitude = 10 ** Math.floor(Math.log10(rough));
+  return [1, 2, 5, 10].map((factor) => factor * magnitude).find((step) => step >= rough) ?? 10 * magnitude;
 }
 
 interface Totals {
@@ -100,7 +100,7 @@ function costText(turn: HistoryTurn): string {
 export default function ContextDetail(props: {
   section: HistorySection;
   sections: readonly HistorySection[];
-  // turns are all the task's completed turns; the strip shares their scale.
+  // turns are all the task's completed turns.
   turns: readonly HistoryTurn[];
   running: HistoryRunningTurn | null;
   href: (section: string) => string;
@@ -116,7 +116,6 @@ export default function ContextDetail(props: {
   const turns = createMemo(() => props.turns.filter((turn) => turn.sectionID === props.section.id));
   const running = () => (props.running?.sectionID === props.section.id ? props.running : null);
   const runningMs = createRunningElapsed(running);
-  const scaleMs = () => props.turns.reduce((max, turn) => Math.max(max, turn.durationMs), 0);
   const totals = createMemo(() => totalsOf(turns()));
   const models = () => [
     ...new Set(
@@ -135,7 +134,7 @@ export default function ContextDetail(props: {
     ];
     if (totals().costCount > 0)
       parts.push({
-        value: `${totals().estimated ? "~" : ""}${formatUSD(totals().costUSD)}${costComplete() ? "" : "+"}`,
+        value: `${costComplete() ? "" : "≥ "}${totals().estimated ? "~" : ""}${formatUSD(totals().costUSD)}`,
         label: "",
         cost: true,
       });
@@ -143,19 +142,39 @@ export default function ContextDetail(props: {
     return parts;
   };
 
-  // The growth chart's explicit domain holds every turn's context, every
-  // window, and the context the harness compacted.
+  // The context lane's round axis holds every turn's context, every window,
+  // and the context the harness compacted.
   const compactedFrom = () => {
     const system = props.section.endBoundary?.message.system;
     return system?.subtype === "compact_boundary" ? (system.contextTokensBefore ?? 0) : 0;
   };
-  const contextMax = createMemo(() =>
-    Math.max(
+  const contextLane = createMemo((): TurnStripLane => {
+    const max = Math.max(
       1,
       compactedFrom(),
       ...turns().map((turn) => Math.max(turn.contextTokens ?? 0, turn.usage.contextWindow ?? 0)),
-    ),
-  );
+    );
+    const step = tokenTickStep(max, 4);
+    const top = Math.ceil(max / step) * step;
+    return {
+      top,
+      step,
+      format: formatTokens,
+      cell: (turn) => (
+        <div class={styles.plot} data-testid="context-growth-turn">
+          <Show when={(turn.usage.contextWindow ?? 0) > 0}>
+            <span class={styles.window} style={{ "--share": (turn.usage.contextWindow ?? 0) / top }} />
+          </Show>
+          <Show when={(turn.contextTokens ?? 0) > 0}>
+            <span class={styles.fill} style={{ "--share": (turn.contextTokens ?? 0) / top }} />
+          </Show>
+          <Show when={compactedFrom() > 0}>
+            <span class={styles.compacted} style={{ "--share": compactedFrom() / top }} />
+          </Show>
+        </div>
+      ),
+    };
+  });
   const known = () => turns().filter((turn) => (turn.contextTokens ?? 0) > 0);
   const growthRows = () =>
     turns().map((turn) => [
@@ -174,9 +193,9 @@ export default function ContextDetail(props: {
     const first = values[0];
     const last = values.at(-1);
     if (!first || !last) return "Context sizes are unknown for these turns.";
-    if (first === last) return `${formatTokens(first.contextTokens ?? 0)} after turn ${first.number}`;
+    if (first === last) return `Context ${formatTokens(first.contextTokens ?? 0)} after turn ${first.number}`;
     const peak = values.reduce((max, turn) => Math.max(max, turn.contextTokens ?? 0), 0);
-    return `${formatTokens(first.contextTokens ?? 0)} after turn ${first.number} → ${formatTokens(last.contextTokens ?? 0)} after turn ${last.number} · peak ${formatTokens(peak)}`;
+    return `Context ${formatTokens(first.contextTokens ?? 0)} after turn ${first.number} → ${formatTokens(last.contextTokens ?? 0)} after turn ${last.number} · peak ${formatTokens(peak)}`;
   };
   const row = (label: string, value: string, updating: boolean) => (
     <tr>
@@ -198,7 +217,7 @@ export default function ContextDetail(props: {
   return (
     <PerformanceBody testId="context-detail">
       <PerformanceSection
-        title="Turn durations"
+        title="Turn time and context"
         actions={
           <span class={styles.stepper}>
             <ActionButton label="Previous context" disabled={previous() === null} onClick={() => go(previous())}>
@@ -210,14 +229,50 @@ export default function ContextDetail(props: {
           </span>
         }
       >
-        <TurnStrip
-          turns={turns()}
-          running={running()}
-          runningMs={runningMs()}
-          scaleMs={scaleMs()}
-          current={null}
-          href={props.turnHref}
-        />
+        <div class={styles.growth} data-testid="context-growth">
+          <TurnStrip
+            turns={turns()}
+            running={running()}
+            runningMs={runningMs()}
+            current={null}
+            href={props.turnHref}
+            lane={contextLane()}
+          />
+          <Show when={turns().length > 0}>
+            <ul class={styles.legend} aria-hidden="true">
+              <li>
+                <span class={`${styles.swatch} ${styles.durationSwatch}`} />
+                Turn time
+              </li>
+              <li>
+                <span class={`${styles.swatch} ${styles.fillSwatch}`} />
+                Context at turn end
+              </li>
+              <Show when={turns().some((turn) => (turn.usage.contextWindow ?? 0) > 0)}>
+                <li>
+                  <span class={`${styles.swatch} ${styles.windowSwatch}`} />
+                  Window
+                </li>
+              </Show>
+              <Show when={compactedFrom() > 0}>
+                <li>
+                  <span class={`${styles.swatch} ${styles.compactedSwatch}`} />
+                  Compacted at
+                </li>
+              </Show>
+            </ul>
+            <p class={styles.note} data-testid="context-growth-summary">
+              {growthSummary()}
+            </p>
+            <ChartDataTable
+              caption="Turns in this context"
+              regionLabel="Turns in this context"
+              columns={growthColumns}
+              rows={growthRows()}
+              updatingColumns={props.costUpdating ? [growthColumns.indexOf("Cost")] : undefined}
+            />
+          </Show>
+        </div>
       </PerformanceSection>
       <PerformanceSection label={`Context ${props.section.id}`} testId="context-summary">
         <p class={styles.summary} data-testid="context-summary-line">
@@ -240,74 +295,6 @@ export default function ContextDetail(props: {
         <p class={styles.end} data-testid="context-end">
           {contextEndDetail(props.section)}
         </p>
-        <Show when={turns().length > 0}>
-          <figure class={styles.growth} data-testid="context-growth">
-            <figcaption class={styles.caption}>
-              <span class={styles.title}>Context at each turn's end</span>
-              <span class={styles.note}>{growthSummary()}</span>
-            </figcaption>
-            <div
-              class={styles.chart}
-              role="img"
-              aria-label={`Context size at the end of each turn: ${growthSummary()}. The turns table lists exact values.`}
-            >
-              <div class={styles.scale} aria-hidden="true">
-                <span>{formatTokens(contextMax())}</span>
-                <span>0</span>
-              </div>
-              <ol class={styles.columns} aria-hidden="true">
-                <For each={turns()}>
-                  {(turn, index) => (
-                    <li class={styles.column} data-testid="context-growth-turn">
-                      <div class={styles.plot}>
-                        <Show when={(turn.usage.contextWindow ?? 0) > 0}>
-                          <span
-                            class={styles.window}
-                            style={{ "--share": (turn.usage.contextWindow ?? 0) / contextMax() }}
-                          />
-                        </Show>
-                        <Show when={(turn.contextTokens ?? 0) > 0}>
-                          <span class={styles.fill} style={{ "--share": (turn.contextTokens ?? 0) / contextMax() }} />
-                        </Show>
-                        <Show when={compactedFrom() > 0}>
-                          <span class={styles.compacted} style={{ "--share": compactedFrom() / contextMax() }} />
-                        </Show>
-                      </div>
-                      <span class={styles.label}>
-                        {index() % labelStep(turns().length) === 0 || index() === turns().length - 1 ? turn.number : ""}
-                      </span>
-                    </li>
-                  )}
-                </For>
-              </ol>
-            </div>
-            <ul class={styles.legend} aria-hidden="true">
-              <li>
-                <span class={`${styles.swatch} ${styles.fillSwatch}`} />
-                Context
-              </li>
-              <Show when={turns().some((turn) => (turn.usage.contextWindow ?? 0) > 0)}>
-                <li>
-                  <span class={`${styles.swatch} ${styles.windowSwatch}`} />
-                  Window
-                </li>
-              </Show>
-              <Show when={compactedFrom() > 0}>
-                <li>
-                  <span class={`${styles.swatch} ${styles.compactedSwatch}`} />
-                  Compacted at
-                </li>
-              </Show>
-            </ul>
-            <ChartDataTable
-              caption="Turns in this context"
-              regionLabel="Turns in this context"
-              columns={growthColumns}
-              rows={growthRows()}
-              updatingColumns={props.costUpdating ? [growthColumns.indexOf("Cost")] : undefined}
-            />
-          </figure>
-        </Show>
         <Table label="Context totals" class={styles.details}>
           <tbody>
             {row("Started", started(), false)}

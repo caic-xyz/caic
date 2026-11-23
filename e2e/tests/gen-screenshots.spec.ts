@@ -759,7 +759,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await page.goto(`/task/@${turnId}/perf/turns/1`);
   const turnView = page.getByTestId("task-view-pane");
   await expect(turnView.getByTestId("turn-timeline").getByTestId("turn-timeline-lane")).toHaveText([
-    /^Model \(inferred\) /,
+    /^Model /,
     /^Tools 24 calls · /,
     /^Subagents 1$/,
     /^Subagent tools 4 calls$/,

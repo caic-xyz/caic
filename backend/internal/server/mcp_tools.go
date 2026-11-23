@@ -806,7 +806,7 @@ func (m *mcpTools) handleGetUsage(ctx context.Context, call *mcp.ToolRequest[str
 		if w.CostKnown {
 			cost = formatUSD(w.CostUSD)
 		} else if w.CostUSD != 0 {
-			cost = formatUSD(w.CostUSD) + " known subtotal; total unknown"
+			cost = "≥ " + formatUSD(w.CostUSD)
 		}
 		lines = append(lines, fmt.Sprintf("%s cost: %s (%d tokens)", w.Duration, cost, w.InputTokens+w.OutputTokens))
 	}

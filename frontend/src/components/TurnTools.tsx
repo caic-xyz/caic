@@ -1,27 +1,32 @@
-// TurnTools breaks a turn's tool time down by tool name: calls, total and longest time, with total-time bars on one scale.
+// TurnTools breaks a turn's or a task's tool time down by tool name: calls, total and, for a turn, longest time, with total-time bars on one scale.
 
 import { For, Show } from "solid-js";
 
-import type { HistoryTurnTool } from "@sdk/types.gen";
 import { formatExactSeconds } from "../timing";
 import Table from "./Table";
 import styles from "./TurnTools.module.css";
 
-export default function TurnTools(props: { tools: readonly HistoryTurnTool[] }) {
+// ToolTime is one tool name's completed calls; a turn also reports its longest call.
+export interface ToolTime {
+  name: string;
+  calls: number;
+  durationMs: number;
+  longestMs?: number;
+}
+
+export default function TurnTools(props: { tools: readonly ToolTime[] }) {
   const longest = () => Math.max(1, ...props.tools.map((tool) => tool.durationMs));
+  const showLongest = () => props.tools.every((tool) => tool.longestMs !== undefined);
   return (
     <figure class={styles.tools} data-testid="turn-tools">
       <figcaption class={styles.caption}>
         <span class={styles.title}>Tool time</span>
-        <Show when={props.tools.length > 0}>
-          <span class={styles.note}>Concurrent calls overlap, so totals can exceed the turn time.</span>
-        </Show>
       </figcaption>
       <Show
         when={props.tools.length > 0}
         fallback={
           <p class={styles.empty} data-testid="turn-tools-empty">
-            No tool calls in this turn.
+            No tool calls.
           </p>
         }
       >
@@ -31,7 +36,9 @@ export default function TurnTools(props: { tools: readonly HistoryTurnTool[] }) 
               <th scope="col">Tool</th>
               <th scope="col">Calls</th>
               <th scope="col">Total</th>
-              <th scope="col">Longest</th>
+              <Show when={showLongest()}>
+                <th scope="col">Longest</th>
+              </Show>
             </tr>
           </thead>
           <tbody>
@@ -44,7 +51,9 @@ export default function TurnTools(props: { tools: readonly HistoryTurnTool[] }) 
                   </th>
                   <td>{tool.calls.toLocaleString()}</td>
                   <td>{formatExactSeconds(tool.durationMs)}</td>
-                  <td>{formatExactSeconds(tool.longestMs)}</td>
+                  <Show when={showLongest()}>
+                    <td>{formatExactSeconds(tool.longestMs ?? 0)}</td>
+                  </Show>
                 </tr>
               )}
             </For>

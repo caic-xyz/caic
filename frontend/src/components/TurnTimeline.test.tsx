@@ -115,22 +115,21 @@ describe("TurnTimeline", () => {
 
     const lanes = screen.getAllByTestId("turn-timeline-lane").map((lane) => lane.firstElementChild?.textContent);
     expect(lanes).toEqual([
-      "Model (inferred) 0:20",
+      "Model 0:20",
       "Tools 3 calls · 0:40",
       "Subagents 1",
       "Subagent tools 1 call",
       "Background 1",
     ]);
-    expect(screen.getByTestId("turn-timeline")).toHaveTextContent("Model time is inferred");
     expect(span(/^Tools: Bash go test, at 10\.000 s, lasts 20\.000 s, failed$/)).toBeInTheDocument();
-    const outliving = span(/^Background: npm run dev, at 35\.000 s, ends 3600\.000 s after the turn$/);
+    const outliving = span(/^Background: npm run dev, at 35\.000 s, ends 3,600\.000 s after the turn$/);
     expect(within(outliving).getByTestId("turn-timeline-beyond")).toBeInTheDocument();
     expect(screen.getByTestId("turn-timeline-omitted")).toHaveTextContent(
       "Not shown: 3 shorter tool calls (0:02 in total).",
     );
     const table = within(screen.getByRole("region", { name: "Timeline spans" }));
     const row = table.getByRole("button", { name: "npm run dev" }).closest("tr");
-    expect(row).toHaveTextContent("Backgroundnpm run dev35.000 s3660.000 s (after the turn)");
+    expect(row).toHaveTextContent("Backgroundnpm run dev35.000 s3,660.000 s (after the turn)");
   });
 
   it("marks a running turn's latest model time provisional and grows in place", async () => {
@@ -152,9 +151,8 @@ describe("TurnTimeline", () => {
     const { setShown } = renderTimeline(true, running, null);
     await waitFor(() => expect(screen.getAllByTestId("turn-timeline-span")).toHaveLength(3));
 
-    expect(screen.getByTestId("turn-timeline")).toHaveTextContent("The turn is running");
     expect(screen.getByText(/^now/)).toHaveTextContent("now 0:12");
-    const latest = span(/^Model \(inferred\): Model time \(inferred, provisional\), at 9\.000 s, so far 3\.000 s/);
+    const latest = span(/^Model: Model time, at 9\.000 s, so far 3\.000 s/);
     expect(latest.className).toMatch(/_provisional_/);
     expect(screen.getByText("Resources")).toBeInTheDocument();
 
@@ -215,7 +213,7 @@ describe("TurnTimeline", () => {
     await waitFor(() => expect(screen.getAllByTestId("turn-timeline-span")).toHaveLength(1));
     expect(screen.getByText(/^now/)).toHaveTextContent("now 0:15");
     expect(screen.getByTestId("turn-timeline-plot")).toHaveAccessibleName(/^Turn 2 timeline, axis ends now, at 0:15; /);
-    expect(span(/^Model \(inferred\): .*so far 15\.400 s, provisional$/)).toBeInTheDocument();
+    expect(span(/^Model: .*so far 15\.400 s$/)).toBeInTheDocument();
   });
 
   it("is one Tab stop whose arrow keys move between spans and whose Enter and Space reveal them", async () => {
@@ -224,12 +222,12 @@ describe("TurnTimeline", () => {
     await waitFor(() => expect(screen.getAllByTestId("turn-timeline-span")).toHaveLength(8));
 
     await user.tab();
-    expect(document.activeElement).toBe(span(/^Model \(inferred\): Model time \(inferred\), from the turn start/));
+    expect(document.activeElement).toBe(span(/^Model: Model time, from the turn start/));
     expect(screen.getAllByTestId("turn-timeline-span").filter((el) => el.tabIndex === 0)).toEqual([
       document.activeElement,
     ]);
     await user.keyboard("{ArrowRight}");
-    expect(document.activeElement).toBe(span(/^Model \(inferred\): Model time \(inferred\), at 30\.000 s/));
+    expect(document.activeElement).toBe(span(/^Model: Model time, at 30\.000 s/));
     await user.keyboard("{ArrowDown}");
     expect(document.activeElement).toBe(span(/^Tools: Bash, at 35\.000 s/));
     await user.keyboard("{Enter}");

@@ -118,8 +118,22 @@ function isVisualTimelineEvent(event: EventMessage): boolean {
 
 // formatExactSeconds states a duration to the millisecond in one unit, so a
 // column of them aligns and compares; text alternatives use it for exact values.
+// Digit grouping keeps hours of seconds readable.
 export function formatExactSeconds(ms: number): string {
-  return `${(ms / 1000).toFixed(3)} s`;
+  return `${(ms / 1000).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })} s`;
+}
+
+// durationTickStep is the round step that divides a duration axis into at
+// most parts intervals.
+export function durationTickStep(duration: number, parts: number): number {
+  const rough = duration / parts;
+  for (const step of [
+    1, 2, 5, 10, 20, 50, 100, 200, 500, 1_000, 2_000, 5_000, 10_000, 15_000, 30_000, 60_000, 120_000, 300_000, 600_000,
+    900_000, 1_800_000, 3_600_000,
+  ]) {
+    if (step >= rough) return step;
+  }
+  return Math.ceil(rough / 3_600_000) * 3_600_000;
 }
 
 // formatTotalDuration shows "0s" for an unmeasured total instead of "0ms".

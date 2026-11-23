@@ -1,4 +1,4 @@
-// Tests the tool-time breakdown's exact rows, shared bar scale, overlap note, and empty line.
+// Tests the tool-time breakdown's exact rows, shared bar scale, task totals without a longest call, and empty line.
 
 import { describe, it } from "node:test";
 import { render, screen, within } from "@solidjs/testing-library";
@@ -7,7 +7,7 @@ import { expect } from "@tests/expect";
 import TurnTools from "./TurnTools";
 
 describe("TurnTools", () => {
-  it("lists each tool's calls, total, and longest time on one scale and notes that concurrent calls overlap", () => {
+  it("lists each tool's calls, total, and longest time on one scale", () => {
     render(() => (
       <TurnTools
         tools={[
@@ -24,15 +24,24 @@ describe("TurnTools", () => {
     ]);
     const share = (row: HTMLElement) => row.querySelector<HTMLElement>("span")?.style.getPropertyValue("--share");
     expect(rows.map(share)).toEqual(["1", "0.25"]);
-    expect(screen.getByTestId("turn-tools")).toHaveTextContent(
-      "Concurrent calls overlap, so totals can exceed the turn time.",
-    );
   });
 
-  it("states that a turn without tool calls has none", () => {
+  it("omits the longest column for task totals, which report none", () => {
+    render(() => <TurnTools tools={[{ name: "Bash", calls: 3, durationMs: 80_000 }]} />);
+
+    const table = screen.getByRole("region", { name: "Tool time" });
+    expect(within(table).queryByRole("columnheader", { name: "Longest" })).not.toBeInTheDocument();
+    expect([...within(table).getByTestId("turn-tool").children].map((cell) => cell.textContent)).toEqual([
+      "Bash",
+      "3",
+      "80.000 s",
+    ]);
+  });
+
+  it("states that there are no tool calls", () => {
     render(() => <TurnTools tools={[]} />);
 
-    expect(screen.getByTestId("turn-tools-empty")).toHaveTextContent("No tool calls in this turn.");
+    expect(screen.getByTestId("turn-tools-empty")).toHaveTextContent("No tool calls.");
     expect(screen.queryByRole("region", { name: "Tool time" })).not.toBeInTheDocument();
   });
 });

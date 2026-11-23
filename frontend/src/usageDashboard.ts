@@ -29,7 +29,7 @@ export interface UsageCostReadout {
   // amount is null when no part of the cost is known.
   amount: string | null;
   provenance: string;
-  // incomplete marks an amount that excludes unknown costs or lacks a source.
+  // incomplete marks a lower bound that excludes unpriced parts, or an amount without a source.
   incomplete: boolean;
 }
 
@@ -41,11 +41,17 @@ export function usageCostReadout(usd: number, cost: UsageDashboardCost): UsageCo
       : { amount: formatCost(usd), provenance: "source unknown", incomplete: true };
   }
   if (source === "partial") {
+    // Unpriced parts make the amount a lower bound.
     const known = cost.reportedUSD + cost.estimatedUSD;
+    const priced =
+      cost.reportedParts !== 0 && cost.estimatedParts !== 0
+        ? "reported + estimated"
+        : cost.reportedParts !== 0
+          ? "reported"
+          : "estimated";
     // Old rows can retain numeric amounts without proving their source.
-    const provenance =
-      Math.abs(usd - known) > 1e-9 ? `incomplete (${formatCost(known)} known)` : "known subtotal, incomplete";
-    return { amount: formatCost(usd), provenance, incomplete: true };
+    const provenance = Math.abs(usd - known) > 1e-9 ? `${formatCost(known)} ${priced}` : priced;
+    return { amount: `≥ ${formatCost(usd)}`, provenance, incomplete: true };
   }
   return {
     amount: formatCost(usd),

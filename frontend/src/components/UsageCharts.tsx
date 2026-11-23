@@ -254,7 +254,7 @@ export default function UsageCharts(props: {
             <h2>Cost per day</h2>
             <strong
               aria-label={`Total ${formatUsageCost(props.totals.costUSD, props.totals.cost)}`}
-              title="Cost over the selected range; incomplete totals exclude unknown costs"
+              title="Cost over the selected range"
             >
               {formatUsageCost(props.totals.costUSD, props.totals.cost)}
             </strong>
@@ -262,7 +262,7 @@ export default function UsageCharts(props: {
           <PlotHost
             label="Cost per day in US dollars"
             description={description(
-              "Cost in US dollars; readouts distinguish reports, estimates, and incomplete subtotals, and unknown costs are gaps",
+              "Cost in US dollars; readouts distinguish reports, estimates, and lower bounds, and unknown costs are gaps",
             )}
             draw={(width) => drawDailyTrend(data(), width, { area: false, series: [cost], y: "USD" })}
           />

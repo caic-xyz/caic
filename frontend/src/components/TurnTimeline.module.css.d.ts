@@ -13,7 +13,6 @@ declare const classes: {
   readonly "laneLabel": string;
   readonly "laneSummary": string;
   readonly "linked": string;
-  readonly "note": string;
   readonly "omitted": string;
   readonly "plot": string;
   readonly "provisional": string;

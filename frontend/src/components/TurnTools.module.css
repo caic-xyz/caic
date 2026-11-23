@@ -1,6 +1,8 @@
 /* Tool-time breakdown: one row per tool name; a bar under each name draws its total time on a scale shared by all rows. */
 
+/* Columns stay near their names instead of spreading across a wide pane. */
 .tools {
+  max-width: 36rem;
   margin: 0.75rem 0 0;
 }
 
@@ -16,11 +18,6 @@
   font-size: 0.8rem;
   font-weight: 600;
   color: var(--color-text-secondary);
-}
-
-.note {
-  font-size: 0.7rem;
-  color: var(--color-text-tertiary);
 }
 
 .empty {

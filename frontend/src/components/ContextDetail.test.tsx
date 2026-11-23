@@ -1,4 +1,4 @@
-// Tests a context's end reason for compacted, cleared, and current sections, its turns on the task's strip scale, growth chart domain, exact values, totals, and stepping.
+// Tests a context's end reason for compacted, cleared, and current sections, its turns on a round axis over its own longest turn, the context lane's domain, exact values, totals, and stepping.
 
 import { describe, it } from "node:test";
 import { Show } from "solid-js";
@@ -112,14 +112,17 @@ describe("ContextDetail", () => {
   it("explains a compacted context and plots its growth against the window and the compaction level", () => {
     renderContext("1", null);
 
-    expect(screen.getByTestId("context-end")).toHaveTextContent("Ended by compaction from 150,000 to 20,000 tokens");
+    expect(screen.getByTestId("context-end")).toHaveTextContent("Compacted session · 150,000 → 20,000 tokens");
     expect(screen.getByTestId("context-summary-line")).toHaveTextContent("2 turns · 1:00 turn time · $1 · 27kt tokens");
 
-    // The strip holds this context's turns on the task's scale.
+    // The strip holds this context's turns on a round axis over its longest
+    // turn, 0:45 for 40 s, not over the task's longest turn.
     const strip = within(screen.getByTestId("turn-strip"));
     const bars = strip.getAllByRole("link");
     expect(bars.map((bar) => bar.getAttribute("aria-label"))).toEqual(["Turn 1, 20.000 s", "Turn 2, 40.000 s"]);
-    expect(bars[1]?.querySelector<HTMLElement>("span")?.style.getPropertyValue("--turn-share")).toBe("0.5");
+    expect(Number(bars[1]?.querySelector<HTMLElement>("span")?.style.getPropertyValue("--turn-share"))).toBeCloseTo(
+      40 / 45,
+    );
 
     const columns = screen.getAllByTestId("context-growth-turn");
     expect(columns).toHaveLength(2);
@@ -127,7 +130,7 @@ describe("ContextDetail", () => {
       [...(column?.querySelectorAll<HTMLElement>("span") ?? [])]
         .find((span) => kind.test(span.className))
         ?.style.getPropertyValue("--share");
-    // The domain reaches the window, the largest value.
+    // The lane's round axis reaches the window, the largest value.
     expect(share(columns[0], /_fill_/)).toBe("0.3");
     expect(share(columns[1], /_fill_/)).toBe("0.7");
     expect(share(columns[1], /_window_/)).toBe("1");
@@ -152,7 +155,7 @@ describe("ContextDetail", () => {
   it("explains a cleared context without claiming an unknown size or a partial cost", () => {
     renderContext("2", null);
 
-    expect(screen.getByTestId("context-end")).toHaveTextContent("Ended by a context clear");
+    expect(screen.getByTestId("context-end")).toHaveTextContent("Cleared session");
     expect(document.querySelector('[class*="_compacted_"]')).toBeNull();
     expect(screen.getByTestId("context-growth")).toHaveTextContent("Context sizes are unknown for these turns.");
     expect(cells()[0]?.[2]).toBe("Unknown");
@@ -174,7 +177,8 @@ describe("ContextDetail", () => {
     expect(
       within(screen.getByTestId("turn-strip")).getByRole("link", { name: /^Turn 4, running, \d+\.\d{3} s so far$/ }),
     ).toHaveAttribute("href", turnHref(4));
-    expect(screen.queryByTestId("context-growth")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("context-growth-turn")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Turns in this context" })).not.toBeInTheDocument();
   });
 
   it("steps between contexts", async () => {
@@ -184,7 +188,7 @@ describe("ContextDetail", () => {
     expect(screen.getByRole("button", { name: "Previous context" })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "Next context" }));
     await waitFor(() => expect(window.location.pathname).toBe(href("2")));
-    expect(screen.getByTestId("context-end")).toHaveTextContent("context clear");
+    expect(screen.getByTestId("context-end")).toHaveTextContent("Cleared session");
     document.body.focus();
     await user.keyboard("{ArrowLeft}");
     await waitFor(() => expect(window.location.pathname).toBe(href("1")));

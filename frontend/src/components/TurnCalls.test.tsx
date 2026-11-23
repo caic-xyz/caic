@@ -108,7 +108,7 @@ describe("TurnCalls", () => {
     // The actor is text among numbers, so it reads from the left.
     const actorCells = screen.getAllByRole("cell", { name: "Agent" });
     expect(actorCells.map((cell) => cell.dataset.align)).toEqual(["text", "text"]);
-    expect(screen.getByText("Call tokens, ~ marks estimated costs (3)")).toBeInTheDocument();
+    expect(screen.getByText("Call tokens (3)")).toBeInTheDocument();
     expect(screen.getByTestId("turn-calls-summary")).toHaveTextContent(
       "cache read 44% of input · peak context 18.4kt of 200kt (9%) · 1.5kt output",
     );

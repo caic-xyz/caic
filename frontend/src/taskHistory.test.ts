@@ -102,9 +102,7 @@ describe("section history owner", () => {
     try {
       await loaded(owner);
       const handlers = defined(owner.connections.at(-1)).handlers;
-      assert.equal(owner.statsRetained(), 0);
       handlers.onStatsSnapshot?.({ samples: [sample(1), sample(2)], retained: 2 });
-      assert.equal(owner.statsRetained(), 2);
       handlers.onStats?.(sample(3));
       assert.deepEqual(
         owner.stats().map((s) => s.ts),

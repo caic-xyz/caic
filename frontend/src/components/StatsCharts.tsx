@@ -1,7 +1,7 @@
-// Shared resource history charts plus task token composition and cumulative tool-time charts.
+// Shared resource history charts plus the task's per-turn token lanes and its tool-time breakdown.
 
 import * as Plot from "@observablehq/plot";
-import { createMemo, createSignal, Show } from "solid-js";
+import { createMemo, Show } from "solid-js";
 
 import type { EventStats } from "@sdk/types.gen";
 
@@ -9,18 +9,17 @@ import { basePlot, crosshairMarks, labelMargin, tickMargin } from "../chartPlot"
 import { formatBytes, formatTokens } from "../formatting";
 import { deriveNetworkRates, type ToolTimingSummary } from "../taskStats";
 import type { HistoryTurn } from "@sdk/types.gen";
-import { formatTimingDuration } from "../timing";
 import ChartDataTable, { DataTable } from "./ChartDataTable";
-import { ToggleChip } from "./FormControls";
 import PlotHost from "./PlotHost";
+import TurnTools from "./TurnTools";
 import styles from "./StatsCharts.module.css";
 
 interface TokenDatum {
   turn: string;
   category: string;
   count: number;
-  share: number;
-  value: number;
+  // level is count as a share of its category's peak, so each lane has its own scale.
+  level: number;
 }
 
 interface ResourceDatum {
@@ -66,16 +65,8 @@ function formatThroughput(bytesPerSecond: number): string {
   return `${formatBytes(bytesPerSecond)}/s`;
 }
 
-function formatShare(share: number): string {
-  return formatPercent(share * 100);
-}
-
 function formatPercent(value: number): string {
   return `${value.toFixed(1)}%`;
-}
-
-function formatShareTick(share: number): string {
-  return `${Math.round(share * 100)}%`;
 }
 
 function throughputScaleMax(data: readonly ResourceDatum[]): number {
@@ -91,36 +82,66 @@ function formatExactSampleTime(ts: number): string {
   return new Date(ts).toLocaleString();
 }
 
-function tokenData(turns: readonly HistoryTurn[], asShare: boolean): TokenDatum[] {
-  return turns.flatMap((turn, i) => {
-    const usage = turn.usage;
-    const counts: readonly (readonly [string, number])[] = [
-      ["New input", usage.inputTokens],
-      ["Cache write", usage.cacheCreationInputTokens],
-      ["Cache read", usage.cacheReadInputTokens],
-      ["Output", usage.outputTokens],
-    ];
-    const total = counts.reduce((sum, [, count]) => sum + count, 0);
-    return counts.map(([category, count]) => {
-      const share = total > 0 ? count / total : 0;
-      return { category, count, share, turn: String(i + 1), value: asShare ? share : count };
-    });
-  });
+const tokenCounts = (turn: HistoryTurn): readonly (readonly [string, number])[] => [
+  ["New input", turn.usage.inputTokens],
+  ["Cache write", turn.usage.cacheCreationInputTokens],
+  ["Cache read", turn.usage.cacheReadInputTokens],
+  ["Output", turn.usage.outputTokens],
+];
+
+function tokenPeaks(turns: readonly HistoryTurn[]): Map<string, number> {
+  const peaks = new Map(tokenCategories.map((category) => [category, 0]));
+  for (const turn of turns)
+    for (const [category, count] of tokenCounts(turn)) peaks.set(category, Math.max(peaks.get(category) ?? 0, count));
+  return peaks;
 }
 
-// Cache reads usually outweigh the other categories by an order of magnitude, so
-// the absolute stack flattens them into the baseline; the share view keeps the
-// composition between them readable.
-function drawTokenChart(turns: readonly HistoryTurn[], width: number, asShare: boolean): Element {
-  const data = tokenData(turns, asShare);
+function tokenData(turns: readonly HistoryTurn[], peaks: ReadonlyMap<string, number>): TokenDatum[] {
+  return turns.flatMap((turn, i) =>
+    tokenCounts(turn).map(([category, count]) => {
+      const peak = peaks.get(category) ?? 0;
+      return { category, count, level: peak > 0 ? count / peak : 0, turn: String(i + 1) };
+    }),
+  );
+}
+
+// turnTicks keeps every turn label that fits: a round step such as 5 or 10,
+// and the first turn when the step leaves room beside it.
+function turnTicks(count: number, width: number): string[] {
+  const labelWidth = String(count).length * 6 + 8;
+  const fits = Math.max(1, Math.floor(width / labelWidth));
+  const step = [1, 2, 5, 10, 20, 25, 50, 100, 200, 500].find((candidate) => count / candidate <= fits) ?? 1000;
+  const ticks: string[] = [];
+  for (let n = 1; n <= count; n++) if ((n === 1 && step >= 5) || n % step === 0) ticks.push(String(n));
+  return ticks;
+}
+
+// Cache reads outweigh the other categories by orders of magnitude, so one
+// stacked scale flattens them into its baseline. Each category gets its own
+// lane scaled to its peak, which its label states, on one shared turn axis.
+function drawTokenChart(turns: readonly HistoryTurn[], width: number): Element {
+  const peaks = tokenPeaks(turns);
+  const data = tokenData(turns, peaks);
+  const marginLeft = 8;
+  const marginRight = 8;
+  const laneHeight = 52;
   return Plot.plot({
-    ...basePlot(width, 180),
-    marginLeft: 48,
-    marginBottom: 32,
-    x: { type: "band", label: "Turn", padding: 0.25, domain: turns.map((_, i) => String(i + 1)) },
-    y: asShare
-      ? { label: null, grid: true, domain: [0, 1], ticks: [0, 0.5, 1], tickFormat: formatShareTick }
-      : { label: "Tokens", grid: true, tickFormat: formatTokens },
+    ...basePlot(width, tokenCategories.length * laneHeight + 30),
+    marginLeft,
+    marginRight,
+    marginTop: 0,
+    marginBottom: 24,
+    x: {
+      type: "band",
+      label: null,
+      padding: 0.2,
+      domain: turns.map((_, i) => String(i + 1)),
+      ticks: turnTicks(turns.length, width - marginLeft - marginRight),
+      tickSize: 2,
+    },
+    // The headroom above 1 keeps the tallest bar clear of the lane label.
+    y: { axis: null, domain: [0, 1.3] },
+    fy: { axis: null, domain: tokenCategories, padding: 0.12 },
     color: {
       domain: tokenCategories,
       range: [
@@ -129,16 +150,23 @@ function drawTokenChart(turns: readonly HistoryTurn[], width: number, asShare: b
         "var(--color-chart-cache-read)",
         "var(--color-chart-output)",
       ],
-      legend: true,
     },
     marks: [
       Plot.barY(data, {
         x: "turn",
-        y: "value",
+        y: "level",
+        fy: "category",
         fill: "category",
-        title: (d: TokenDatum) => `Turn ${d.turn} · ${d.category}: ${formatTokens(d.count)} (${formatShare(d.share)})`,
+        title: (d: TokenDatum) => `Turn ${d.turn} · ${d.category}: ${formatTokens(d.count)}`,
       }),
-      Plot.ruleY([0]),
+      Plot.ruleY([0], { stroke: "var(--color-border)" }),
+      Plot.text(tokenCategories, {
+        fy: (category: string) => category,
+        frameAnchor: "top-left",
+        dy: 3,
+        fill: "var(--color-text-secondary)",
+        text: (category: string) => `${category} · peak ${formatTokens(peaks.get(category) ?? 0)}`,
+      }),
     ],
   });
 }
@@ -512,31 +540,6 @@ export function ResourceSamples(props: { stats: readonly ResourceSample[]; scope
   );
 }
 
-function drawToolChart(tools: readonly ToolTimingSummary[], width: number): Element {
-  const height = Math.max(92, tools.length * 25 + 34);
-  return Plot.plot({
-    ...basePlot(width, height),
-    marginLeft: Math.min(150, Math.max(62, Math.max(...tools.map((tool) => labelMargin(tool.name))))),
-    marginBottom: 28,
-    x: { label: "Cumulative time", grid: true, tickFormat: formatTimingDuration },
-    y: {
-      label: null,
-      domain: tools.map((tool) => tool.name),
-      tickFormat: (name) => (String(name).length > 22 ? `${String(name).slice(0, 21)}…` : String(name)),
-    },
-    marks: [
-      Plot.barX(tools, {
-        x: "durationMs",
-        y: "name",
-        fill: "var(--color-primary)",
-        title: (d: ToolTimingSummary) =>
-          `${d.name}: ${formatTimingDuration(d.durationMs)} across ${d.calls} ${d.calls === 1 ? "call" : "calls"}`,
-      }),
-      Plot.ruleX([0]),
-    ],
-  });
-}
-
 export default function StatsCharts(props: {
   stats: readonly EventStats[];
   turns: readonly HistoryTurn[];
@@ -552,12 +555,6 @@ export default function StatsCharts(props: {
   }, []);
   const turns = createMemo(() => props.turns);
   const tools = createMemo(() => props.tools);
-  const [tokenShare, setTokenShare] = createSignal(false);
-  const tokenLabel = () => (tokenShare() ? "Token share by turn" : "Token volume by turn");
-  const tokenDescription = () =>
-    tokenShare()
-      ? "Each bar is one completed turn normalized to its own total, so the ratio between cache reads and the other categories stays visible."
-      : "Each bar is one completed turn's tokens, stacked by category; cache reads usually dominate the total.";
   const tokenRows = () =>
     turns().map((turn, index) => {
       const usage = turn.usage;
@@ -581,20 +578,11 @@ export default function StatsCharts(props: {
       </Show>
       <Show when={turns().length > 0}>
         <div class={styles.figure} data-testid="turn-token-chart">
-          <div class={styles.figureHeader}>
-            <div class={styles.title}>Tokens by turn</div>
-            <ToggleChip
-              checked={tokenShare()}
-              title="Show each turn as a share of its own tokens"
-              onChange={setTokenShare}
-            >
-              Share of turn
-            </ToggleChip>
-          </div>
+          <div class={styles.title}>Tokens by turn</div>
           <PlotHost
-            label={tokenLabel()}
-            description={tokenDescription()}
-            draw={(width) => drawTokenChart(turns(), width, tokenShare())}
+            label="Tokens by turn"
+            description="One lane per token category, each scaled to its own peak, on a shared turn axis."
+            draw={(width) => drawTokenChart(turns(), width)}
           />
           <ChartDataTable
             caption="Turn tokens"
@@ -606,19 +594,7 @@ export default function StatsCharts(props: {
       </Show>
       <Show when={tools().length > 0}>
         <div class={styles.figure} data-testid="tool-time-chart">
-          <div class={styles.title}>Tool time by kind</div>
-          <PlotHost
-            label="Cumulative tool time by tool kind"
-            description="Completed calls; concurrent durations may overlap."
-            draw={(width) => drawToolChart(tools(), width)}
-          />
-          <div class={styles.note}>Completed calls; concurrent durations may overlap.</div>
-          <ChartDataTable
-            caption="Tool timings"
-            columns={["Tool", "Calls", "Time"]}
-            regionLabel="Cumulative tool time by kind"
-            rows={tools().map((tool) => [tool.name, String(tool.calls), formatTimingDuration(tool.durationMs)])}
-          />
+          <TurnTools tools={tools()} />
         </div>
       </Show>
     </>

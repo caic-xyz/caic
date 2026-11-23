@@ -1,4 +1,4 @@
-/* Styles for the Performance frame: header, breadcrumb, result notices, hidden transient status, loading notice, and unknown-turn notice. */
+/* Styles for the Performance frame: header, breadcrumb, error notice, hidden transient status, loading notice, and unknown-turn notice. */
 
 .container {
   display: flex;

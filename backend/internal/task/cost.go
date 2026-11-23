@@ -1,4 +1,4 @@
-// CostTracker folds harness reports and per-request or aggregate token estimates into task costs.
+// CostTracker folds harness reports and per-request or aggregate token estimates into task costs, and running API-time totals into per-turn API time.
 
 package task
 
@@ -56,6 +56,12 @@ type CostTracker struct {
 	// with no billed tokens or reported cost leaves TotalUSD zero and Known
 	// false, so callers can distinguish unknown from an exact zero.
 	Known bool
+	// TurnAPIMs is the API time of the latest root turn, in milliseconds;
+	// zero when the harness reports none or restarted its running total during
+	// the turn. Claude reports a running session total, like its cost, and
+	// counts the API time of subagents and background work, so a turn's API
+	// time can exceed its duration.
+	TurnAPIMs int64
 
 	priorUSD            float64
 	sessionPricedUSD    float64
@@ -69,7 +75,8 @@ type CostTracker struct {
 	sessionUnknown      int
 	deferredUnknown     int // Non-request usage awaiting a root aggregate that covers its tokens.
 	deferredUsage       agent.Usage
-	countRestarted      bool // The harness restarted its running total during the current turn.
+	countRestarted      bool  // The harness restarted its running total during the current turn.
+	sessionAPIMs        int64 // Latest running API-time total of the current session.
 }
 
 // Snapshot returns cumulative amounts and coverage from the same fold state.
@@ -126,6 +133,7 @@ func (c *CostTracker) Observe(msg agent.Message, at time.Time, pricer usage.Mode
 			if m.Subtype == "context_cleared" {
 				c.sessionCostReported = false
 				c.sessionReportedUSD = 0
+				c.sessionAPIMs = 0
 				c.sessionUnknown = 0
 				c.pricedUsage = agent.Usage{}
 				c.deferredUnknown = 0
@@ -170,6 +178,7 @@ func (c *CostTracker) Observe(msg agent.Message, at time.Time, pricer usage.Mode
 		if m.Source.IsChild() {
 			break
 		}
+		c.observeAPITime(m.DurationAPIMs)
 		if c.Harness != harness.Pi && (m.CostReported || m.TotalCostUSD > 0) {
 			c.reportCumulative(m.TotalCostUSD)
 		} else if !c.sessionCostReported || c.Harness == harness.Claude {
@@ -261,6 +270,17 @@ func (c *CostTracker) Observe(msg agent.Message, at time.Time, pricer usage.Mode
 		return cost, known
 	}
 	return TurnCost{}, false
+}
+
+// observeAPITime derives the turn's API time from a running total. A total
+// that falls restarted from an unknown base, as cost does in reportCumulative,
+// so that turn's API time stays unknown rather than counting a restored part.
+func (c *CostTracker) observeAPITime(totalMs int64) {
+	c.TurnAPIMs = 0
+	if totalMs >= c.sessionAPIMs {
+		c.TurnAPIMs = totalMs - c.sessionAPIMs
+	}
+	c.sessionAPIMs = totalMs
 }
 
 // coversCostUsage checks whether a priced root aggregate contains deferred usage.

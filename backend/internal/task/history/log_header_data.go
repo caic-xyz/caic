@@ -15,14 +15,14 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
-	v14 "github.com/caic-xyz/caic/backend/internal/task/history/data/headercache/v14"
+	v15 "github.com/caic-xyz/caic/backend/internal/task/history/data/headercache/v15"
 )
 
-func headerTaskToData(t *LoadedTask) *v14.Task {
+func headerTaskToData(t *LoadedTask) *v15.Task {
 	if t == nil {
 		return nil
 	}
-	return &v14.Task{
+	return &v15.Task{
 		TaskID:                         t.TaskID,
 		Prompt:                         t.Prompt,
 		Title:                          t.Title,
@@ -53,7 +53,7 @@ func headerTaskToData(t *LoadedTask) *v14.Task {
 		RequestedModel:                 t.RequestedModel,
 		RequestedEffort:                t.RequestedEffort,
 		RequestedAutoCompactTokenLimit: t.RequestedAutoCompactTokenLimit,
-		RequestedCompactionBudget:      v14.CompactionBudget(t.RequestedCompactionBudget),
+		RequestedCompactionBudget:      v15.CompactionBudget(t.RequestedCompactionBudget),
 		ReportedModel:                  t.ReportedModel,
 		ReportedEffort:                 t.ReportedEffort,
 		SessionID:                      t.SessionID,
@@ -65,7 +65,7 @@ func headerTaskToData(t *LoadedTask) *v14.Task {
 	}
 }
 
-func headerTaskFromData(t *v14.Task) *LoadedTask {
+func headerTaskFromData(t *v15.Task) *LoadedTask {
 	if t == nil {
 		return nil
 	}
@@ -112,18 +112,18 @@ func headerTaskFromData(t *v14.Task) *LoadedTask {
 	}
 }
 
-func headerReposToData(in []repo.Mount) []v14.Repo {
+func headerReposToData(in []repo.Mount) []v15.Repo {
 	if in == nil {
 		return nil
 	}
-	out := make([]v14.Repo, len(in))
+	out := make([]v15.Repo, len(in))
 	for i := range in {
-		out[i] = v14.Repo(in[i])
+		out[i] = v15.Repo(in[i])
 	}
 	return out
 }
 
-func headerReposFromData(in []v14.Repo) []repo.Mount {
+func headerReposFromData(in []v15.Repo) []repo.Mount {
 	if in == nil {
 		return nil
 	}
@@ -134,18 +134,18 @@ func headerReposFromData(in []v14.Repo) []repo.Mount {
 	return out
 }
 
-func headerCacheMountsToData(in []runtime.CacheMount) []v14.CacheMount {
+func headerCacheMountsToData(in []runtime.CacheMount) []v15.CacheMount {
 	if in == nil {
 		return nil
 	}
-	out := make([]v14.CacheMount, len(in))
+	out := make([]v15.CacheMount, len(in))
 	for i := range in {
-		out[i] = v14.CacheMount(in[i])
+		out[i] = v15.CacheMount(in[i])
 	}
 	return out
 }
 
-func headerCacheMountsFromData(in []v14.CacheMount) []runtime.CacheMount {
+func headerCacheMountsFromData(in []v15.CacheMount) []runtime.CacheMount {
 	if in == nil {
 		return nil
 	}
@@ -156,18 +156,18 @@ func headerCacheMountsFromData(in []v14.CacheMount) []runtime.CacheMount {
 	return out
 }
 
-func headerMountsToData(in []runtime.Mount) []v14.Mount {
+func headerMountsToData(in []runtime.Mount) []v15.Mount {
 	if in == nil {
 		return nil
 	}
-	out := make([]v14.Mount, len(in))
+	out := make([]v15.Mount, len(in))
 	for i := range in {
-		out[i] = v14.Mount(in[i])
+		out[i] = v15.Mount(in[i])
 	}
 	return out
 }
 
-func headerMountsFromData(in []v14.Mount) []runtime.Mount {
+func headerMountsFromData(in []v15.Mount) []runtime.Mount {
 	if in == nil {
 		return nil
 	}
@@ -178,18 +178,18 @@ func headerMountsFromData(in []v14.Mount) []runtime.Mount {
 	return out
 }
 
-func headerDiffStatToData(in []v3.DiffFileStat) []v14.DiffFileStat {
+func headerDiffStatToData(in []v3.DiffFileStat) []v15.DiffFileStat {
 	if in == nil {
 		return nil
 	}
-	out := make([]v14.DiffFileStat, len(in))
+	out := make([]v15.DiffFileStat, len(in))
 	for i := range in {
-		out[i] = v14.DiffFileStat(in[i])
+		out[i] = v15.DiffFileStat(in[i])
 	}
 	return out
 }
 
-func headerDiffStatFromData(in []v14.DiffFileStat) []v3.DiffFileStat {
+func headerDiffStatFromData(in []v15.DiffFileStat) []v3.DiffFileStat {
 	if in == nil {
 		return nil
 	}
@@ -200,7 +200,7 @@ func headerDiffStatFromData(in []v14.DiffFileStat) []v3.DiffFileStat {
 	return out
 }
 
-func headerResultToData(r *task.Result) *v14.Result {
+func headerResultToData(r *task.Result) *v15.Result {
 	if r == nil {
 		return nil
 	}
@@ -208,14 +208,14 @@ func headerResultToData(r *task.Result) *v14.Result {
 	if r.Err != nil {
 		text = r.Err.Error()
 	}
-	var failure *v14.StartupFailure
+	var failure *v15.StartupFailure
 	if r.StartupFailure != nil {
-		failure = new(v14.StartupFailure(*r.StartupFailure))
+		failure = new(v15.StartupFailure(*r.StartupFailure))
 	}
-	return &v14.Result{State: string(r.State), DiffStat: headerDiffStatToData(r.DiffStat), DiskUsedBytes: r.DiskUsedBytes, CostUSD: r.CostUSD, CostKnown: r.CostKnown, CostComplete: r.CostComplete, Duration: r.Duration, NumTurns: r.NumTurns, Usage: headerUsageToData(r.Usage), AgentResult: r.AgentResult, StartupFailure: failure, Error: text}
+	return &v15.Result{State: string(r.State), DiffStat: headerDiffStatToData(r.DiffStat), DiskUsedBytes: r.DiskUsedBytes, CostUSD: r.CostUSD, CostKnown: r.CostKnown, CostComplete: r.CostComplete, Duration: r.Duration, NumTurns: r.NumTurns, Usage: headerUsageToData(r.Usage), AgentResult: r.AgentResult, StartupFailure: failure, Error: text}
 }
 
-func headerResultFromData(r *v14.Result) *task.Result {
+func headerResultFromData(r *v15.Result) *task.Result {
 	if r == nil {
 		return nil
 	}
@@ -230,18 +230,18 @@ func headerResultFromData(r *v14.Result) *task.Result {
 	return &task.Result{State: task.State(r.State), DiffStat: headerDiffStatFromData(r.DiffStat), DiskUsedBytes: r.DiskUsedBytes, CostUSD: r.CostUSD, CostKnown: r.CostKnown, CostComplete: r.CostComplete, Duration: r.Duration, NumTurns: r.NumTurns, Usage: headerUsageFromData(r.Usage), AgentResult: r.AgentResult, StartupFailure: failure, Err: err}
 }
 
-func headerUsageToData(u agent.Usage) v14.Usage {
-	buckets := make([]v14.CacheWrite, 0, len(u.CacheWrites))
+func headerUsageToData(u agent.Usage) v15.Usage {
+	buckets := make([]v15.CacheWrite, 0, len(u.CacheWrites))
 	if u.CacheWrites == nil {
 		buckets = nil
 	}
 	for _, b := range u.CacheWrites {
-		buckets = append(buckets, v14.CacheWrite{TTLSeconds: int64(b.TTL / time.Second), Tokens: b.Tokens})
+		buckets = append(buckets, v15.CacheWrite{TTLSeconds: int64(b.TTL / time.Second), Tokens: b.Tokens})
 	}
-	return v14.Usage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, CacheCreationInputTokens: u.CacheCreationInputTokens, CacheWrites: buckets, CacheReadInputTokens: u.CacheReadInputTokens, ReasoningOutputTokens: u.ReasoningOutputTokens, CacheTTLSeconds: u.CacheTTLSeconds}
+	return v15.Usage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, CacheCreationInputTokens: u.CacheCreationInputTokens, CacheWrites: buckets, CacheReadInputTokens: u.CacheReadInputTokens, ReasoningOutputTokens: u.ReasoningOutputTokens, CacheTTLSeconds: u.CacheTTLSeconds}
 }
 
-func headerUsageFromData(u v14.Usage) agent.Usage {
+func headerUsageFromData(u v15.Usage) agent.Usage {
 	buckets := make(tokens.CacheWrites, 0, len(u.CacheWrites))
 	if u.CacheWrites == nil {
 		buckets = nil

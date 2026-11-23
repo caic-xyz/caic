@@ -25,11 +25,6 @@
   color: var(--color-text-secondary);
 }
 
-.note {
-  font-size: 0.7rem;
-  color: var(--color-text-tertiary);
-}
-
 .plot {
   display: flex;
   flex-direction: column;

@@ -18,8 +18,6 @@ export interface TaskHistory {
   messages: Accessor<readonly EventMessage[]>;
   manifest: Accessor<HistoryManifest | null>;
   stats: Accessor<EventStats[]>;
-  // statsRetained is the server's resource ring capacity; zero until known.
-  statsRetained: Accessor<number>;
   through: Accessor<number>;
   epoch: Accessor<number>;
   loading: Accessor<boolean>;
@@ -54,7 +52,6 @@ export function createTaskEventTimeline(options: { taskId: Accessor<string> }): 
     messages: () => source().messages(),
     manifest: () => source().manifest(),
     stats: () => source().stats(),
-    statsRetained: () => source().statsRetained(),
     through: () => source().through(),
     epoch,
     loading: () => source().loading(),

@@ -1157,14 +1157,11 @@ describe("Performance turn view", () => {
     const { history } = renderApp("/task/@task1+do-something/perf");
 
     const strip = await screen.findByTestId("turn-strip");
-    // The fixture turns carry no cost; only the all-turns overview reports it.
-    expect(await screen.findByText("Some turn costs are unavailable.")).toBeInTheDocument();
     await user.click(within(strip).getByRole("link", { name: "Turn 2, 2.000 s" }));
 
     expect(history.get()).toBe("/task/@task1+do-something/perf/turns/2");
     const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
     expect(breadcrumb).toHaveTextContent("Turn 2 of 2");
-    expect(screen.queryByText("Some turn costs are unavailable.")).not.toBeInTheDocument();
     await user.click(within(breadcrumb).getByRole("link", { name: "Performance" }));
     expect(history.get()).toBe("/task/@task1+do-something/perf");
     expect(screen.getByTestId("conversation-pane")).toBeInTheDocument();

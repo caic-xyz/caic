@@ -1,9 +1,9 @@
-// TurnResources draws the task's retained CPU and memory samples within one turn as lanes on the turn timeline's axis, with exact values.
+// TurnResources draws the task's retained CPU and memory samples within one turn as lanes on the turn timeline's axis, with exact values, and nothing when none fall in the turn.
 
 import { createMemo, For, Show } from "solid-js";
 
 import type { EventStats } from "@sdk/types.gen";
-import { formatExactSeconds, formatTotalDuration } from "../timing";
+import { formatExactSeconds } from "../timing";
 import ChartDataTable from "./ChartDataTable";
 import styles from "./TurnResources.module.css";
 
@@ -17,40 +17,12 @@ interface Series {
   points: readonly { x: number; y: number }[];
 }
 
-// coverage states why a turn draws no samples, or that it draws only part of
-// its window because older samples left the full ring of retained samples;
-// null otherwise, and for a turn older than every retained sample. A ring that
-// is not full has dropped nothing: sampling simply had not reached the turn's
-// start. An unknown capacity, zero, drops nothing.
-function coverage(
-  stats: readonly EventStats[],
-  retained: number,
-  start: number,
-  end: number,
-  shown: number,
-): string | null {
-  const first = stats[0];
-  const last = stats.at(-1);
-  if (!first || !last) return "No resource samples are retained for this task.";
-  const dropped = retained > 0 && stats.length >= retained && first.ts > start;
-  if (shown === 0) {
-    if (dropped && first.ts > end) return null;
-    if (last.ts < start) return "Resource samples stopped before this turn.";
-    return "No resource sample falls within this turn.";
-  }
-  if (dropped)
-    return `Samples start ${formatTotalDuration(first.ts - start)} into the turn; earlier ones are no longer retained.`;
-  return null;
-}
-
 function percent(value: number): string {
   return `${value.toFixed(1)}%`;
 }
 
 export default function TurnResources(props: {
   stats: readonly EventStats[];
-  // retained is the server's resource ring capacity; zero is unknown.
-  retained: number;
   // startMs is the turn start, in milliseconds since the epoch.
   startMs: number;
   durationMs: number;
@@ -59,7 +31,6 @@ export default function TurnResources(props: {
 }) {
   const end = () => props.startMs + props.durationMs;
   const samples = createMemo(() => props.stats.filter((sample) => sample.ts >= props.startMs && sample.ts <= end()));
-  const note = () => coverage(props.stats, props.retained, props.startMs, end(), samples().length);
   const share = (ts: number) => (props.durationMs > 0 ? (ts - props.startMs) / props.durationMs : 0);
   const series = createMemo<Series[]>(() => {
     const shown = samples();
@@ -92,9 +63,10 @@ export default function TurnResources(props: {
       `${(sample.memUsed / 2 ** 20).toFixed(1)} MiB`,
     ]);
 
+  // A turn without samples in its window draws nothing: no empty lanes.
   return (
-    <div class={styles.resources} data-testid="turn-resources">
-      <Show when={samples().length > 0}>
+    <Show when={samples().length > 0}>
+      <div class={styles.resources} data-testid="turn-resources">
         <div class={styles.lanes} aria-hidden="true">
           <For each={series()}>
             {(item) => (
@@ -114,22 +86,13 @@ export default function TurnResources(props: {
             )}
           </For>
         </div>
-      </Show>
-      <Show when={note()}>
-        {(text) => (
-          <p class={styles.note} data-testid="turn-resources-note">
-            {text()}
-          </p>
-        )}
-      </Show>
-      <Show when={samples().length > 0}>
         <ChartDataTable
           caption="Resource samples, CPU 100% per CPU"
           regionLabel="Resource samples in this turn"
           columns={columns}
           rows={rows()}
         />
-      </Show>
-    </div>
+      </div>
+    </Show>
   );
 }

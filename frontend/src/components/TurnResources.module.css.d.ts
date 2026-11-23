@@ -5,7 +5,6 @@ declare const classes: {
   readonly "lane": string;
   readonly "lanes": string;
   readonly "line": string;
-  readonly "note": string;
   readonly "resources": string;
   readonly "summary": string;
   readonly "track": string;

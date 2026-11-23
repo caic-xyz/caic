@@ -397,12 +397,12 @@ func ExportDiscussion(path string, resolver ParserResolver) (string, error) {
 }
 
 // taskMetadataProjection folds shared startup and lazy-load metadata. Native
-// Claude accounting survives a zero-cost revival trailer until EOF, when the
-// latest authoritative trailer and last completed root result are both known.
+// accounting survives a trailer without cost or usage until EOF, when the
+// latest authoritative trailer and every root result are known.
 type taskMetadataProjection struct {
-	lastResult  *agent.ResultMessage
 	turnMetrics task.TurnMetrics
 	costs       task.CostTracker
+	usage       agent.Usage // Root usage summed as the live task sums it.
 }
 
 func (p *taskMetadataProjection) apply(loaded *LoadedTask, messages []agent.TimedMessage) {
@@ -414,11 +414,13 @@ func (p *taskMetadataProjection) apply(loaded *LoadedTask, messages []agent.Time
 			loaded.Harness = harness.Name(msg.Harness)
 			p.costs.Harness = loaded.Harness
 			p.costs.Model = loaded.RequestedModel
+		case *agent.UsageMessage:
+			if msg.Additive && !msg.Source.IsChild() {
+				p.usage.Add(msg.Usage)
+			}
 		case *agent.ResultMessage:
-			// Claude's native result is the inventory accounting source. Other
-			// harnesses preserve accounting in task completion trailers.
-			if loaded.Harness == harness.Claude && !msg.Source.IsChild() {
-				p.lastResult = msg
+			if !msg.UsageIsSnapshot && !msg.Source.IsChild() {
+				p.usage.Add(msg.Usage)
 			}
 		case *agent.SyncActivityMessage:
 			switch {
@@ -460,15 +462,16 @@ func (p *taskMetadataProjection) finish(loaded *LoadedTask) {
 	if r.NumTurns == 0 {
 		r.NumTurns = p.turnMetrics.NumTurns
 	}
-	// A trailer without a cost, such as a crash, takes the cost folded from
-	// every result, not the last result's report: a harness's running total can
-	// restart, and Pi reports per invocation.
+	// A trailer without a cost or usage, such as a crash, takes the amounts
+	// folded from every result, not the last result's report: a harness's
+	// running total can restart, Pi reports per invocation, and Claude reports
+	// each turn's usage.
 	if r.CostUSD == 0 && p.costs.Known && p.costs.TotalUSD > 0 {
 		r.CostUSD = p.costs.TotalUSD
 		r.CostKnown = true
-		if p.lastResult != nil {
-			r.Usage = p.lastResult.Usage
-		}
+	}
+	if r.Usage.Equal(agent.Usage{}) {
+		r.Usage = p.usage
 	}
 	// Native metadata can certify an older summary only when its complete
 	// amount agrees with the authoritative stored amount. Missing proof never

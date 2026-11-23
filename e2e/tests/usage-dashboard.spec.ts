@@ -117,7 +117,7 @@ test("usage cost distinguishes native zero, estimates, and unknown coverage", as
     ["$0 · reported", "$0"],
     ["Unknown", "—"],
     ["$0.25 · estimated", "$0.25"],
-    ["$2993.82 · known subtotal, incomplete", "$2.99k"],
+    ["≥ $2993.82 · reported + estimated", "$2.99k"],
   ] as const) {
     const cell = daily.getByRole("cell", { name, exact: true });
     await expect(cell).toHaveAttribute("title", name);

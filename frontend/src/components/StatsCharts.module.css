@@ -95,13 +95,6 @@
   margin-top: 0.7rem;
 }
 
-.figureHeader {
-  display: flex;
-  gap: 0.5rem;
-  align-items: baseline;
-  justify-content: space-between;
-}
-
 .title {
   margin-bottom: 0.15rem;
   font-size: 0.75rem;

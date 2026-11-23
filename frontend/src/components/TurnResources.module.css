@@ -1,4 +1,4 @@
-/* Resource lanes under the turn timeline: the same axis width and gridlines, a line and dots per series on an explicit domain, and a coverage note. */
+/* Resource lanes under the turn timeline: the same axis width and gridlines, a line and dots per series on an explicit domain. */
 
 .resources {
   --resource-track-height: 1.75rem;
@@ -82,10 +82,4 @@
   background: var(--series-color);
   border-radius: 50%;
   transform: translate(-50%, 50%);
-}
-
-.note {
-  margin: 0.4rem 0 0;
-  font-size: 0.7rem;
-  color: var(--color-text-tertiary);
 }

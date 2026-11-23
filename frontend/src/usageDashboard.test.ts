@@ -23,11 +23,9 @@ describe("cost provenance", () => {
     const unknown = { reportedUSD: 0, estimatedUSD: 0, reportedParts: 0, estimatedParts: 0, unknownParts: 1 };
     expect(formatUsageCost(0, unknown)).toBe("Unknown");
     expect(formatUsageCost(0.25, unknown)).toBe("$0.25 · source unknown");
-    expect(formatUsageCost(0.75, { ...reportedUsageCost(0.25), unknownParts: 1 })).toBe(
-      "$0.75 · incomplete ($0.25 known)",
-    );
+    expect(formatUsageCost(0.75, { ...reportedUsageCost(0.25), unknownParts: 1 })).toBe("≥ $0.75 · $0.25 reported");
     expect(formatUsageCost(0.25, { ...unknown, ...reportedUsageCost(0.25), unknownParts: 1 })).toBe(
-      "$0.25 · known subtotal, incomplete",
+      "≥ $0.25 · reported",
     );
     expect(formatUsageCost(0.25, { ...unknown, estimatedUSD: 0.25, estimatedParts: 1, unknownParts: 0 })).toBe(
       "$0.25 · estimated",

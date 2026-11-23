@@ -92,13 +92,9 @@ function PerformanceFrame(props: { taskId: string; children?: JSX.Element }) {
     return number !== null && number <= total ? `Turn ${number} of ${total}` : `Turn ${raw ?? ""}`;
   };
   const overview = () => params.n === undefined && params.section === undefined;
-  // The cost-completeness notice is about all turns, so only the overview shows it.
-  const costIncomplete = () =>
-    overview() && !analytics.loading() && !analytics.pricing() && !analytics.snapshot().costComplete;
-  // Results keep a block above the content. Loading and pricing are transient:
-  // a block for them would move the content when it appears and clears, so
-  // they are announced here and shown where they apply.
-  const result = () => analytics.error() || costIncomplete();
+  // An error keeps a block above the content. Loading and pricing are
+  // transient: a block for them would move the content when it appears and
+  // clears, so they are announced here and shown where they apply.
   const transient = () => {
     if (analytics.loading()) return "Loading performance data…";
     return analytics.pricing() ? "Updating cost estimates…" : "";
@@ -133,19 +129,14 @@ function PerformanceFrame(props: { taskId: string; children?: JSX.Element }) {
         <p class={styles.visuallyHidden} role="status" data-testid="performance-transient-status">
           {transient()}
         </p>
-        <Show when={result()}>
-          <div class={styles.status}>
-            <Show when={analytics.error()}>
-              {(message) => (
-                <p role="alert">
-                  Performance data incomplete: {message()} <Button onClick={analytics.retry}>Retry</Button>
-                </p>
-              )}
-            </Show>
-            <Show when={costIncomplete()}>
-              <p role="status">Some turn costs are unavailable.</p>
-            </Show>
-          </div>
+        <Show when={analytics.error()}>
+          {(message) => (
+            <div class={styles.status}>
+              <p role="alert">
+                Performance data incomplete: {message()} <Button onClick={analytics.retry}>Retry</Button>
+              </p>
+            </div>
+          )}
         </Show>
         {/* Until the history loads, the views have nothing to show, so the
             notice is the only content and clearing it moves nothing below. */}
@@ -209,7 +200,6 @@ export function PerformanceOverview() {
           turns={snapshot().turns}
           running={perf.analytics.running()}
           runningMs={runningMs()}
-          scaleMs={0}
           current={null}
           href={perf.turnHref}
         />

@@ -100,7 +100,7 @@ export default function StatsIcon(props: { href: string; stats: EventStats[]; us
           {formatTokens(tokens())}
           <Show when={props.usage.costUSD > 0}>
             <span class={styles.iconSummarySeparator}> · </span>
-            {`${formatUSD(props.usage.costUSD)}${props.usage.costComplete ? "" : " known subtotal"}`}
+            {`${props.usage.costComplete ? "" : "≥ "}${formatUSD(props.usage.costUSD)}`}
           </Show>
         </span>
       </Show>

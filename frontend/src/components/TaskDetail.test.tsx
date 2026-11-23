@@ -224,7 +224,7 @@ it("never mounts completed context content while canonical history is published"
     view = await renderTaskDetail({ taskId: "canonical-publication" });
     expect(screen.getByText("Current context response")).toBeInTheDocument();
     expect(rendered).toHaveLength(0);
-    await userEvent.setup().click(screen.getByRole("button", { name: /Ended by compaction/ }));
+    await userEvent.setup().click(screen.getByRole("button", { name: /Compacted session/ }));
     await userEvent.setup().click(await screen.findByRole("button", { name: /^1 message/ }));
     expect(screen.getByRole("img", { name: "Historical render probe" })).toBeInTheDocument();
     expect(rendered.length).toBeGreaterThan(0);
@@ -703,7 +703,7 @@ describe("TaskDetail", () => {
     // Agents that report no turn or item identity still anchor on their events.
     expect(live.some((key) => key?.startsWith("ev:"))).toBe(true);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: /^Ended by compaction 1 turn/ }));
+    await user.click(await screen.findByRole("button", { name: /^Compacted session 1 turn/ }));
     await user.click(await screen.findByRole("button", { name: /^1 message/ }));
     await screen.findByText("archived answer", { exact: true });
     expect(unique().some((key) => key?.startsWith("turn:"))).toBe(true);
@@ -785,10 +785,10 @@ describe("TaskDetail", () => {
     });
     await renderTaskDetail({ taskId: "closed-context-identity" });
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: /^Ended by compaction 1 turn/ }));
+    await user.click(await screen.findByRole("button", { name: /^Compacted session 1 turn/ }));
     await user.click(await screen.findByRole("button", { name: /^1 message/ }));
     const body = await screen.findByText("old context", { exact: true });
-    const toggle = screen.getByRole("button", { name: /^Ended by compaction 1 turn/ });
+    const toggle = screen.getByRole("button", { name: /^Compacted session 1 turn/ });
     toggle.focus();
     const boundaries: EventMessage[] = [
       { kind: "system", ts: 10, system: { subtype: "compact_boundary" } },
@@ -805,7 +805,7 @@ describe("TaskDetail", () => {
       send?.(resultEvent(boundary.ts + 2));
       await screen.findByText(`later response ${boundary.ts}`, { exact: true });
       expect(screen.getByText("old context", { exact: true })).toBe(body);
-      expect(screen.getAllByRole("button", { name: /^Ended by compaction 1 turn/ })[0]).toBe(toggle);
+      expect(screen.getAllByRole("button", { name: /^Compacted session 1 turn/ })[0]).toBe(toggle);
       expect(toggle).toHaveFocus();
     }
   });
@@ -1220,7 +1220,7 @@ describe("TaskDetail", () => {
       await waitFor(() => expect(screen.queryByRole("navigation", { name: "Loaded skills" })).not.toBeInTheDocument());
       await userEvent.setup().click(
         screen.getByRole("button", {
-          name: subtype === "compact_boundary" ? /^Ended by compaction/ : /^Ended by a context clear/,
+          name: subtype === "compact_boundary" ? /^Compacted session/ : /^Cleared session/,
         }),
       );
       const prior = await screen.findByRole("navigation", { name: "Previous context skills" });
@@ -1273,13 +1273,13 @@ describe("TaskDetail", () => {
     await renderTaskDetail();
     const user = userEvent.setup();
     expect(screen.queryByRole("navigation", { name: "Previous context skills" })).not.toBeInTheDocument();
-    const sessions = screen.getAllByRole("button", { name: /^Ended by compaction/ });
+    const sessions = screen.getAllByRole("button", { name: /^Compacted session/ });
     assert.ok(sessions[0]);
     await user.click(sessions[0]);
     expect(
       within(screen.getByRole("navigation", { name: "Previous context skills" })).getByRole("link"),
     ).toHaveTextContent("review");
-    const secondSession = screen.getAllByRole("button", { name: /^Ended by a context clear/ })[0];
+    const secondSession = screen.getAllByRole("button", { name: /^Cleared session/ })[0];
     assert.ok(secondSession);
     await user.click(secondSession);
     const strips = screen.getAllByRole("navigation", { name: "Previous context skills" });
@@ -1352,7 +1352,7 @@ describe("TaskDetail", () => {
     await renderTaskDetail();
     expect(screen.getByText("Execute the new plan", { exact: true })).toBeVisible();
     expect(screen.getByText("Executing the new plan", { exact: true })).toBeVisible();
-    expect(screen.getAllByRole("button", { name: /^Ended by a context clear/ })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: /^Cleared session/ })).toHaveLength(1);
   });
 
   it("keeps same-session content stable and exposes it through an archive after compaction", async () => {
@@ -1382,7 +1382,7 @@ describe("TaskDetail", () => {
     await screen.findByText("Current response", { exact: true });
     expect(screen.queryByText("First response", { exact: true })).not.toBeInTheDocument();
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: /^Ended by compaction/ }));
+    await user.click(screen.getByRole("button", { name: /^Compacted session/ }));
     await user.click(await screen.findByRole("button", { name: /^1 message/ }));
     expect(await screen.findByText("First response", { exact: true })).toBeVisible();
   });
@@ -3180,7 +3180,7 @@ it("cancels a gated archived body when collapsed and keeps the current DOM mount
   });
   const view = await renderTaskDetail({ taskId: "archive-cancellation" });
   const current = screen.getByText("Stable current response");
-  const header = screen.getByRole("button", { name: /^Ended by compaction/ });
+  const header = screen.getByRole("button", { name: /^Compacted session/ });
   const user = userEvent.setup();
   await user.click(header);
   await waitFor(() => assert.ok(signal));
@@ -3189,7 +3189,7 @@ it("cancels a gated archived body when collapsed and keeps the current DOM mount
   release(historyResponse(events.slice(0, 3)));
   expect(screen.queryByText("Never mounted archive")).not.toBeInTheDocument();
   expect(screen.getByText("Stable current response")).toBe(current);
-  expect(screen.getByRole("button", { name: /^Ended by compaction/ })).toBe(header);
+  expect(screen.getByRole("button", { name: /^Compacted session/ })).toBe(header);
   view.unmount();
 });
 
@@ -3223,7 +3223,7 @@ it("keeps an open cross-context child focused when it completes, archiving it on
   const user = userEvent.setup();
   await user.click(summary);
   await screen.findByText("Old child output");
-  await user.click(screen.getByRole("button", { name: /^Ended by compaction/ }));
+  await user.click(screen.getByRole("button", { name: /^Compacted session/ }));
   summary.focus();
   send?.({
     kind: "nativeSubagent",
@@ -3237,7 +3237,7 @@ it("keeps an open cross-context child focused when it completes, archiving it on
   await user.click(summary);
   await waitFor(() => expect(screen.getAllByTestId("native-subagent-card")).toHaveLength(1));
   expect(screen.getByTestId("native-subagent-card")).not.toBe(card);
-  await waitFor(() => expect(screen.getByRole("button", { name: /^Ended by compaction/ })).toHaveFocus());
+  await waitFor(() => expect(screen.getByRole("button", { name: /^Compacted session/ })).toHaveFocus());
   expect(
     within(screen.getByTestId("native-subagent-card")).getByRole("img", { name: "Completed" }),
   ).toBeInTheDocument();
@@ -3273,7 +3273,7 @@ it("settles background work on its archived tool row across equal-time compactio
   await renderTaskDetail({ taskId: "background-origin" });
   expect(screen.queryByTestId("tool-call")).not.toBeInTheDocument();
   const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: /^Ended by compaction/ }));
+  await user.click(screen.getByRole("button", { name: /^Compacted session/ }));
   await user.click(await screen.findByRole("button", { name: /^1 tool call/ }));
   await waitFor(() =>
     expect(within(toolRow("origin-tool")).getByTestId("background-command-chip")).toHaveTextContent("Completed"),
@@ -3530,7 +3530,7 @@ for (const boundary of ["compaction", "changed init"]) {
     expect(summary).toHaveFocus();
     const archive = screen.getByTestId("history-section");
     const archived = within(archive).getByRole("button", {
-      name: boundary === "compaction" ? /^Ended by compaction/ : /^Ended by a new session/,
+      name: boundary === "compaction" ? /^Compacted session/ : /^Previous session/,
     });
     await user.click(archived);
     expect(screen.getAllByTestId("native-subagent-card")).toHaveLength(1);
