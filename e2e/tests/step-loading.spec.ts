@@ -1,5 +1,5 @@
 // Browser coverage for STEP loading controls, cancellation, retry, and worker cleanup using gated downloads.
-import type { Page } from "@playwright/test";
+import type { Page, Route } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { zipSync } from "three/addons/libs/fflate.module.js";
 import { test, expect, createTaskAPI, waitForTaskState, STEP_IMPORT_TIMEOUT } from "../helpers";
@@ -67,7 +67,7 @@ for (const width of [390, 1280]) {
   test(`STEP cancellation, retry, and file switching at ${width}px`, async ({ page, context, api, uniquePrompt }) => {
     await page.setViewportSize({ width, height: 900 });
     let loads = 0;
-    const gate = Promise.withResolvers<void>();
+    const pending: Route[] = [];
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await context.route("**/raw?*", async (route) => {
@@ -75,8 +75,7 @@ for (const width of [390, 1280]) {
       if (path === "/cube.stpz" && ++loads !== 2) {
         // These requests must remain pending until cancellation, navigation,
         // or closing the view terminates their workers. Retry gets real bytes.
-        await gate.promise;
-        await route.abort("aborted");
+        pending.push(route);
         return;
       }
       await route.fulfill({
@@ -129,8 +128,9 @@ for (const width of [390, 1280]) {
       expect(page.workers().filter((worker) => worker.url().includes("stepWorker"))).toHaveLength(0);
       expect(errors).toEqual([]);
     } finally {
-      gate.resolve();
-      await context.unrouteAll({ behavior: "wait" });
+      // CI stalled removing the last route from the live page after workers
+      // closed mid-download. Let context disposal remove this route.
+      await Promise.all(pending.map((route) => route.abort("aborted")));
     }
   });
 }
