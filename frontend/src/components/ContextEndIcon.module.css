@@ -1,0 +1,14 @@
+/* Context-end symbol sized to the archived section summary text. */
+
+.icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-self: center;
+  margin-right: 0.4em;
+}
+
+.icon svg {
+  width: 1.25em;
+  height: 1.25em;
+  fill: currentcolor;
+}

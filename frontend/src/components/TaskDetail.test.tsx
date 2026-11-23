@@ -706,7 +706,7 @@ describe("TaskDetail", () => {
     // Agents that report no turn or item identity still anchor on their events.
     expect(live.some((key) => key?.startsWith("ev:"))).toBe(true);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: /^Ended by compaction · 1 turn/ }));
+    await user.click(await screen.findByRole("button", { name: /^Ended by compaction 1 turn/ }));
     await user.click(await screen.findByRole("button", { name: /^1 message/ }));
     await screen.findByText("archived answer", { exact: true });
     expect(unique().some((key) => key?.startsWith("turn:"))).toBe(true);
@@ -788,10 +788,10 @@ describe("TaskDetail", () => {
     });
     await renderTaskDetail({ taskId: "closed-context-identity" });
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: /^Ended by compaction · 1 turn/ }));
+    await user.click(await screen.findByRole("button", { name: /^Ended by compaction 1 turn/ }));
     await user.click(await screen.findByRole("button", { name: /^1 message/ }));
     const body = await screen.findByText("old context", { exact: true });
-    const toggle = screen.getByRole("button", { name: /^Ended by compaction · 1 turn/ });
+    const toggle = screen.getByRole("button", { name: /^Ended by compaction 1 turn/ });
     toggle.focus();
     const boundaries: EventMessage[] = [
       { kind: "system", ts: 10, system: { subtype: "compact_boundary" } },
@@ -808,7 +808,7 @@ describe("TaskDetail", () => {
       send?.(resultEvent(boundary.ts + 2));
       await screen.findByText(`later response ${boundary.ts}`, { exact: true });
       expect(screen.getByText("old context", { exact: true })).toBe(body);
-      expect(screen.getAllByRole("button", { name: /^Ended by compaction · 1 turn/ })[0]).toBe(toggle);
+      expect(screen.getAllByRole("button", { name: /^Ended by compaction 1 turn/ })[0]).toBe(toggle);
       expect(toggle).toHaveFocus();
     }
   });

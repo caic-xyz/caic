@@ -113,11 +113,12 @@ import { SyncActivityTracker, type SyncEntry } from "../syncActivity";
 import SyncActivity from "./SyncActivity";
 import StatsIcon from "./StatsIcon";
 import StatusIcon from "./StatusIcon";
+import ContextEndIcon from "./ContextEndIcon";
 import ActionButton from "./ActionButton";
 import Duration from "./Duration";
 import TimingIcon from "./TimingIcon";
 import { ContextDurationLink, TurnDurationLink } from "./InvocationDurations";
-import { contextEndLabel } from "../contextEnd";
+import { contextEndCause } from "../contextEnd";
 import WidgetCard from "./WidgetCard";
 import Dropdown from "./Dropdown";
 import TaskActionsMenu from "./TaskActionsMenu";
@@ -2053,12 +2054,11 @@ function ArchivedSession(props: {
   renderGroups: (groups: Accessor<MessageGroup[]>, position: (event: EventMessage) => string | null) => JSX.Element;
   renderActivities: () => JSX.Element;
 }) {
+  const cause = () => contextEndCause(props.section);
   const summary = () => {
     const section = props.section;
-    const parts = [
-      contextEndLabel(section) ?? "Current context",
-      `${section.turnCount} ${section.turnCount === 1 ? "turn" : "turns"}`,
-    ];
+    const parts = [`${section.turnCount} ${section.turnCount === 1 ? "turn" : "turns"}`];
+    if (cause() === null) parts.unshift("Current context");
     if (section.textCount) parts.push(`${section.textCount} ${section.textCount === 1 ? "message" : "messages"}`);
     if (section.toolCount) parts.push(`${section.toolCount} ${section.toolCount === 1 ? "tool call" : "tool calls"}`);
     return parts.join(" · ");
@@ -2075,6 +2075,7 @@ function ArchivedSession(props: {
           onClick={(event) => props.onToggle(event)}
           aria-expanded={props.open}
         >
+          <Show when={cause()}>{(c) => <ContextEndIcon cause={c()} />}</Show>{" "}
           <span class={styles.turnSummaryText}>{summary()}</span>
         </button>
         <ContextDurationLink section={props.section} />
