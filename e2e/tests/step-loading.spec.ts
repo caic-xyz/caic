@@ -59,8 +59,9 @@ for (const width of [390, 1280]) {
       expect(loads).toBe(1);
       expect(errors).toEqual([]);
     } finally {
+      // Keep interception enabled through page teardown. Chromium can stall
+      // disabling it after a worker has closed.
       gate.resolve();
-      await context.unrouteAll({ behavior: "wait" });
     }
   });
 

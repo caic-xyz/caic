@@ -26,7 +26,6 @@ jobs:
           go-version-file: go.mod
       - uses: pnpm/setup@v3
         with:
-          runtime: node@26
           cache: true
           require-lockfile: true
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0

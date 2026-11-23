@@ -20,8 +20,7 @@ import (
 // recorded payload per line, after waiting for the caic session's first prompt.
 // It pauses before the payload at hold_after for hold_ms so a smoke test can
 // restart caic between the recorded running card and the records that settle it.
-// The synthetic end marker lets the replay wire end the turn: a minimized
-// recording holds native harness records, not a harness turn result.
+// Synthetic markers supply the turn boundaries missing from the minimized recording.
 const replayAgentScript = `
 import sys
 import time
@@ -37,6 +36,9 @@ for line in sys.stdin:
     if line.strip():
         break
 
+sys.stdout.write('` + replayStartMarker + `\n')
+sys.stdout.flush()
+
 for index, payload in enumerate(payloads):
     if index == hold_after:
         time.sleep(hold_ms / 1000.0)
@@ -44,7 +46,7 @@ for index, payload in enumerate(payloads):
     sys.stdout.flush()
     time.sleep(0.05)
 
-sys.stdout.write('{"caic_replay_end":true}\n')
+sys.stdout.write('` + replayEndMarker + `\n')
 sys.stdout.flush()
 
 for line in sys.stdin:
@@ -55,11 +57,9 @@ for line in sys.stdin:
 const (
 	replayAgentPath   = agent.RelayDir + "/replay_agent.py"
 	replayPayloadPath = agent.RelayDir + "/replay_payloads.jsonl"
+	replayStartMarker = `{"caic_replay_start":true}`
+	replayEndMarker   = `{"caic_replay_end":true}`
 )
-
-// replayEndMarker is the synthetic line the replay agent writes after the last
-// recorded payload. It never appears in a recording.
-var replayEndMarker = []byte(`{"caic_replay_end":true}`)
 
 // ReplayRecording is one retained native-subagent recording to deliver through a
 // caic-managed container.
@@ -165,7 +165,7 @@ func (b *ReplayBackend) NewWire() agent.WireFormat {
 	return NewReplayWire(b.backend.NewWire())
 }
 
-// NewMetadataParser reconstructs metadata with the same replay turn marker.
+// NewMetadataParser reconstructs metadata with the same replay turn boundaries.
 func (b *ReplayBackend) NewMetadataParser() agent.MessageParser {
 	return replayParser{inner: b.backend.NewMetadataParser()}
 }
@@ -189,16 +189,14 @@ func (b *ReplayBackend) selectRecording(prompt string) (ReplayRecording, error) 
 	return ReplayRecording{}, fmt.Errorf("no replay recording for prompt %q; held %q", prompt, held)
 }
 
-// NewReplayWire wraps a harness wire so a replay agent's end marker turns into a
-// completed turn, which a minimized recording does not carry.
+// NewReplayWire wraps a harness wire to parse the replay agent's turn boundaries.
 func NewReplayWire(inner agent.WireFormat) agent.WireFormat {
 	return replayWire{inner: inner}
 }
 
 var _ agent.Backend = (*ReplayBackend)(nil)
 
-// replayWire parses one recording's native records with the harness's own wire
-// and turns the replay agent's end marker into a completed turn.
+// replayWire adds the replay agent's turn boundaries to the harness's native records.
 type replayWire struct{ replayParser }
 
 // EncodePrompt returns the replay process's complete JSON prompt command.
@@ -212,9 +210,12 @@ func (replayWire) EncodePrompt(p agent.Prompt) ([]byte, error) {
 
 type replayParser struct{ inner agent.MessageParser }
 
-// ParseOutput delegates to the harness wire and ends the turn on the marker.
+// ParseOutput interprets replay markers and delegates native records to the harness parser.
 func (w replayParser) ParseOutput(line []byte) ([]agent.Message, error) {
-	if bytes.Equal(bytes.TrimSpace(line), replayEndMarker) {
+	switch string(bytes.TrimSpace(line)) {
+	case replayStartMarker:
+		return []agent.Message{&agent.TurnStartedMessage{}}, nil
+	case replayEndMarker:
 		return []agent.Message{&agent.ResultMessage{
 			MessageType: "result",
 			Subtype:     "success",
