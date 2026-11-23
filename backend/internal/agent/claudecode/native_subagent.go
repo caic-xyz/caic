@@ -530,7 +530,7 @@ func claudeBackgroundCommandStatus(status string) agent.BackgroundCommandStatus 
 // prompt delivered during a turn follows the same rule: a later request
 // carries it, or Claude Code starts a turn for it after the result. The root
 // result reports such a pending notification or prompt through
-// ResultMessage.TurnQueued; AGENTS.md holds the evidence.
+// ResultMessage.TurnContinues; AGENTS.md holds the evidence.
 //
 // A background task that a subagent spawned notifies that subagent, not the
 // parent, so it starts no parent turn. Its task records reach the root stream
@@ -542,17 +542,20 @@ type turnQueue struct {
 	childTools map[string]struct{} // tool use IDs that a subagent owns
 	pending    bool                // a terminal record or prompt arrived during the turn that no later model request delivers yet
 	inTurn     bool                // a root init started a turn that no root result has ended yet
+	stale      bool                // a stale-session stop notification arrived since the last init or prompt
 }
 
 // input records a root prompt. Delivered during a turn, it is pending until a
 // later model request carries it; otherwise it starts its own turn.
 func (q *turnQueue) input() {
 	q.pending = q.pending || q.inTurn
+	q.stale = false
 }
 
-// parse returns messages with a TurnStartedMessage before each root init and
+// parse returns messages with a TurnStartedMessage before each root init,
+// except the empty one that answers a stale-session stop notification, and
 // before each background card that a task_updated or task_notification record
-// settled while no turn runs, and sets TurnQueued on a root result that such a
+// settled while no turn runs, and sets TurnContinues on a root result that such a
 // record or a prompt precedes with no later request. Only the first terminal
 // record of a run starts or queues a turn.
 func (q *turnQueue) parse(record *decodedLine, subagent bool, messages []agent.Message) []agent.Message {
@@ -573,10 +576,14 @@ func (q *turnQueue) parse(record *decodedLine, subagent bool, messages []agent.M
 	for i, message := range messages {
 		switch m := message.(type) {
 		case *agent.InitMessage:
-			q.pending, q.inTurn = false, true
+			stale := q.stale
+			q.pending, q.inTurn, q.stale = false, true, false
+			if stale {
+				return messages
+			}
 			return slices.Insert(slices.Clone(messages), i, agent.Message(&agent.TurnStartedMessage{}))
 		case *agent.ResultMessage:
-			m.TurnQueued = q.pending
+			m.TurnContinues = q.pending
 			q.pending, q.inTurn = false, false
 		}
 	}
@@ -590,9 +597,12 @@ func (q *turnQueue) parse(record *decodedLine, subagent bool, messages []agent.M
 		}
 		return messages
 	}
+	if ev.Subtype == claudecode.SystemTaskNotification && strings.Contains(ev.Summary, staleSessionSummary) {
+		q.stale = true
+	}
 	out := messages[:0:0]
 	for _, message := range messages {
-		if q.settles(message) {
+		if q.settles(message) && !q.stale {
 			if q.inTurn {
 				q.pending = true
 			} else {
@@ -631,3 +641,9 @@ func (q *turnQueue) settles(message agent.Message) bool {
 	q.queued[id] = runID
 	return true
 }
+
+// staleSessionSummary ends the task_notification summary of a background
+// command or agent that the previous Claude Code process left running, even
+// mid-turn. Claude Code answers it with an init and a result without a model
+// request.
+const staleSessionSummary = "didn't finish before the previous session ended"

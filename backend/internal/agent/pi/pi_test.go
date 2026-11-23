@@ -784,14 +784,18 @@ func TestPiWireFormat(t *testing.T) {
 			prompt     = `{"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"Fix it"}]}}`
 			assistant  = `{"type":"message_start","message":{"role":"assistant","content":[],"provider":"openrouter","model":"m"}}`
 			agentEnd   = `{"type":"agent_end","messages":[]}`
+			// Minimized from a task log: the failed attempt's run ended first.
+			agentEndRetry = `{"type":"agent_end","messages":[],"willRetry":true}`
+			settled       = `{"type":"agent_settled"}`
 			// Minimized from a task log: the pi-subagents extension woke the
 			// idle parent after a detached run ended.
 			notify = `{"type":"message_start","message":{"role":"custom","customType":"subagent-notify","content":"Background task completed: **worker**","display":false}}`
 			// Minimized from a task log: Pi retried a rate-limited request.
 			retry = `{"type":"auto_retry_start","attempt":1,"maxAttempts":3,"delayMs":2000,"errorMessage":"429"}`
 		)
-		// A prompt's run, an extension wake, and a retry each start at agent_start.
-		lines := []string{agentStart, turnStart, prompt, assistant, agentEnd, agentStart, turnStart, notify, assistant, agentEnd, retry, agentStart, turnStart, assistant, agentEnd}
+		// A prompt's run, an extension wake, and a retry each start at agent_start;
+		// the turn ends at agent_settled, so a retried run keeps it going.
+		lines := []string{agentStart, turnStart, prompt, assistant, agentEnd, settled, agentStart, turnStart, notify, assistant, agentEndRetry, retry, agentStart, turnStart, assistant, agentEnd, settled}
 		wire := New("", nil).NewWire()
 		var msgs []agent.Message
 		for i, line := range lines {
@@ -801,12 +805,13 @@ func TestPiWireFormat(t *testing.T) {
 			}
 			msgs = append(msgs, m...)
 		}
-		if got := agenttest.TurnBoundaries(msgs); got != "SRSRSR" {
-			t.Errorf("boundaries = %q, want %q", got, "SRSRSR")
+		if got := agenttest.TurnBoundaries(msgs); got != "SQESSQE" {
+			t.Errorf("boundaries = %q, want %q", got, "SQESSQE")
 		}
+		// These recordings predate agent_settled; the host exit ends their turn.
 		for _, name := range []string{"read-edit-bash", "tool-error"} {
-			if got := agenttest.TurnBoundaries(agenttest.ParseJSONL(t, filepath.Join("testdata", name+".jsonl"), New("", nil).NewWire())); got != "ISR" {
-				t.Errorf("%s: boundaries = %q, want %q", name, got, "ISR")
+			if got := agenttest.TurnBoundaries(agenttest.ParseJSONL(t, filepath.Join("testdata", name+".jsonl"), New("", nil).NewWire())); got != "ISQ" {
+				t.Errorf("%s: boundaries = %q, want %q", name, got, "ISQ")
 			}
 		}
 	})

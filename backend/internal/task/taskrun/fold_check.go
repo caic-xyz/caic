@@ -130,7 +130,7 @@ func foldCheckTask(lt *history.LoadedTask) (*Task, error) {
 // ends a turn.
 func foldCheckTurnBoundary(m agent.Message) bool {
 	switch m.(type) {
-	case *agent.TurnStartedMessage, *agent.UserInputMessage, *agent.AskMessage, *agent.ResultMessage, *agent.ExitMessage:
+	case *agent.TurnStartedMessage, *agent.TurnEndedMessage, *agent.UserInputMessage, *agent.AskMessage, *agent.ResultMessage, *agent.ExitMessage:
 		return true
 	default:
 		return false

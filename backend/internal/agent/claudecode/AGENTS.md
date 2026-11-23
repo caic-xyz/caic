@@ -99,7 +99,7 @@ root result, Claude Code starts a notification turn about 30 ms after the
 result: 5 of 5 such results in 116 local Claude task logs. None of the 63
 results with such a record, TaskStop kills included, was followed by a turn
 within 2 s. The result itself does not distinguish them
-(`queued_turn_count` is 0); `turnQueue` sets `ResultMessage.TurnQueued`.
+(`queued_turn_count` is 0); `turnQueue` sets `ResultMessage.TurnContinues`.
 
 A user prompt delivered during a turn follows the same rule. With no root
 `tool_result` record between the prompt's input record and the root result,
@@ -107,6 +107,19 @@ Claude Code started a turn for it within 30 ms of the result: 5 of 5 cases in
 the same logs. None of the 63 prompts that a tool result followed was followed
 by a turn within 2 s: 50 next saw user input, and 13 an `init` after 2 s. A
 prompt delivered before `init` belongs to the turn that `init` starts.
+
+After a revive, Claude Code reports each background command or agent the
+previous process left running as a root `task_notification` with status
+`stopped` and a summary ending "didn't finish before the previous session
+ended", then sends `init` and a result with `num_turns` 0 and no model
+request, about 1 ms apart. In 861 local task logs, 5 revives sent such
+notifications: 3 sent one notification and one empty turn, one sent two agent
+notifications and one empty turn, and one sent an agent and a shell
+notification and two empty turns. `turnQueue` reports no turn start for the
+first empty turn; a prompt delivered first still starts one. A second empty
+turn still reports a start, because no count of notifications predicts the
+number of empty turns, and suppressing a real turn's start would show it
+waiting.
 
 A task that a subagent spawned notifies that subagent. Its task records reach
 the parent stream without `parent_tool_use_id`, and newer versions add

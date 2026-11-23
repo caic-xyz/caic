@@ -34,6 +34,7 @@ the message's streaming deltas from its consolidated content in the frontend
 (duplicated assistant text) and duplicate the tool card.
 | `tool_execution_end` | ToolResultMessage (+ result output for subagents) |
 | `agent_end` | ResultMessage (with usage, duration, numTurns) |
+| `agent_settled` | TurnEndedMessage |
 | `turn_end` | UsageMessage (also increments turn counter) |
 | `extension_ui_request` | (auto-respond on stdin) |
 
@@ -154,6 +155,17 @@ widget's completion after 0.126 s (median), 0.153 s at most. The first
 assistant output followed the opening message after 2.4 s (median), 6.1 s at
 the 90th percentile. `ParseOutput` in `pi.go` reports every `agent_start` as
 a `TurnStartedMessage`, whatever opens the run.
+
+The turn ends at `agent_settled`, which Pi emits when no automatic retry,
+compaction retry, or queued continuation remains. `ParseOutput` sets
+`ResultMessage.TurnContinues` on every result between `agent_start` and
+`agent_settled` and emits a `TurnEndedMessage` at `agent_settled`. Of 2,321
+`agent_end` records in local Pi logs, 2,231 were followed by `agent_settled`,
+81 by another `agent_start` about 2 s later, 8 by user input, and 1 by the end
+of a log purged during a retry; every log with an `agent_end` has an
+`agent_settled`. Ending the turn at `agent_end` or at an error `message_end`
+showed the task waiting during each retry delay. Recordings older than
+`agent_settled` end their turn at the host exit.
 
 A steered prompt that no run consumes stays in Pi's queue at `agent_end`, so
 `queue_update` does not predict a run: of 27 non-empty queues at `agent_end`,

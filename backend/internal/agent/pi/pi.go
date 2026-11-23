@@ -370,6 +370,10 @@ type piWireFormat struct {
 	// Pi's tool_execution_update events carry the full accumulated output;
 	// we track the previous length to emit only the new portion.
 	toolOutputLen map[string]int
+
+	// unsettled is set from agent_start until agent_settled: Pi may still retry
+	// a failed run or start a queued continuation.
+	unsettled bool
 }
 
 // EncodePrompt encodes a complete Pi prompt without changing decoder state.
@@ -419,9 +423,26 @@ func (w *piWireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 	// Each agent_start begins a low-level run with its own agent_end messages:
 	// a prompt's, or one Pi starts by itself; see AGENTS.md.
 	// https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/packages/agent/src/agent-loop.ts
-	if typ == pi.EventAgentStart {
+	// The turn ends at agent_settled, once Pi has no retry or queued
+	// continuation left, so results before it do not end the turn.
+	switch typ {
+	case pi.EventAgentStart:
 		w.usageSinceResult = false
+		w.unsettled = true
 		msgs = append([]agent.Message{&agent.TurnStartedMessage{}}, msgs...)
+	case pi.EventAgentSettled:
+		if w.unsettled {
+			w.unsettled = false
+			msgs = append(msgs, &agent.TurnEndedMessage{})
+		}
+	default:
+	}
+	if w.unsettled {
+		for _, m := range msgs {
+			if rm, ok := m.(*agent.ResultMessage); ok {
+				rm.TurnContinues = true
+			}
+		}
 	}
 	w.applyMetadata(msgs)
 	w.markAccounting(typ, msgs)

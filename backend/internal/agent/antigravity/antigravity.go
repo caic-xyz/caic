@@ -403,7 +403,7 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 		// resumed processes. Only DONE steps from the task's proven conversations
 		// contribute to the neutral per-turn usage.
 		m.Usage = w.finishResult()
-		m.TurnQueued = w.queued > 0
+		m.TurnContinues = w.queued > 0
 		w.inTurn = false
 		return append(messages, m), nil
 	default:

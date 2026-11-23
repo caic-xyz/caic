@@ -549,6 +549,10 @@ func TestTurnQueue(t *testing.T) {
 			reply  = `{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_other","type":"tool_result","content":"ok"}]},"session_id":"fe242f82"}`
 			// prompt is an input record: the user's prompt that caic delivered.
 			prompt = `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Also update the docs"}]}}`
+			// stale reports, after a revive, a command the previous process left
+			// running; Claude Code answers it with init and a result without a
+			// model request. Minimized from a task log.
+			stale = `{"type":"system","subtype":"task_notification","task_id":"bxguu5fqa","tool_use_id":"toolu_01Lot","status":"stopped","output_file":"","summary":"Background shell command didn't finish before the previous session ended","session_id":"fe242f82"}`
 		)
 		boundaries := func(t *testing.T, lines ...string) string {
 			wire := newWireFormat()
@@ -586,6 +590,13 @@ func TestTurnQueue(t *testing.T) {
 			{"PromptDuringFinalRequest", []string{init, prompt, result, init, result}, "SIQSR"},
 			{"PromptToolResultDelivers", []string{init, prompt, reply, result}, "SIR"},
 			{"PromptBeforeInit", []string{prompt, init, result}, "ISR"},
+			// The empty turn answering a stale-session stop reports no start; a
+			// prompt delivered first still starts its own turn.
+			{"StaleSessionStop", []string{stale, init, result, init, result}, "RSR"},
+			{"StaleSessionStopThenPrompt", []string{stale, prompt, init, result}, "ISR"},
+			// Minimized from a task log: replay keeps one parser across the restart
+			// of a session that exited mid-turn.
+			{"StaleSessionStopAfterExitMidTurn", []string{init, stale, init, result}, "SR"},
 		} {
 			if got := boundaries(t, c.lines...); got != c.want {
 				t.Errorf("%s: boundaries = %q, want %q", c.name, got, c.want)

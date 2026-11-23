@@ -86,7 +86,11 @@ if (process.env.TEST_WORKER_INDEX === undefined) {
 export default defineConfig({
   testDir: "./tests",
   testIgnore: includeVisuals ? [] : ["**/gen-screenshots.spec.ts", "**/prompt-input.spec.ts"],
-  timeout: 60_000,
+  // A busy host (load average above 100) stretched waits past the 60 s test and
+  // 5 s assertion defaults while every failing test passed on rerun. Passing
+  // runs never wait on these limits.
+  timeout: 120_000,
+  expect: { timeout: 15_000 },
   // Keep browser processes within a predictable memory budget on large hosts.
   workers: includeVisuals ? 1 : 4,
   outputDir: process.env.CAIC_E2E_OUTPUT_DIR,

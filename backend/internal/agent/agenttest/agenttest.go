@@ -21,8 +21,8 @@ func TimedMessages(messages []agent.Message) []agent.TimedMessage {
 }
 
 // TurnBoundaries renders the root turn boundaries in messages, in order: "I"
-// for a prompt, "S" for a turn start, "R" for a result, and "Q" for a result
-// that reports the harness starts another turn right after it.
+// for a prompt, "S" for a turn start, "R" for a result, "Q" for a result
+// after which the turn continues, and "E" for a reported turn end.
 func TurnBoundaries(messages []agent.Message) string {
 	var b strings.Builder
 	for _, msg := range messages {
@@ -34,8 +34,10 @@ func TurnBoundaries(messages []agent.Message) string {
 			b.WriteByte('I')
 		case *agent.TurnStartedMessage:
 			b.WriteByte('S')
+		case *agent.TurnEndedMessage:
+			b.WriteByte('E')
 		case *agent.ResultMessage:
-			if m.TurnQueued {
+			if m.TurnContinues {
 				b.WriteByte('Q')
 			} else {
 				b.WriteByte('R')

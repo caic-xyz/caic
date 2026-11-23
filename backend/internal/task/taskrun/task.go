@@ -157,7 +157,7 @@ type Task struct {
 	nativeSubagents        agent.NativeSubagentTimeline    // harness-native subagent cards folded from timeline
 	backgroundCommands     agent.BackgroundCommandTimeline // harness-native detached shell cards folded from timeline
 	backgroundStarts       map[string]backgroundStart      // First running observation of each card's current run, by card ID.
-	turnQueued             bool                            // The last root result reported that the harness starts another turn right after it.
+	turnContinues          bool                            // The last root result reported that the root turn continues past it.
 	turnEnded              bool                            // The last root turn has a trailing result or host exit; only background work or a queued turn keeps the task running.
 	turnAsks               []turnAsk                       // Unanswered root questions of the current turn, oldest first.
 	turnExitPlan           bool                            // The current turn presented a plan with ExitPlanMode.
@@ -1585,7 +1585,7 @@ func (t *Task) clearContextLocked(at time.Time) {
 	t.planContent = ""
 	t.planDismissed = true
 	t.planExitID = ""
-	t.turnAsks, t.turnExitPlan, t.turnQueued, t.turnEnded = nil, false, false, true
+	t.turnAsks, t.turnExitPlan, t.turnContinues, t.turnEnded = nil, false, false, true
 	if s := t.stateLocked(); s == task.StateRunning || s == task.StateAsking || s == task.StateHasPlan {
 		t.setActivityLocked(task.StateWaiting, at)
 	}
@@ -1707,7 +1707,7 @@ func (t *Task) observeBackgroundStartLocked(id, run string, running bool, at tim
 func (t *Task) hostExitedLocked() {
 	t.nativeSubagents.HostExited()
 	t.backgroundCommands.HostExited()
-	t.turnQueued = false
+	t.turnContinues = false
 	t.turnEnded = true
 }
 
@@ -1881,10 +1881,27 @@ func (t *Task) settledTurnStateLocked() task.State {
 		return task.StateAsking
 	case t.turnExitPlan && t.planContent != "":
 		return task.StateHasPlan
-	case t.turnQueued || t.nativeSubagents.ActiveBackground() > 0 || t.backgroundCommands.Active() > 0:
+	case t.turnContinues || t.nativeSubagents.ActiveBackground() > 0 || t.backgroundCommands.Active() > 0:
 		return task.StateRunning
 	default:
 		return task.StateWaiting
+	}
+}
+
+// settleTurnLocked settles the activity of an ended root turn as of at. A
+// task still starting settles too: the agent can report a result before its
+// session goes live. The caller holds t.mu.
+func (t *Task) settleTurnLocked(at time.Time) {
+	cur := t.stateLocked()
+	if cur != task.StateRunning && cur != task.StateStarting && cur != task.StateWaiting && cur != task.StateAsking {
+		return
+	}
+	next := t.settledTurnStateLocked()
+	t.setActivityLocked(next, at)
+	if next == task.StateRunning {
+		// Duration now includes the settled turn, so the live delta starts at
+		// its result rather than at the turn that just ended.
+		t.turnStartedAt = t.stateUpdatedAt
 	}
 }
 
@@ -2030,7 +2047,7 @@ func (t *Task) foldMessageLocked(m agent.Message, at, producerAt time.Time, repl
 	// Transition to waiting/asking when a result arrives.
 	if rm, ok := m.(*agent.ResultMessage); ok && !child {
 		t.completedRootTurns++
-		t.turnQueued = rm.TurnQueued
+		t.turnContinues = rm.TurnContinues
 		if len(rm.DiffStat) > 0 {
 			t.setLiveDiffStatLocked(rm.DiffStat)
 		}
@@ -2039,22 +2056,11 @@ func (t *Task) foldMessageLocked(m agent.Message, at, producerAt time.Time, repl
 			t.reportedContextWindow = rm.ContextWindow
 		}
 		t.planDismissed = false
-		// Settle the parent turn. Also handle Running/Waiting because
-		// watchSession may have already set Waiting before the dispatch
-		// goroutine processed this ResultMessage (it does a blocking Fetch
-		// first). In that case we still need to distinguish Asking/HasPlan and
-		// to keep Running while a native subagent is active.
-		// StateStarting is also handled: the agent subprocess may produce a
-		// result before its session goes live.
-		if cur := t.stateLocked(); cur == task.StateRunning || cur == task.StateStarting || cur == task.StateWaiting || cur == task.StateAsking {
-			next := t.settledTurnStateLocked()
-			t.setActivityLocked(next, stateAt)
-			if next == task.StateRunning {
-				// Duration now includes the settled turn, so the live delta starts
-				// at its result rather than at the turn that just ended.
-				t.turnStartedAt = t.stateUpdatedAt
-			}
-		}
+		t.settleTurnLocked(stateAt)
+	}
+	if _, ok := m.(*agent.TurnEndedMessage); ok && !child {
+		t.turnContinues = false
+		t.settleTurnLocked(stateAt)
 	}
 	if !child {
 		t.observeUsageLocked(m)
@@ -2095,6 +2101,8 @@ func (t *Task) observeTurnLocked(m agent.Message, at time.Time) {
 		if t.turnEnded {
 			t.turnAsks, t.turnExitPlan = nil, false
 		}
+		t.turnEnded = true
+	case *agent.TurnEndedMessage:
 		t.turnEnded = true
 	case *agent.UserInputMessage:
 		if t.inputDelivering {

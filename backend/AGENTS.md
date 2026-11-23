@@ -9,6 +9,10 @@ Go backend for caic. Packages under `internal/` are private.
 - Before changing a task's terminal state or a lifecycle lock, read the
   incarnation rules in the `taskmgr` package comment
   (`internal/task/taskmgr/manager.go`).
+- Runtime code changes a task's lifecycle through `taskrun.Task.Transition`
+  or a named entry point such as `GoLive` or `RuntimeExited`; the message fold
+  alone sets running, waiting, asking, and has_plan. Tests reach a published
+  state through `taskruntest.SetState`, or `setState` inside `taskrun`.
 
 ## Serialized Structures
 

@@ -249,51 +249,38 @@ func TestTask(t *testing.T) {
 	})
 	t.Run("NativeContextOccupancy", func(t *testing.T) {
 		t.Parallel()
-		for _, mode := range []string{"live", "restored"} {
-			t.Run(mode, func(t *testing.T) {
-				t.Parallel()
-				used, zero, childUsed := 45_000, 0, 999
-				steps := []struct {
-					message agent.Message
-					used    *int
-					input   int
-				}{
-					{&agent.InitMessage{SessionID: "root"}, nil, 0},
-					{&agent.UsageMessage{Usage: agent.Usage{InputTokens: 100}, Additive: true}, nil, 100},
-					{&agent.UsageMessage{ContextUsed: &used, ContextWindow: 200_000}, &used, 100},
-					{&agent.UsageMessage{Source: v3.MessageSource{AgentID: "child"}, ContextUsed: &childUsed, Usage: agent.Usage{InputTokens: 999}}, &used, 100},
-					{&agent.UsageMessage{ContextUsed: &zero}, &zero, 100},
-					{&agent.UsageMessage{ContextWindow: 200_000}, &zero, 0},
-					{&agent.InitMessage{SessionID: "root"}, &zero, 0},
-					{&agent.ResultMessage{Usage: agent.Usage{InputTokens: 100}}, &zero, 0},
-					{&agent.InitMessage{SessionID: "next"}, nil, 0},
-					{&agent.UsageMessage{ContextUsed: &used}, &used, 0},
-					{&agent.SystemMessage{Subtype: agent.SystemSubtypeCompactBoundary}, nil, 0},
-					{&agent.UsageMessage{ContextUsed: &used}, &used, 0},
-					{agent.ContextCleared(), nil, 0},
-					{&agent.UsageMessage{ContextUsed: &used, Usage: agent.Usage{InputTokens: 321}}, &used, 321},
-					{&agent.UsageMessage{ContextUsed: &zero, PerCall: true}, &zero, 0},
-				}
-				live := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Dsh, "", "")
-				history := make([]agent.Message, 0, len(steps))
-				for i, step := range steps {
-					history = append(history, step.message)
-					tk := live
-					if mode == "restored" {
-						tk = mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Dsh, "", "")
-						tk.SeedTimelineParts(nil, agenttest.TimedMessages(history), nil)
-					} else {
-						addTaskMessage(tk, step.message)
-					}
-					snap := tk.Snapshot()
-					if !reflect.DeepEqual(snap.ContextUsed, step.used) || snap.LastAPIUsage.InputTokens != step.input {
-						t.Fatalf("step %d: occupancy=%v api=%+v; want %v/%d", i, snap.ContextUsed, snap.LastAPIUsage, step.used, step.input)
-					}
-					if i == 5 && snap.Usage.InputTokens != 100 {
-						t.Fatalf("occupancy changed billed usage: %+v", snap.Usage)
-					}
-				}
-			})
+		used, zero, childUsed := 45_000, 0, 999
+		steps := []struct {
+			message agent.Message
+			used    *int
+			input   int
+		}{
+			{&agent.InitMessage{SessionID: "root"}, nil, 0},
+			{&agent.UsageMessage{Usage: agent.Usage{InputTokens: 100}, Additive: true}, nil, 100},
+			{&agent.UsageMessage{ContextUsed: &used, ContextWindow: 200_000}, &used, 100},
+			{&agent.UsageMessage{Source: v3.MessageSource{AgentID: "child"}, ContextUsed: &childUsed, Usage: agent.Usage{InputTokens: 999}}, &used, 100},
+			{&agent.UsageMessage{ContextUsed: &zero}, &zero, 100},
+			{&agent.UsageMessage{ContextWindow: 200_000}, &zero, 0},
+			{&agent.InitMessage{SessionID: "root"}, &zero, 0},
+			{&agent.ResultMessage{Usage: agent.Usage{InputTokens: 100}}, &zero, 0},
+			{&agent.InitMessage{SessionID: "next"}, nil, 0},
+			{&agent.UsageMessage{ContextUsed: &used}, &used, 0},
+			{&agent.SystemMessage{Subtype: agent.SystemSubtypeCompactBoundary}, nil, 0},
+			{&agent.UsageMessage{ContextUsed: &used}, &used, 0},
+			{agent.ContextCleared(), nil, 0},
+			{&agent.UsageMessage{ContextUsed: &used, Usage: agent.Usage{InputTokens: 321}}, &used, 321},
+			{&agent.UsageMessage{ContextUsed: &zero, PerCall: true}, &zero, 0},
+		}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Dsh, "", "")
+		for i, step := range steps {
+			addTaskMessage(tk, step.message)
+			snap := tk.Snapshot()
+			if !reflect.DeepEqual(snap.ContextUsed, step.used) || snap.LastAPIUsage.InputTokens != step.input {
+				t.Fatalf("step %d: occupancy=%v api=%+v; want %v/%d", i, snap.ContextUsed, snap.LastAPIUsage, step.used, step.input)
+			}
+			if i == 5 && snap.Usage.InputTokens != 100 {
+				t.Fatalf("occupancy changed billed usage: %+v", snap.Usage)
+			}
 		}
 	})
 	t.Run("ExitAfterInputAttempt", func(t *testing.T) {
@@ -568,85 +555,65 @@ func TestTask(t *testing.T) {
 	})
 	t.Run("ChildObservedProviderQuotaRemainsShared", func(t *testing.T) {
 		t.Parallel()
-		for _, live := range []bool{false, true} {
-			t.Run(strconv.FormatBool(live), func(t *testing.T) {
-				t.Parallel()
-				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Codex, "model", "")
-				sink := &rollupSpy{}
-				tk.Rollup = sink
-				quota := &agent.RateLimitMessage{Source: v3.MessageSource{AgentID: "child"}, Status: agent.RateLimitStatusRejected, RateLimitType: "five_hour", ResetsAt: time.Now().Add(time.Hour), QuotaLabel: "shared account", QuotaProvider: agent.QuotaProviderCodex}
-				if live {
-					addTaskMessage(tk, quota)
-				} else {
-					tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{quota}), nil)
-				}
-				history, _ := tk.RateLimitsSince(0)
-				if len(history) != 1 || tk.rateLimit.Status != agent.RateLimitStatusRejected || len(sink.Quotas) != 1 {
-					t.Fatalf("child-origin account quota discarded: history=%v quota=%+v sink=%v", history, tk.rateLimit, sink.Quotas)
-				}
-				if prompt := BuildHandoffPrompt(tk, 0); !strings.Contains(prompt, "shared account") {
-					t.Fatalf("provider block lost from handoff: %s", prompt)
-				}
-			})
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Codex, "model", "")
+		sink := &rollupSpy{}
+		tk.Rollup = sink
+		quota := &agent.RateLimitMessage{Source: v3.MessageSource{AgentID: "child"}, Status: agent.RateLimitStatusRejected, RateLimitType: "five_hour", ResetsAt: time.Now().Add(time.Hour), QuotaLabel: "shared account", QuotaProvider: agent.QuotaProviderCodex}
+		addTaskMessage(tk, quota)
+		history, _ := tk.RateLimitsSince(0)
+		if len(history) != 1 || tk.rateLimit.Status != agent.RateLimitStatusRejected || len(sink.Quotas) != 1 {
+			t.Fatalf("child-origin account quota discarded: history=%v quota=%+v sink=%v", history, tk.rateLimit, sink.Quotas)
+		}
+		if prompt := BuildHandoffPrompt(tk, 0); !strings.Contains(prompt, "shared account") {
+			t.Fatalf("provider block lost from handoff: %s", prompt)
 		}
 	})
 	t.Run("ChildOwnership", func(t *testing.T) {
 		t.Parallel()
 		parent := v3.MessageSource{ThreadID: "root", TurnID: "turn", RootThreadID: "root"}
 		child := v3.MessageSource{ThreadID: "child", TurnID: "child-turn", RootThreadID: "root", AgentID: "child"}
-		for _, live := range []bool{false, true} {
-			t.Run(strconv.FormatBool(live), func(t *testing.T) {
-				t.Parallel()
-				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "root prompt"}, harness.Codex, "root-model", "")
-				sink := &rollupSpy{}
-				tk.Rollup = sink
-				messages := []agent.Message{
-					&agent.InitMessage{Source: parent, SessionID: "root", ReportedModel: "root-model"},
-					&agent.UsageMessage{Source: parent, Usage: agent.Usage{InputTokens: 12}, ContextWindow: 100, ReportedModel: "root-model", ModelDerived: true},
-					&agent.TextMessage{Source: parent, Text: "root answer"},
-					&agent.ResultMessage{Source: parent, Usage: agent.Usage{InputTokens: 30}},
-					&agent.UserInputMessage{Source: child, Text: "child prompt"},
-					&agent.InitMessage{Source: child, SessionID: "child", ReportedModel: "child-model"},
-					&agent.TextMessage{Source: child, Text: "child answer"},
-					&agent.ToolUseMessage{Source: child, Name: "EnterPlanMode", ToolUseID: "local"},
-					&agent.UsageMessage{Source: child, Usage: agent.Usage{InputTokens: 999}, ContextWindow: 999, ReportedModel: "child-model", ModelDerived: true},
-					&agent.SystemMessage{Source: child, Subtype: agent.SystemSubtypeCompactBoundary, ContextTokensAfter: 999},
-					&agent.SystemMessage{Source: child, Subtype: agent.SystemSubtypeModelRerouted, ReportedModel: "child-model"},
-					&agent.AskMessage{Source: child, ToolUseID: "ask"},
-					&agent.RateLimitMessage{Source: child, Status: agent.RateLimitStatusRejected, QuotaLabel: "child-only-quota", RateLimitType: "thread_goal"},
-					&agent.ResultMessage{Source: child, IsError: true, Result: "child error", Usage: agent.Usage{InputTokens: 999}},
-				}
-				if live {
-					setState(tk, task.StateRunning)
-					for _, message := range messages {
-						addTaskMessage(tk, message)
-					}
-				} else {
-					tk.Restore(task.StateStarting, time.Time{})
-					tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages), nil)
-					tk.GoLive()
-				}
-				if tk.GetState() != task.StateWaiting || tk.sessionMetadata.SessionID != "root" || tk.sessionMetadata.ReportedModel != "root-model" || tk.costTracker.Model != "root-model" || tk.inPlanMode {
-					t.Fatalf("child changed root state: state=%s session=%s model=%s costmodel=%s plan=%t", tk.GetState(), tk.sessionMetadata.SessionID, tk.sessionMetadata.ReportedModel, tk.costTracker.Model, tk.inPlanMode)
-				}
-				if tk.contextMeter.API.InputTokens != 12 || tk.reportedContextWindow != 100 || tk.liveUsage.InputTokens != 30 {
-					t.Fatalf("root context/totals changed: latest=%+v window=%d totals=%+v", tk.contextMeter.API, tk.reportedContextWindow, tk.liveUsage)
-				}
-				if got := tk.LastAgentResult(); got != "root answer" {
-					t.Errorf("last result = %q", got)
-				}
-				history, _ := tk.RateLimitsSince(0)
-				if len(sink.Quotas) != 0 {
-					t.Fatalf("child goal affected provider quota: %+v", sink.Quotas)
-				}
-				if len(history) != 0 {
-					t.Fatalf("child thread quota entered root rate limits: %+v", history)
-				}
-				prompt := BuildHandoffPrompt(tk, 0)
-				if strings.Contains(prompt, "child answer") || strings.Contains(prompt, "child prompt") || strings.Contains(prompt, "child error") || strings.Contains(prompt, "child-only-quota") {
-					t.Errorf("child leaked into handoff: %s", prompt)
-				}
-			})
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "root prompt"}, harness.Codex, "root-model", "")
+		sink := &rollupSpy{}
+		tk.Rollup = sink
+		messages := []agent.Message{
+			&agent.InitMessage{Source: parent, SessionID: "root", ReportedModel: "root-model"},
+			&agent.UsageMessage{Source: parent, Usage: agent.Usage{InputTokens: 12}, ContextWindow: 100, ReportedModel: "root-model", ModelDerived: true},
+			&agent.TextMessage{Source: parent, Text: "root answer"},
+			&agent.ResultMessage{Source: parent, Usage: agent.Usage{InputTokens: 30}},
+			&agent.UserInputMessage{Source: child, Text: "child prompt"},
+			&agent.InitMessage{Source: child, SessionID: "child", ReportedModel: "child-model"},
+			&agent.TextMessage{Source: child, Text: "child answer"},
+			&agent.ToolUseMessage{Source: child, Name: "EnterPlanMode", ToolUseID: "local"},
+			&agent.UsageMessage{Source: child, Usage: agent.Usage{InputTokens: 999}, ContextWindow: 999, ReportedModel: "child-model", ModelDerived: true},
+			&agent.SystemMessage{Source: child, Subtype: agent.SystemSubtypeCompactBoundary, ContextTokensAfter: 999},
+			&agent.SystemMessage{Source: child, Subtype: agent.SystemSubtypeModelRerouted, ReportedModel: "child-model"},
+			&agent.AskMessage{Source: child, ToolUseID: "ask"},
+			&agent.RateLimitMessage{Source: child, Status: agent.RateLimitStatusRejected, QuotaLabel: "child-only-quota", RateLimitType: "thread_goal"},
+			&agent.ResultMessage{Source: child, IsError: true, Result: "child error", Usage: agent.Usage{InputTokens: 999}},
+		}
+		setState(tk, task.StateRunning)
+		for _, message := range messages {
+			addTaskMessage(tk, message)
+		}
+		if tk.GetState() != task.StateWaiting || tk.sessionMetadata.SessionID != "root" || tk.sessionMetadata.ReportedModel != "root-model" || tk.costTracker.Model != "root-model" || tk.inPlanMode {
+			t.Fatalf("child changed root state: state=%s session=%s model=%s costmodel=%s plan=%t", tk.GetState(), tk.sessionMetadata.SessionID, tk.sessionMetadata.ReportedModel, tk.costTracker.Model, tk.inPlanMode)
+		}
+		if tk.contextMeter.API.InputTokens != 12 || tk.reportedContextWindow != 100 || tk.liveUsage.InputTokens != 30 {
+			t.Fatalf("root context/totals changed: latest=%+v window=%d totals=%+v", tk.contextMeter.API, tk.reportedContextWindow, tk.liveUsage)
+		}
+		if got := tk.LastAgentResult(); got != "root answer" {
+			t.Errorf("last result = %q", got)
+		}
+		history, _ := tk.RateLimitsSince(0)
+		if len(sink.Quotas) != 0 {
+			t.Fatalf("child goal affected provider quota: %+v", sink.Quotas)
+		}
+		if len(history) != 0 {
+			t.Fatalf("child thread quota entered root rate limits: %+v", history)
+		}
+		prompt := BuildHandoffPrompt(tk, 0)
+		if strings.Contains(prompt, "child answer") || strings.Contains(prompt, "child prompt") || strings.Contains(prompt, "child error") || strings.Contains(prompt, "child-only-quota") {
+			t.Errorf("child leaked into handoff: %s", prompt)
 		}
 	})
 	t.Run("ToolCompactionOwnerScope", func(t *testing.T) {
@@ -3562,10 +3529,11 @@ func TestTask(t *testing.T) {
 					agentEnd   = `{"type":"agent_end","messages":[{"role":"assistant","content":[{"type":"text","text":"Done"}],"usage":{"input":10,"output":5}}]}`
 					notify     = `{"type":"message_start","message":{"role":"custom","customType":"subagent-notify","content":"Background task completed: **worker**","display":false}}`
 					assistant  = `{"type":"message_start","message":{"role":"assistant","content":[]}}`
+					settled    = `{"type":"agent_settled"}`
 				)
-				entries := parseWire(t, pi.New("", nil).NewWire(), agentStart, prompt, delta, agentEnd, agentStart, notify, assistant, delta, agentEnd)
+				entries := parseWire(t, pi.New("", nil).NewWire(), agentStart, prompt, delta, agentEnd, settled, agentStart, notify, assistant, delta, agentEnd, settled)
 				states, _ := fold(t, entries)
-				results := slices.IndexFunc(entries, func(e agent.TimedMessage) bool { _, ok := e.Message.(*agent.ResultMessage); return ok })
+				results := slices.IndexFunc(entries, func(e agent.TimedMessage) bool { _, ok := e.Message.(*agent.TurnEndedMessage); return ok })
 				queued := slices.IndexFunc(entries[results:], func(e agent.TimedMessage) bool { _, ok := e.Message.(*agent.TurnStartedMessage); return ok })
 				if queued < 0 {
 					t.Fatal("the extension wake started no turn")
@@ -3576,7 +3544,7 @@ func TestTask(t *testing.T) {
 				}
 				for i := queued; i < len(entries)-1; i++ {
 					if states[i] != task.StateRunning {
-						t.Errorf("entry %d (%T): state = %v, want running until the wake's result", i, entries[i].Message, states[i])
+						t.Errorf("entry %d (%T): state = %v, want running until the wake settles", i, entries[i].Message, states[i])
 					}
 				}
 				if got := states[len(states)-1]; got != task.StateWaiting {

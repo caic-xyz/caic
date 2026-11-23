@@ -46,7 +46,7 @@ agy reports `init` once per process. Each turn opens with one root
 `user_input` step, which reports a turn start (`TurnStartedMessage`), and ends
 at the root result. A prompt delivered during a turn gets its own turn right
 after the result: 22 of 23 such results in local logs; an exit followed the
-other. The result then sets `ResultMessage.TurnQueued`.
+other. The result then sets `ResultMessage.TurnContinues`.
 
 ## Integration boundary
 

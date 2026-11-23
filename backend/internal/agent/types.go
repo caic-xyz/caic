@@ -650,10 +650,11 @@ type ResultMessage struct {
 	ContextWindow int         `json:"context_window,omitempty"`
 	UUID          string      `json:"uuid"`
 	DiffStat      v3.DiffStat `json:"diff_stat,omitzero"` // Set by caic after running container diff.
-	// TurnQueued reports that the harness starts another turn right after this
-	// one, for input it received during this turn. The adapter derives it from
-	// native records.
-	TurnQueued bool `json:"-"`
+	// TurnContinues reports that the root turn goes on past this result: the
+	// harness starts another turn right after it for input it received during
+	// the turn, or reports the turn's end later with a TurnEndedMessage. The
+	// adapter derives it from native records.
+	TurnContinues bool `json:"-"`
 }
 
 // Type implements Message.
@@ -864,7 +865,8 @@ func (m *BackgroundCommandMessage) Type() string { return "background_command" }
 // started by the harness itself, without user input, is one too. An adapter
 // emits it before a lifecycle update that causes the turn, so a consumer never
 // sees that update settle the task while the turn is pending. A root turn ends
-// at the next root ResultMessage. An accepted root prompt also starts a turn;
+// at the next root ResultMessage that does not set TurnContinues, or at a
+// TurnEndedMessage. An accepted root prompt also starts a turn;
 // ACP has no other boundary. It is derived from native records and is not part
 // of the transcript.
 type TurnStartedMessage struct {
@@ -873,6 +875,16 @@ type TurnStartedMessage struct {
 
 // Type implements Message.
 func (m *TurnStartedMessage) Type() string { return "turn_started" }
+
+// TurnEndedMessage reports that the harness ended a root turn whose results
+// set ResultMessage.TurnContinues, such as Pi agent_settled after its last run.
+// It is derived from native records and is not part of the transcript.
+type TurnEndedMessage struct {
+	v3.MessageProvenance
+}
+
+// Type implements Message.
+func (m *TurnEndedMessage) Type() string { return "turn_ended" }
 
 // BackgroundRetiredMessage reports a running native subagent or background
 // command whose outcome the harness will not report. The card ends as unknown, as on host exit. It is derived from

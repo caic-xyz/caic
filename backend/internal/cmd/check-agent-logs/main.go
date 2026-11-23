@@ -17,6 +17,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/maruel/genai/acp"
@@ -192,12 +193,21 @@ func run(args []string, out io.Writer) (runErr error) {
 	if len(cfg.paths) == 0 && !cfg.all {
 		cutoff = time.Now().Add(-cfg.since)
 	}
-	for _, path := range paths {
-		result, err := checkFile(path, cutoff, resolver)
-		if err != nil {
-			runErr = errors.Join(runErr, err)
-			continue
-		}
+	results := make([]logCheck, len(paths))
+	var foldMu sync.Mutex
+	sem := make(chan struct{}, logWorkers)
+	var wg sync.WaitGroup
+	for i, path := range paths {
+		sem <- struct{}{}
+		wg.Go(func() {
+			defer func() { <-sem }()
+			results[i] = checkLog(path, cutoff, resolver, store, prices, foldOut, &foldMu)
+		})
+	}
+	wg.Wait()
+	for i, path := range paths {
+		result := results[i]
+		runErr = errors.Join(runErr, result.err)
 		switch result.version {
 		case 1, 2:
 			if err := os.Remove(path); err != nil {
@@ -210,12 +220,6 @@ func run(args []string, out io.Writer) (runErr error) {
 		case agent.LogVersionV3:
 			if result.checked {
 				checked++
-				f, err := checkReplay(store, path, result.harness, foldOut, prices)
-				if err != nil {
-					runErr = errors.Join(runErr, err)
-				} else if f != nil {
-					result.findings = append(result.findings, *f)
-				}
 			}
 			for _, v := range result.agentVersions {
 				n := newest[result.harness]
@@ -254,6 +258,44 @@ func run(args []string, out io.Writer) (runErr error) {
 		runErr = errors.Join(runErr, errors.New("agent log validation failed"))
 	}
 	return runErr
+}
+
+// logWorkers bounds concurrently checked logs; replaying a large log needs GiBs.
+const logWorkers = 6
+
+// logCheck is one log's validation and fold comparison.
+type logCheck struct {
+	fileCheck
+
+	err error
+}
+
+// checkLog validates path, then audits its prices and compares its live and
+// replayed fold when the validation covered it. Each log's fold points reach foldOut together.
+func checkLog(path string, cutoff time.Time, resolver agent.Backends, store *history.Store, prices *priceAudit, foldOut io.Writer, foldMu *sync.Mutex) logCheck {
+	result, err := checkFile(path, cutoff, resolver)
+	if err != nil {
+		return logCheck{err: err}
+	}
+	if result.version != agent.LogVersionV3 || !result.checked {
+		return logCheck{fileCheck: result}
+	}
+	var buf bytes.Buffer
+	w := io.Writer(&buf)
+	if foldOut == io.Discard {
+		w = io.Discard
+	}
+	f, err := checkReplay(store, path, result.harness, w, prices)
+	if f != nil {
+		result.findings = append(result.findings, *f)
+	}
+	if buf.Len() != 0 {
+		foldMu.Lock()
+		_, werr := foldOut.Write(buf.Bytes())
+		foldMu.Unlock()
+		err = errors.Join(err, werr)
+	}
+	return logCheck{fileCheck: result, err: err}
 }
 
 func parseFlags(args []string) (config, error) {

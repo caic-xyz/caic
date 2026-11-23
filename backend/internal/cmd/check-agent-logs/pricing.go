@@ -8,6 +8,7 @@ import (
 	"io"
 	"maps"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -29,6 +30,7 @@ type pricingExample struct {
 
 type priceAudit struct {
 	pricer   *usage.Pricer
+	mu       sync.Mutex
 	warnings map[pricingKey]pricingExample
 }
 
@@ -50,9 +52,12 @@ func (a *priceAudit) observe(lt *history.LoadedTask, path string) {
 	if c.Snapshot().UnknownParts == 0 {
 		return
 	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	for model, at := range p.models {
 		key := pricingKey{harness: lt.Harness, model: model}
-		if _, ok := a.warnings[key]; !ok {
+		// Logs finish in any order; the first path in sorted order is the example.
+		if ex, ok := a.warnings[key]; !ok || path < ex.path {
 			a.warnings[key] = pricingExample{path: path, at: at}
 		}
 	}
