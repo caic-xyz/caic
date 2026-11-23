@@ -4,20 +4,22 @@ const markdownExtension = /\.(md|markdown)$/i;
 const stlExtension = /\.stl$/i;
 const stepExtension = /\.(step|stp)$/i;
 const compressedStepExtension = /\.(stpz|(?:step|stp)\.(?:gz|zip))$/i;
+const pathLineSuffix = /(?::(\d+)(?::\d+)?|&line=(\d+))$/;
 
 /**
  * Returns the runtime file a markdown destination names, or null for web URLs,
  * protocol-relative URLs, and fragment anchors. A relative path resolves
  * against baseDir when it is not null; otherwise the backend resolves it
- * against the task checkout. Line is the 1-based source line a `#L10` or
- * `:10` suffix names, or null.
+ * against the task checkout. Line is the 1-based source line a `#L10`,
+ * `:10`, or `&line=10` suffix names, or null.
  */
 export function runtimeFileTarget(href: string, baseDir: string | null): { path: string; line: number | null } | null {
   let path = href;
   if (path.startsWith("file:///")) path = path.slice(7);
   else if (/^[a-z][a-z0-9+.-]*:/i.test(path) || path.startsWith("//") || path.startsWith("#")) return null;
-  const line = lineSuffix(path);
-  path = path.replace(/#.*$/, "").replace(/:\d+(?::\d+)?$/, "");
+  const filePath = path.replace(/#.*$/, "");
+  const line = lineSuffix(path, filePath);
+  path = filePath.replace(pathLineSuffix, "");
   if (!path) return null;
   // Marked decodes neither percent-encoded spaces nor file URI paths.
   try {
@@ -36,10 +38,9 @@ export function runtimeFilePath(href: string, baseDir: string | null): string | 
   return runtimeFileTarget(href, baseDir)?.path ?? null;
 }
 
-/** Extracts the line from a `#L10`, `#L10-L20`, or `:10:5` suffix. */
-function lineSuffix(href: string): number | null {
-  const match = /#L(\d+)(?:-L?\d+)?$/.exec(href) ?? /:(\d+)(?::\d+)?$/.exec(href);
-  const line = match ? Number(match[1]) : 0;
+function lineSuffix(href: string, filePath: string): number | null {
+  const match = /#L(\d+)(?:-L?\d+)?$/.exec(href) ?? pathLineSuffix.exec(filePath);
+  const line = Number(match?.[1] ?? match?.[2]);
   return Number.isSafeInteger(line) && line > 0 ? line : null;
 }
 

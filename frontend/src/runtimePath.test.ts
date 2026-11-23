@@ -41,6 +41,21 @@ describe("runtimeFilePath", () => {
     expect(runtimeFileTarget("./b.go:7", null)).toEqual({ path: "./b.go", line: 7 });
   });
 
+  it("resolves an ampersand line suffix and preserves encoded ampersands in the filename", () => {
+    expect(runtimeFileTarget("src/a%20b.go&line=12", "/checkout")).toEqual({
+      path: "/checkout/src/a b.go",
+      line: 12,
+    });
+    expect(runtimeFileTarget("file:///checkout/a.go%26line=12", null)).toEqual({
+      path: "/checkout/a.go&line=12",
+      line: null,
+    });
+    expect(runtimeFileTarget("/checkout/a.go#example&line=12", null)).toEqual({
+      path: "/checkout/a.go",
+      line: null,
+    });
+  });
+
   it("passes relative paths through unchanged without a base directory", () => {
     expect(runtimeFilePath("./src/App.tsx", null)).toBe("./src/App.tsx");
   });

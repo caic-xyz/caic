@@ -67,7 +67,7 @@ for (const width of [390, 1280]) {
     const id = await createTaskAPI(
       api,
       uniquePrompt(
-        "Review [Screenshot](/home/user/src/caic/test-results/screenshot.png), [Readme](/home/user/src/caic/README.md), [Bracket](/home/user/src/caic/models/bracket.stl), [Print](/models/assembly.3mf), [Source](/notes.go), [Source line](/notes.go#L2), [Binary](/report.bin), [PDF](/report.pdf), [Broken PDF](/broken.pdf), [Notes](/notes.md), and [Data](/home/user/src/artifacts).",
+        "Review [Screenshot](/home/user/src/caic/test-results/screenshot.png), [Readme](/home/user/src/caic/README.md), [Bracket](/home/user/src/caic/models/bracket.stl), [Print](/models/assembly.3mf), [Source](/notes.go), [Source line](/notes.go&line=2), [Binary](/report.bin), [PDF](/report.pdf), [Broken PDF](/broken.pdf), [Notes](/notes.md), and [Data](/home/user/src/artifacts).",
       ),
     );
     await waitForTaskState(api, id, "waiting");
