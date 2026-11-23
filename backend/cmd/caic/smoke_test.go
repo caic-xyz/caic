@@ -1010,8 +1010,11 @@ func prepareSmokeImage(t *testing.T, log *slog.Logger, fx serverFixture, xdgDir 
 	}
 }
 
-// smokeTaskTimeout bounds one smoke task's wait for a state or a runtime.
-const smokeTaskTimeout = 10 * time.Minute
+// smokeTaskTimeout bounds one smoke task's wait for a state or a runtime. A
+// fork commits the source container; rootless Podman nested in a container
+// lacks native overlay diff, and committing a live harness's container took
+// 8m43s there.
+const smokeTaskTimeout = 30 * time.Minute
 
 // smokeServerLogTailBytes bounds how much of the fixture's server log a failure
 // copies into the test output.

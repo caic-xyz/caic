@@ -72,13 +72,9 @@ reads the process working directory's `.env` before ACP initialization and
 rejects launch-control keys such as `DSH_HOME` there; md's `~/.env` remains the
 shell-owned environment source rather than a dsh project configuration file.
 
-[`dsh_smoke_test.go`](../../../cmd/caic/dsh_smoke_test.go) exercises native
-server task history, task-scoped MCP, active relay adoption, imported recovery
-after an unexpected container exit, deliberate stop and explicit revival,
-and purge. Its container fork preserves the edited workspace while creating
-an independent native session and retaining caic's source-task lineage.
-The separate discovery scenario uses actual temporary md instances and custom
-storage beneath the persistent `.dsh` mount, without inference prompts.
+[`harness_smoke_test.go`](../../../cmd/caic/harness_smoke_test.go) runs dsh
+through the server with `CAIC_SMOKE_HARNESS=dsh` and
+`CAIC_SMOKE_HARNESS_ENV=DEEPSEEK_API_KEY`.
 
 No dsh work outlives a turn in the local logs. The 3 local dsh logs hold 24
 prompts, all answered with `end_turn`, and no `session/update` outside a
