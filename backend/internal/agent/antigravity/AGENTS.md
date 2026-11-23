@@ -117,6 +117,11 @@ reports. Shared ACP keeps the final text of a step outside a prompt; that step
 reports no token usage, so caic does not price it. A failed `invoke_subagent`
 call fails its card.
 
+`testdata/evidence/native-subagent-joke-v3.jsonl` minimizes that recording to
+the `session/prompt` request, the spawn, its acknowledgment, and the prompt
+response. The request lets the wire correlate the response; the smoke replay
+sends it as the task's prompt.
+
 ## Stream-json history
 
 Tasks that ran before ACP recorded agy's print-mode NDJSON. `streamjson.go`

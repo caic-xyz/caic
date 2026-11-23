@@ -1,14 +1,5 @@
-/* Context-end symbol sized to the archived section summary text. */
+/* Separates the context-end symbol from the archived section's counts. */
 
 .icon {
-  display: inline-flex;
-  flex-shrink: 0;
-  align-self: center;
   margin-right: 0.4em;
-}
-
-.icon svg {
-  width: 1.25em;
-  height: 1.25em;
-  fill: currentcolor;
 }

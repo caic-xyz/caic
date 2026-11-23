@@ -158,7 +158,7 @@ func TestCodexNativeSubagentAdapter(t *testing.T) {
 		if len(restored) != 1 || restored[0].Status != agent.NativeSubagentStatusUnknown {
 			t.Fatalf("restored = %#v, want one spawned receiver", restored)
 		}
-		live := agenttest.RestartNativeSubagents(t, [][]byte{history}, [][]byte{tail}, New("", nil).NewWire())
+		live := agenttest.RestartNativeSubagents(t, nil, [][]byte{history}, [][]byte{tail}, New("", nil).NewWire())
 		observations := make([]agent.NativeSubagent, 0, len(restored)+len(live))
 		observations = append(observations, restored...)
 		observations = append(observations, live...)
@@ -246,7 +246,7 @@ func TestCodexNativeSubagentAdapter(t *testing.T) {
 		if len(restored) != 1 || restored[0].Status != agent.NativeSubagentStatusRunning {
 			t.Fatalf("restored = %#v, want one running agent", restored)
 		}
-		live := agenttest.RestartNativeSubagents(t, [][]byte{history}, [][]byte{tail}, New("", nil).NewWire())
+		live := agenttest.RestartNativeSubagents(t, nil, [][]byte{history}, [][]byte{tail}, New("", nil).NewWire())
 		observations := make([]agent.NativeSubagent, 0, len(restored)+len(live))
 		observations = append(observations, restored...)
 		observations = append(observations, live...)

@@ -1,4 +1,4 @@
-// Browser coverage for the context Performance view: transcript entry, compacted, cleared, and current contexts, stepping, and layout.
+// Browser coverage for the context Performance view: transcript entry and end icons, compacted, cleared, and current contexts, stepping, and layout.
 import type { Page } from "@playwright/test";
 import { createTaskAPI, expect, test, waitForTaskState, type APIClient } from "../helpers";
 
@@ -46,8 +46,13 @@ for (const width of [1280, 390]) {
     const id = await threeContextTask(api, uniquePrompt("FAKE_CONTEXT_OCCUPANCY"));
 
     await page.goto(`/task/@${id}`);
-    const links = page.getByTestId("conversation-pane").getByTestId("context-performance-link");
+    const conversation = page.getByTestId("conversation-pane");
+    const links = conversation.getByTestId("context-performance-link");
     await expect(links).toHaveCount(2);
+    // Each archived context's toggle names how it ended with an icon.
+    await expect(conversation.getByRole("button", { name: /^Ended by compaction 1 turn/ })).toBeVisible();
+    await expect(conversation.getByRole("button", { name: /^Ended by a context clear 1 turn/ })).toBeVisible();
+    await conversation.screenshot({ path: testInfo.outputPath(`context-ends-${width}.png`) });
     // A link, styled like the turn durations: dotted underline.
     expect(await links.first().evaluate((el) => getComputedStyle(el).textDecorationStyle)).toBe("dotted");
     await links.first().click();

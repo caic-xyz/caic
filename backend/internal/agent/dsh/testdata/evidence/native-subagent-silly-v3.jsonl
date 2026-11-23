@@ -1,0 +1,6 @@
+{"t":"caic_meta","version":3,"prompt":"do a silly task as a subagent","repos":[],"harness":"dsh"}
+{"t":"input","ts":1.000,"msg":{"jsonrpc":"2.0","id":8,"method":"session/prompt","params":{"sessionId":"test-parent-session","prompt":[{"type":"text","text":"do a silly task as a subagent"}]}}}
+{"t":"agent","ts":2.000,"msg":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"test-parent-session","update":{"sessionUpdate":"tool_call","toolCallId":"test-spawn-call","title":"subagent","kind":"other","status":"in_progress","rawInput":{"description":"Silly duck task","cwd":"/tmp","prompt":"act as a rubber duck"}}}}}
+{"t":"agent","ts":3.000,"msg":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"test-parent-session","update":{"sessionUpdate":"tool_call_update","toolCallId":"test-spawn-call","status":"completed","content":[{"type":"content","content":{"type":"text","text":"started subagent test-child-session"}}]}}}}
+{"t":"agent","ts":4.000,"msg":{"jsonrpc":"2.0","id":8,"result":{"stopReason":"end_turn"}}}
+{"t":"result","state":"completed"}

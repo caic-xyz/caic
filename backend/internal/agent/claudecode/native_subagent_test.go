@@ -128,7 +128,7 @@ func TestNativeSubagentRestartSettlesSameCard(t *testing.T) {
 	if len(restored) != 1 || restored[0].Status != agent.NativeSubagentStatusRunning || restoredActive != 1 {
 		t.Fatalf("restored = %#v active = %d, want one running card", restored, restoredActive)
 	}
-	live := agenttest.RestartNativeSubagents(t, history, tail, New().NewWire())
+	live := agenttest.RestartNativeSubagents(t, nil, history, tail, New().NewWire())
 
 	observations := append(wireSubagents(t, history...), live...)
 	cards, active := agenttest.FoldNativeSubagents(observations)

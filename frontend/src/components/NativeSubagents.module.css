@@ -77,6 +77,10 @@
   min-width: 0;
 }
 
+.scopeIcon {
+  margin-right: 0.3em;
+}
+
 .status {
   margin-inline: 0.5rem;
   font-size: 0.8rem;

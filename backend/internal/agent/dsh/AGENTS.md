@@ -47,6 +47,9 @@ unknown. The child's result is not an ACP record, so it cannot be attached to
 the card. The parent model sees that result, but the journal does not.
 `testdata/subagent.jsonl` trims and anonymizes records of a
 local dsh task (not a `record-trace` recording).
+`testdata/evidence/native-subagent-silly-v3.jsonl` minimizes it to the
+`session/prompt` request, the spawn, and the prompt response. The request lets
+the wire correlate the response; the smoke replay sends it as the task's prompt.
 
 Upstream follow-up: dsh should emit child subagent start and end session
 updates over ACP so each card reports its own end.

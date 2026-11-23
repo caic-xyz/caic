@@ -209,6 +209,9 @@ for (const width of [390, 1280]) {
     const chips = page.getByTestId("background-strip").getByTestId("background-chip");
     await expect(chips).toHaveCount(4);
     const chip = (label: string) => chips.filter({ hasText: label });
+    // Whole at 1280px. The pane scrolls in whole pixels, so a call that ends
+    // the content at a fractional height can stay clipped by under a pixel.
+    const shown = width === 1280 ? 0.99 : 0;
     // An agent whose harness reports no kind keeps the generic name.
     await expect(chip("Profile the build")).toHaveAccessibleName(/^Agent Profile the build /);
 
@@ -218,7 +221,7 @@ for (const width of [390, 1280]) {
       await expect(call).toHaveCount(0);
       await chip("Profile build").click();
       await expect(agent).toHaveAttribute("open", "");
-      await expect(call).toBeInViewport({ ratio: width === 1280 ? 1 : 0 });
+      await expect(call).toBeInViewport({ ratio: shown });
       await expect(call.locator("summary")).toBeFocused();
       await expect(call).toHaveClass(/revealed/);
       await page.screenshot({ path: testInfo.outputPath(`background-reveal-agent-${width}.png`) });
@@ -257,7 +260,7 @@ for (const width of [390, 1280]) {
       const call = toolCall(page, "toolu_edge_child");
       await chip("Profile build").click();
       await expect(agent).toHaveAttribute("open", "");
-      await expect(call).toBeInViewport({ ratio: width === 1280 ? 1 : 0 });
+      await expect(call).toBeInViewport({ ratio: shown });
       await expect(call.locator("summary")).toBeFocused();
       await expect(call).toHaveClass(/revealed/);
       await page.screenshot({ path: testInfo.outputPath(`background-reveal-archived-agent-${width}.png`) });

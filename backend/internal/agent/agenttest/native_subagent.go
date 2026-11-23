@@ -23,6 +23,10 @@ import (
 //
 // Adapters are stateful, so each field is produced by a fresh wire format.
 type NativeSubagentEvidence struct {
+	// Prompt is the native prompt request the fixture records before its agent
+	// records, or nil. A harness that settles cards on the prompt response
+	// needs it to correlate that response.
+	Prompt []byte
 	// Payloads are the fixture's native harness records in file order. Tests
 	// split them to model a restart between two records.
 	Payloads   [][]byte
@@ -37,10 +41,10 @@ type NativeSubagentEvidence struct {
 // The fixture's control records (the metadata header and result trailer)
 // never reach the native parser, so one fixture serves live and replay.
 func LoadNativeSubagentEvidence(t testing.TB, path string, newWire func() agent.WireFormat) NativeSubagentEvidence {
-	native := nativeSubagentPayloads(t, path)
-	evidence := NativeSubagentEvidence{Payloads: native}
-	evidence.PerPayload, evidence.Live = liveSubagents(t, native, newWire())
-	evidence.Replay = replaySubagents(t, native, newWire())
+	prompt, native := nativeSubagentPayloads(t, path)
+	evidence := NativeSubagentEvidence{Prompt: prompt, Payloads: native}
+	evidence.PerPayload, evidence.Live = liveSubagents(t, prompt, native, newWire())
+	evidence.Replay = replaySubagents(t, prompt, native, newWire())
 	return evidence
 }
 
@@ -70,9 +74,10 @@ func (e *NativeSubagentEvidence) Contract(t testing.TB) NativeSubagentContract {
 	return live
 }
 
-// nativeSubagentPayloads returns the native harness payloads of a fixture in
-// file order.
-func nativeSubagentPayloads(t testing.TB, path string) [][]byte {
+// nativeSubagentPayloads returns the native prompt request a fixture records
+// before its agent records, if any, and its native harness payloads in file
+// order.
+func nativeSubagentPayloads(t testing.TB, path string) (prompt []byte, payloads [][]byte) {
 	file, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		t.Fatal(err)
@@ -82,11 +87,18 @@ func nativeSubagentPayloads(t testing.TB, path string) [][]byte {
 			t.Error(err)
 		}
 	})
-	var payloads [][]byte
-	parser, err := agent.NewLogRecordParser(&Wire{Output: func(line []byte) ([]agent.Message, error) {
-		payloads = append(payloads, append([]byte(nil), line...))
-		return nil, nil
-	}})
+	var inputs int
+	parser, err := agent.NewLogRecordParser(&Wire{
+		Output: func(line []byte) ([]agent.Message, error) {
+			payloads = append(payloads, append([]byte(nil), line...))
+			return nil, nil
+		},
+		Input: func(line []byte) ([]agent.Message, error) {
+			inputs++
+			prompt = append([]byte(nil), line...)
+			return nil, nil
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,14 +108,18 @@ func nativeSubagentPayloads(t testing.TB, path string) [][]byte {
 		if len(bytes.TrimSpace(scanner.Bytes())) == 0 {
 			continue
 		}
+		before := len(payloads)
 		record, err := parser.ParseRecord(scanner.Bytes())
 		if err != nil {
 			t.Fatalf("parse %s: %v", path, err)
 		}
-		if !record.Control && record.Provenance.Source != agent.RecordSourceRelay {
-			// Only relay-owned agent records carry native harness output. A v3
-			// input record is a client command and is not fixture evidence.
-			t.Fatalf("%s contains a non-relay record; native-subagent fixtures must hold only agent records", path)
+		if record.Control || record.Provenance.Source == agent.RecordSourceRelay {
+			continue
+		}
+		// The one client record a fixture may hold is the prompt request, ahead
+		// of every agent record, as the harness received it.
+		if inputs != 1 || before != 0 {
+			t.Fatalf("%s holds a client record other than one leading prompt request", path)
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -112,12 +128,17 @@ func nativeSubagentPayloads(t testing.TB, path string) [][]byte {
 	if len(payloads) == 0 {
 		t.Fatalf("%s has no native harness records", path)
 	}
-	return payloads
+	return prompt, payloads
 }
 
 // liveSubagents parses raw harness payloads exactly as a live session does and
 // groups the observations by the payload that produced them.
-func liveSubagents(t testing.TB, payloads [][]byte, wire agent.WireFormat) (perPayload [][]agent.NativeSubagent, all []agent.NativeSubagent) {
+func liveSubagents(t testing.TB, prompt []byte, payloads [][]byte, wire agent.WireFormat) (perPayload [][]agent.NativeSubagent, all []agent.NativeSubagent) {
+	if prompt != nil {
+		if _, err := wire.ParseInput(prompt); err != nil {
+			t.Fatalf("live parse of the prompt request: %v", err)
+		}
+	}
 	perPayload = make([][]agent.NativeSubagent, 0, len(payloads))
 	for index, payload := range payloads {
 		messages, err := wire.ParseOutput(payload)
@@ -133,14 +154,11 @@ func liveSubagents(t testing.TB, payloads [][]byte, wire agent.WireFormat) (perP
 
 // replaySubagents replays the same native payloads as physical task-log records
 // which is the restart and settled-history path.
-func replaySubagents(t testing.TB, payloads [][]byte, wire agent.WireFormat) []agent.NativeSubagent {
-	parser, err := agent.NewLogRecordParser(wire)
-	if err != nil {
-		t.Fatal(err)
-	}
+func replaySubagents(t testing.TB, prompt []byte, payloads [][]byte, wire agent.WireFormat) []agent.NativeSubagent {
+	parser := promptedLogParser(t, prompt, wire)
 	out := make([]agent.NativeSubagent, 0, len(payloads))
 	for index, payload := range payloads {
-		record, err := parser.ParseRecord(v3AgentRecord(payload))
+		record, err := parser.ParseRecord(v3Record("agent", payload))
 		if err != nil {
 			t.Fatalf("replay of native record %d: %v", index, err)
 		}
@@ -153,24 +171,21 @@ func replaySubagents(t testing.TB, payloads [][]byte, wire agent.WireFormat) []a
 	return out
 }
 
-// RestartNativeSubagents models a restart or relay adoption: history is
-// replayed through the wire with its messages discarded, exactly like
-// session reconnect, and the live tail then continues on that same wire.
-// The returned observations are the tail's, and they must settle the same
-// canonical identities the history produced.
-func RestartNativeSubagents(t testing.TB, history, tail [][]byte, wire agent.WireFormat) []agent.NativeSubagent {
-	parser, err := agent.NewLogRecordParser(wire)
-	if err != nil {
-		t.Fatal(err)
-	}
+// RestartNativeSubagents models a restart or relay adoption: the prompt
+// request, if any, and history are replayed through the wire with their
+// messages discarded, exactly like session reconnect, and the live tail then
+// continues on that same wire. The returned observations are the tail's, and
+// they must settle the same canonical identities the history produced.
+func RestartNativeSubagents(t testing.TB, prompt []byte, history, tail [][]byte, wire agent.WireFormat) []agent.NativeSubagent {
+	parser := promptedLogParser(t, prompt, wire)
 	for index, payload := range history {
-		if _, err := parser.ParseRecord(v3AgentRecord(payload)); err != nil {
+		if _, err := parser.ParseRecord(v3Record("agent", payload)); err != nil {
 			t.Fatalf("warm history record %d: %v", index, err)
 		}
 	}
 	out := make([]agent.NativeSubagent, 0, len(tail))
 	for index, payload := range tail {
-		record, err := parser.ParseRecord(v3AgentRecord(payload))
+		record, err := parser.ParseRecord(v3Record("agent", payload))
 		if err != nil {
 			t.Fatalf("live tail record %d: %v", index, err)
 		}
@@ -183,11 +198,26 @@ func RestartNativeSubagents(t testing.TB, history, tail [][]byte, wire agent.Wir
 	return out
 }
 
-// v3AgentRecord wraps one native payload in a canonical agent record. Agent
-// framing preserves the native JSON bytes.
-func v3AgentRecord(payload []byte) []byte {
+// promptedLogParser returns a task-log parser over wire that has read the
+// prompt request, if any, as a physical input record.
+func promptedLogParser(t testing.TB, prompt []byte, wire agent.WireFormat) *agent.LogRecordParser {
+	parser, err := agent.NewLogRecordParser(wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prompt != nil {
+		if _, err := parser.ParseRecord(v3Record("input", prompt)); err != nil {
+			t.Fatalf("replay of the prompt request: %v", err)
+		}
+	}
+	return parser
+}
+
+// v3Record wraps one native payload in a canonical record of kind "agent" or
+// "input". The framing preserves the native JSON bytes.
+func v3Record(kind string, payload []byte) []byte {
 	var buf bytes.Buffer
-	buf.WriteString(`{"t":"agent","ts":1.000,"msg":`)
+	buf.WriteString(`{"t":"` + kind + `","ts":1.000,"msg":`)
 	buf.Write(payload)
 	buf.WriteByte('}')
 	return buf.Bytes()

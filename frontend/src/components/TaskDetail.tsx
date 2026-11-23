@@ -28,6 +28,7 @@ import LoadingIcon from "@material-symbols/svg-400/outlined/progress_activity.sv
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 import EditIcon from "@material-symbols/svg-400/outlined/edit.svg?solid";
 import MoreIcon from "@material-symbols/svg-400/outlined/more_vert.svg?solid";
+import ThinkingIcon from "@material-symbols/svg-400/outlined/psychology.svg?solid";
 
 import type {
   EventMessage,
@@ -114,6 +115,7 @@ import SyncActivity from "./SyncActivity";
 import StatsIcon from "./StatsIcon";
 import StatusIcon from "./StatusIcon";
 import ContextEndIcon from "./ContextEndIcon";
+import NamedIcon from "./NamedIcon";
 import ActionButton from "./ActionButton";
 import Duration from "./Duration";
 import TimingIcon from "./TimingIcon";
@@ -2914,9 +2916,7 @@ function ThinkingCard(props: { events: EventMessage[]; text?: string }) {
         onToggle={(e) => detailsOpenState.set(key(), e.currentTarget.open)}
       >
         <summary>
-          <span role="img" aria-label="Thinking">
-            💭
-          </span>
+          <NamedIcon icon={ThinkingIcon} label="Thinking" />
           <Show when={excerpt()}>
             <span class={styles.thinkingExcerpt}>{excerpt()}</span>
           </Show>

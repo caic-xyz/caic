@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"time"
 
@@ -20,12 +21,14 @@ import (
 // recorded payload per line, after waiting for the caic session's first prompt.
 // It pauses before the payload at hold_after for hold_ms so a smoke test can
 // restart caic between the recorded running card and the records that settle it.
-// Synthetic markers supply the turn boundaries missing from the minimized recording.
+// Synthetic markers supply the turn boundaries missing from the minimized
+// recording; a recording that ends with its own prompt response needs no end
+// marker, so end_marker is 0.
 const replayAgentScript = `
 import sys
 import time
 
-payloads_path, hold_after, hold_ms = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+payloads_path, hold_after, hold_ms, end_marker = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), sys.argv[4] == "1"
 
 with open(payloads_path, encoding="utf-8") as f:
     payloads = [line.rstrip("\n") for line in f if line.strip()]
@@ -46,8 +49,9 @@ for index, payload in enumerate(payloads):
     sys.stdout.flush()
     time.sleep(0.05)
 
-sys.stdout.write('` + replayEndMarker + `\n')
-sys.stdout.flush()
+if end_marker:
+    sys.stdout.write('` + replayEndMarker + `\n')
+    sys.stdout.flush()
 
 for line in sys.stdin:
     if "\x00" in line:
@@ -68,6 +72,10 @@ type ReplayRecording struct {
 	// serves one harness's several recordings selects the one recorded with the
 	// task's prompt.
 	Prompt string
+	// NativePrompt is the native prompt request the recording answers, or nil.
+	// The replay wire sends it as the task's prompt, so the harness wire
+	// correlates the recorded prompt response, which then ends the turn.
+	NativePrompt []byte
 	// Harness names the recording's harness. It selects the container's agent
 	// mounts and the task-log harness field; the wire parses the payloads.
 	Harness harness.Name
@@ -131,9 +139,13 @@ func (b *ReplayBackend) Start(ctx context.Context, opts *agent.Options) (*agent.
 	if err := deployReplayRecording(ctx, opts.Target, rec.Payloads); err != nil {
 		return nil, err
 	}
+	endMarker := "1"
+	if rec.NativePrompt != nil {
+		endMarker = "0"
+	}
 	args := []string{
 		"python3", "-u", replayAgentPath, replayPayloadPath,
-		strconv.Itoa(rec.HoldAfter), strconv.FormatInt(rec.Hold.Milliseconds(), 10),
+		strconv.Itoa(rec.HoldAfter), strconv.FormatInt(rec.Hold.Milliseconds(), 10), endMarker,
 	}
 	session, err := agent.StartRelay(ctx, opts, args)
 	if err != nil {
@@ -160,9 +172,10 @@ func (b *ReplayBackend) AttachRelay(ctx context.Context, opts *agent.Options) (*
 func (*ReplayBackend) AgentArgs(agent.HarnessArgs) []string { return nil }
 
 // NewWire implements agent.Backend. Each call returns an independent wire, so a
-// replayed task log never reuses the session's adapter state.
+// replayed task log never reuses the session's adapter state. It sends a
+// recording's native prompt request in place of the task's prompt.
 func (b *ReplayBackend) NewWire() agent.WireFormat {
-	return NewReplayWire(b.backend.NewWire())
+	return replayWire{inner: b.backend.NewWire(), backend: b}
 }
 
 // NewMetadataParser reconstructs metadata with the same replay turn boundaries.
@@ -197,10 +210,22 @@ func NewReplayWire(inner agent.WireFormat) agent.WireFormat {
 var _ agent.Backend = (*ReplayBackend)(nil)
 
 // replayWire adds the replay agent's turn boundaries to the harness's native records.
-type replayWire struct{ replayParser }
+type replayWire struct {
+	replayParser
 
-// EncodePrompt returns the replay process's complete JSON prompt command.
-func (replayWire) EncodePrompt(p agent.Prompt) ([]byte, error) {
+	// backend holds the recordings whose native prompts EncodePrompt sends; nil
+	// for a wire that only parses.
+	backend *ReplayBackend
+}
+
+// EncodePrompt returns the recording's native prompt request when it has one,
+// and otherwise the replay process's complete JSON prompt command.
+func (w replayWire) EncodePrompt(p agent.Prompt) ([]byte, error) {
+	if w.backend != nil {
+		if rec, err := w.backend.selectRecording(p.Text); err == nil && rec.NativePrompt != nil {
+			return slices.Concat(bytes.TrimSpace(rec.NativePrompt), []byte{'\n'}), nil
+		}
+	}
 	data, err := json.Marshal(p)
 	if err != nil {
 		return nil, err

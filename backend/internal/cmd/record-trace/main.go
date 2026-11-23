@@ -5,6 +5,9 @@
 //	record-trace --harness pi --scenario read-edit-bash
 //	record-trace --harness claude --scenario native-subagent-joke --local
 //
+// An existing testdata/<scenario>.jsonl is kept; --force re-records it and
+// replaces it only once the new recording validates.
+//
 // Requires: podman, unless --local runs the harness on this machine. It mounts
 // logged-in harness credentials when available; --api-key-env is optional for
 // API-key based recording. --local is for hosts where nested rootless podman is
@@ -150,6 +153,7 @@ func mainImpl() error {
 	resumeFlag := flag.String("resume-session", "", "native session ID to restore in the retained checkout")
 	effortFlag := flag.String("effort", "", "native reasoning effort to select during handshake")
 	localFlag := flag.Bool("local", false, "run the harness on this machine instead of a container; requires the harness CLIs on PATH")
+	forceFlag := flag.Bool("force", false, "re-record and replace an existing golden file once the new recording validates")
 	flag.Parse()
 
 	if *harnessFlag == "" {
@@ -176,13 +180,16 @@ func mainImpl() error {
 		return fmt.Errorf("scenario %s needs compaction, which %s does not support", *scenarioFlag, b.Harness())
 	}
 	outputPath := filepath.Clean(filepath.Join("testdata", *scenarioFlag+".jsonl"))
-	if _, err := os.Stat(outputPath); err == nil {
-		// Skip if the golden file already exists (idempotent for go generate).
-		return nil
-	}
-
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
+	if _, err := os.Stat(outputPath); err == nil && !*forceFlag {
+		// An existing golden file keeps go generate idempotent. go generate sets
+		// GOFILE; only a direct run reports the skip.
+		if os.Getenv("GOFILE") == "" {
+			slog.InfoContext(ctx, "Golden file exists; skipping. Pass --force to re-record it", "path", outputPath)
+		}
+		return nil
+	}
 	return recordTrace(ctx, b, *apiKeyEnv, sc, outputPath, *localFlag, &agent.Options{Dir: *workDirFlag, Model: *modelFlag, Effort: *effortFlag, ResumeSessionID: *resumeFlag})
 }
 

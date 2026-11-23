@@ -5,6 +5,7 @@ declare const classes: {
   readonly "card": string;
   readonly "duration": string;
   readonly "label": string;
+  readonly "scopeIcon": string;
   readonly "status": string;
   readonly "statusIcon": string;
   readonly "summaryContent": string;

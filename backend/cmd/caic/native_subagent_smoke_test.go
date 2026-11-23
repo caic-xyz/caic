@@ -26,8 +26,10 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
+	"github.com/caic-xyz/caic/backend/internal/agent/antigravity"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/codex"
+	"github.com/caic-xyz/caic/backend/internal/agent/dsh"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
 	"github.com/caic-xyz/caic/backend/internal/agent/pi"
@@ -42,11 +44,15 @@ const (
 )
 
 // smokeReplayRecordings lists every retained recording the smoke test delivers:
-// the standardized delegation for each harness, plus Pi's workflow orchestration,
-// which is the only recording that pins the batch scope.
+// the standardized delegation for each harness except dsh, whose recording
+// predates it, plus Pi's workflow orchestration, which is the only recording
+// that pins the batch scope. The agy and dsh recordings settle on their prompt
+// response, so they carry the native prompt request it answers.
 var smokeReplayRecordings = []smokeReplayRecording{
+	{harness.Antigravity, "native-subagent-joke-v3.jsonl"},
 	{harness.Claude, "native-subagent-joke-v3.jsonl"},
 	{harness.Codex, "native-subagent-joke-v3.jsonl"},
+	{harness.Dsh, "native-subagent-silly-v3.jsonl"},
 	{harness.OpenCode, "native-subagent-joke-v3.jsonl"},
 	{harness.Pi, "native-subagent-joke-v3.jsonl"},
 	{harness.Pi, "native-subagent-workflow-v3.jsonl"},
@@ -65,10 +71,12 @@ func (r smokeReplayRecording) name() string {
 
 // smokeReplayEvidenceDir maps each harness to the package holding its recordings.
 var smokeReplayEvidenceDir = map[harness.Name]string{
-	harness.Claude:   "claudecode",
-	harness.Codex:    "codex",
-	harness.OpenCode: "opencode",
-	harness.Pi:       "pi",
+	harness.Antigravity: "antigravity",
+	harness.Claude:      "claudecode",
+	harness.Codex:       "codex",
+	harness.Dsh:         "dsh",
+	harness.OpenCode:    "opencode",
+	harness.Pi:          "pi",
 }
 
 // smokeReplayCase is one retained recording, the name it is reported under, and
@@ -98,11 +106,12 @@ func newSmokeReplayCase(t *testing.T, h harness.Name, file string) smokeReplayCa
 	return smokeReplayCase{
 		name: file,
 		recording: smoketest.ReplayRecording{
-			Prompt:    agenttest.NativeSubagentEvidencePrompt(t, path),
-			Harness:   h,
-			Payloads:  evidence.Payloads,
-			HoldAfter: split,
-			Hold:      smokeReplayHold,
+			Prompt:       agenttest.NativeSubagentEvidencePrompt(t, path),
+			NativePrompt: evidence.Prompt,
+			Harness:      h,
+			Payloads:     evidence.Payloads,
+			HoldAfter:    split,
+			Hold:         smokeReplayHold,
 		},
 		contract: evidence.Contract(t),
 	}
@@ -140,7 +149,9 @@ func runSmokeReplay(t *testing.T, fixture *smokeServer, h harness.Name, tc *smok
 		t.Fatalf("task %s: pre-restart cards = %#v active = %d, want %d running recorded agents", taskID, beforeCards, beforeActive, len(tc.contract.Cards))
 	}
 	for i := range beforeCards {
-		if beforeCards[i].Status != agent.NativeSubagentStatusRunning || !strings.HasPrefix(beforeCards[i].ID, tc.contract.Cards[i].Identity+":") {
+		// An ID without a "harness:kind:" scheme is its own identity.
+		identity := tc.contract.Cards[i].Identity
+		if beforeCards[i].Status != agent.NativeSubagentStatusRunning || beforeCards[i].ID != identity && !strings.HasPrefix(beforeCards[i].ID, identity+":") {
 			t.Fatalf("task %s: pre-restart card %d = %#v, want the fixture identity %q still running", taskID, i, beforeCards[i], tc.contract.Cards[i].Identity)
 		}
 	}
@@ -456,10 +467,14 @@ func smokeReplayWire(h harness.Name) agent.WireFormat {
 
 func smokeReplayBackend(h harness.Name) agent.Backend {
 	switch h {
+	case harness.Antigravity:
+		return antigravity.New("", nil)
 	case harness.Claude:
 		return claudecode.New()
 	case harness.Codex:
 		return codex.New("", nil)
+	case harness.Dsh:
+		return dsh.New("", nil)
 	case harness.OpenCode:
 		return opencode.New("", nil)
 	case harness.Pi:

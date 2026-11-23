@@ -9,6 +9,9 @@ import Button from "./Button";
 import Duration from "./Duration";
 import StatusIcon, { type StatusIconState } from "./StatusIcon";
 import LoadingIcon from "@material-symbols/svg-400/outlined/progress_activity.svg?solid";
+import AgentIcon from "@material-symbols/svg-400/outlined/smart_toy.svg?solid";
+import BatchIcon from "@material-symbols/svg-400/outlined/groups.svg?solid";
+import NamedIcon from "./NamedIcon";
 import { backgroundCommandStatus, nativeActivityStatus, nativeTerminal } from "../nativeSubagents";
 import { formatTimingDuration } from "../timing";
 import { createLiveDuration } from "../liveDuration";
@@ -85,16 +88,10 @@ export function NativeAgentCard(props: {
           <span class={styles.label}>
             <Show
               when={activity().scope === "batch"}
-              fallback={
-                <span role="img" aria-label="Subagent">
-                  🤖
-                </span>
-              }
+              fallback={<NamedIcon icon={AgentIcon} label="Subagent" class={styles.scopeIcon} />}
             >
-              <span role="img" aria-label="Batch">
-                👥
-              </span>
-            </Show>{" "}
+              <NamedIcon icon={BatchIcon} label="Batch" class={styles.scopeIcon} />
+            </Show>
             {activity().label || "Unnamed"}
           </span>
           <NativeActivityStatus activity={activity()} settled={props.settled} />
