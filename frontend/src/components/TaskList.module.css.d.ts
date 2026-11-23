@@ -4,7 +4,6 @@ declare const classes: {
   readonly "collapseBtn": string;
   readonly "expandBtn": string;
   readonly "fixCIBtn": string;
-  readonly "header": string;
   readonly "hidden": string;
   readonly "list": string;
   readonly "narrow": string;

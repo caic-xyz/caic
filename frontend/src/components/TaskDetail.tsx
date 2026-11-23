@@ -1075,7 +1075,9 @@ export default function TaskDetail(props: Props) {
     const root = messageContentRef;
     if (!root) return;
     const land = (el: HTMLElement) => {
-      if (!signal.aborted) revealElement(el, styles.revealed);
+      if (signal.aborted) return;
+      const desktopTool = el.hasAttribute("data-tool-key") && !shellViewport();
+      revealElement(el, styles.revealed, desktopTool ? historyScroll.reveal : undefined);
     };
     const wait = (find: () => HTMLElement | null) => waitForElement(root, find, signal, REVEAL_TIMEOUT_MS);
     const toolKey = item.toolKey;
@@ -1557,6 +1559,16 @@ export default function TaskDetail(props: Props) {
           ref={setMessageArea}
           tabIndex={0}
           role="region"
+          onClick={(event) => {
+            if (event.defaultPrevented || shellViewport() || !(event.target instanceof Element)) return;
+            const call = event.target.closest("summary")?.parentElement;
+            if (!(call instanceof window.HTMLDetailsElement) || !call.hasAttribute("data-tool-key") || call.open)
+              return;
+            // Apply the native disclosure before measuring its expanded bounds.
+            event.preventDefault();
+            call.open = true;
+            historyScroll.reveal(call);
+          }}
           aria-label="Task conversation"
           data-testid="task-message-area"
           aria-busy={timeline.loading()}

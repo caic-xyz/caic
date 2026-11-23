@@ -14,6 +14,7 @@
   padding-bottom: var(--task-list-bottom-fade);
   overflow-y: auto;
   scrollbar-gutter: stable;
+  scroll-padding-block: var(--task-list-top-fade) var(--task-list-bottom-fade);
   opacity: 1;
 
   /* Fade only the bottom edge of the scroll viewport. */
@@ -70,14 +71,9 @@
   }
 }
 
-.header {
+button.collapseBtn {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.header h2 {
-  margin: 0;
+  margin-left: auto;
 }
 
 .expandBtn {

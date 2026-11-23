@@ -247,9 +247,23 @@ export default function TaskList(props: TaskListProps) {
     if (!selectedId || !props.sidebarOpen()) return;
     requestAnimationFrame(() => {
       if (props.selectedId !== selectedId || !props.sidebarOpen()) return;
-      taskCards()
-        .find((card) => card.dataset.taskId === selectedId)
-        ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+      const card = taskCards().find((candidate) => candidate.dataset.taskId === selectedId);
+      if (!card || !listRef) return;
+      card.scrollIntoView({ block: "nearest", inline: "nearest" });
+
+      const group = card.closest(`.${styles.repoGroup}`);
+      if (!group || !listRef.clientHeight) return;
+      const listTop = listRef.getBoundingClientRect().top;
+      const groupTop = group.getBoundingClientRect().top - listTop;
+      const cardBottom = card.getBoundingClientRect().bottom - listTop;
+      const padding = getComputedStyle(listRef);
+      const readableBottom = listRef.clientHeight - parseFloat(padding.scrollPaddingBottom);
+      const spareHeight = readableBottom - (cardBottom - groupTop);
+      if (spareHeight < 0) return;
+
+      // Leave room above the repo name for the top fade when possible.
+      const delta = groupTop - Math.min(parseFloat(padding.scrollPaddingTop), spareHeight);
+      if (delta < 0) listRef.scrollTop += delta;
     });
   };
 
@@ -377,21 +391,16 @@ export default function TaskList(props: TaskListProps) {
           listRef = el;
         }}
         class={`${styles.list} ${props.selectedId !== null ? styles.narrow : ""} ${props.sidebarOpen() ? "" : styles.hidden} ${scrolledFromTop() ? styles.scrolledFromTop : ""}`}
+        role="region"
+        aria-label="Tasks"
         data-testid="task-list"
         onScroll={updateScrollFade}
       >
-        <div class={styles.header}>
-          <h2>Tasks</h2>
-          <Show when={props.selectedId !== null}>
-            <ActionButton
-              class={styles.collapseBtn}
-              onClick={() => props.setSidebarOpen(false)}
-              label="Collapse sidebar"
-            >
-              <LeftPanelClose width={20} height={20} />
-            </ActionButton>
-          </Show>
-        </div>
+        <Show when={props.selectedId !== null}>
+          <ActionButton class={styles.collapseBtn} onClick={() => props.setSidebarOpen(false)} label="Collapse sidebar">
+            <LeftPanelClose width={20} height={20} />
+          </ActionButton>
+        </Show>
         <Show when={props.tasks().length === 0}>
           <p class={styles.placeholder}>
             {props.tasksLoading() || props.settledLoading() ? "Loading..." : "No tasks yet."}

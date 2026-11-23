@@ -154,6 +154,31 @@ function fixture() {
   };
 }
 
+it("reveals an expanded tool with the smallest scroll and keeps its header visible for oversized output", async () => {
+  const f = fixture();
+  try {
+    await paint();
+    f.userScroll(100);
+    const tool = document.createElement("details");
+    f.row.append(tool);
+    let height = 50;
+    tool.getBoundingClientRect = () => new DOMRect(0, 230 - f.el.scrollTop, 400, height);
+    f.scroll.reveal(tool);
+    assert.equal(f.el.scrollTop, 100); // Already fully visible.
+    height = 100;
+    f.scroll.reveal(tool);
+    assert.equal(f.el.scrollTop, 130); // Only the bottom was clipped.
+    height = 300;
+    f.scroll.reveal(tool);
+    assert.equal(f.el.scrollTop, 230);
+    f.appendPreview();
+    await paint();
+    assert.equal(f.el.scrollTop, 230);
+  } finally {
+    f.dispose();
+  }
+});
+
 it("follows the recent preview, automatic backlog replacement, and later live output", async () => {
   const f = fixture();
   try {

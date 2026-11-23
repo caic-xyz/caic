@@ -55,6 +55,80 @@ test("purged-only repos disclose inline while mixed repos keep their task sectio
   await page.screenshot({ path: "test-results/compact-purged-mobile.png", fullPage: true });
 });
 
+test("task navigation reveals the repository when it fits with the selected card", async ({
+  page,
+  api,
+  uniquePrompt,
+}) => {
+  const second = await createTaskAPI(api, uniquePrompt("second in first repo"));
+  const first = await createTaskAPI(api, uniquePrompt("first repo"));
+  const last = await createTaskAPI(api, uniquePrompt("crowded repo"));
+  await waitForTaskState(api, last, "waiting");
+  const task = await api.getTask(last);
+  const crowded = { ...task, repos: [{ name: "crowded", branch: "work" }] };
+  const snapshot = {
+    kind: "snapshot",
+    snapshot: [
+      { ...task, id: first, repos: [{ name: "alpha", branch: "work" }] },
+      { ...task, id: second, repos: [{ name: "alpha", branch: "work" }] },
+      ...Array.from({ length: 30 }, (_, i) => ({ ...crowded, id: `${last}${i}` })),
+      crowded,
+    ],
+  } satisfies TaskListEvent;
+  await page.route(
+    (url) => url.pathname === "/api/caic/v1/tasks/events",
+    (route) => route.fulfill({ contentType: "text/event-stream", body: `data: ${JSON.stringify(snapshot)}\n\n` }),
+  );
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto(`/task/@${first}`);
+  const list = page.getByRole("region", { name: "Tasks" });
+  const prompt = page.getByTestId("task-detail-prompt");
+  await prompt.press("PageUp");
+  await expect(page).toHaveURL(new RegExp(`/task/@${last}`));
+  await expect(list.locator(`[data-task-id="${last}"]`)).toBeInViewport({ ratio: 1 });
+  await expect(list.getByText("crowded", { exact: true }).first()).not.toBeInViewport();
+
+  await prompt.press("PageDown");
+  await expect(page).toHaveURL(new RegExp(`/task/@${first}`));
+  await expect(list.getByText("alpha", { exact: true }).first()).toBeInViewport({ ratio: 1 });
+  await expect(list.locator(`[data-task-id="${first}"]`)).toBeInViewport({ ratio: 1 });
+
+  await prompt.press("PageDown");
+  await expect(page).toHaveURL(new RegExp(`/task/@${second}`));
+  await list.locator(`[data-task-id="${last}"]`).click();
+  await expect(page).toHaveURL(new RegExp(`/task/@${last}`));
+  await page.goBack();
+  await expect(list.locator(`[data-task-id="${second}"]`)).toBeInViewport({ ratio: 1 });
+  await expect(list.getByText("alpha", { exact: true }).first()).toBeInViewport({ ratio: 1 });
+
+  // Size the list so both boxes fit only if the card overlaps the bottom fade.
+  const secondCard = list.locator(`[data-task-id="${second}"]`);
+  const header = list.getByText("alpha", { exact: true }).first();
+  const cardBox = await secondCard.boundingBox();
+  const headerBox = await header.boundingBox();
+  ok(cardBox && headerBox);
+  const span = cardBox.y + cardBox.height - headerBox.y;
+  const { height, fade } = await list.evaluate((el) => ({
+    height: el.clientHeight,
+    fade: parseFloat(getComputedStyle(el).scrollPaddingBottom),
+  }));
+  await page.setViewportSize({ width: 1280, height: Math.round(720 - height + span + fade / 2) });
+  await expect.poll(() => list.evaluate((el) => el.clientHeight)).toBeGreaterThan(span);
+  await expect.poll(() => list.evaluate((el) => el.clientHeight)).toBeLessThan(span + fade);
+  await list.locator(`[data-task-id="${last}"]`).click();
+  await expect(page).toHaveURL(new RegExp(`/task/@${last}`));
+  await page.goBack();
+  await expect(secondCard).toBeInViewport({ ratio: 1 });
+  await expect
+    .poll(async () => {
+      const card = await secondCard.boundingBox();
+      const pane = await list.boundingBox();
+      ok(card && pane);
+      return pane.y + pane.height - card.y - card.height;
+    })
+    .toBeGreaterThanOrEqual(fade - 1);
+});
+
 test("task-card fixtures distinguish known zero from unknown cost", async ({ page, api, uniquePrompt }, testInfo) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));

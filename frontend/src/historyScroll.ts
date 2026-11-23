@@ -203,6 +203,21 @@ export function createHistoryScroll(
   });
 
   return {
+    // An explicit reveal becomes the new reading position before resize and live-output corrections run.
+    reveal(target: HTMLElement) {
+      const el = area();
+      if (!el?.clientHeight || !el.contains(target)) return;
+      const viewTop = el.getBoundingClientRect().top + el.clientTop;
+      const box = target.getBoundingClientRect();
+      const start = box.top - viewTop;
+      const end = box.bottom - viewTop - el.clientHeight;
+      const delta = start < 0 || box.height >= el.clientHeight ? start : Math.max(0, end);
+      cancelFrame();
+      correction = null;
+      scrollInput = false;
+      if (delta !== 0) write(el, el.scrollTop + delta);
+      intent = { kind: "reading", anchor: anchor(el) };
+    },
     restoreAnchor(key: string, top: number | undefined) {
       const el = area();
       if (!el || top === undefined) return;

@@ -109,6 +109,7 @@ for (const width of [390, 1280]) {
       await groupB.locator(":scope > summary").press("Enter");
       await groupA.locator(":scope > summary").press("Enter");
       await toolA.locator(":scope > summary").press("Enter");
+      if (width === 1280) await expect(toolA).toBeInViewport({ ratio: 1 });
       await expect(toolA).toContainText("child-a output start");
       await expect(toolB).not.toContainText("child-a output start");
       const originalTool = await toolA.elementHandle();

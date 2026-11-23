@@ -123,7 +123,7 @@ for (const width of [390, 1280]) {
       // Keyboard activation expands the collapsed tool group.
       await chips.nth(0).focus();
       await page.keyboard.press("Enter");
-      await expect(checks).toBeInViewport();
+      await expect(checks).toBeInViewport({ ratio: mobile ? 0 : 1 });
       await expect(checks.locator("summary")).toBeFocused();
       await expect(checks.getByTestId("background-command-chip")).toHaveText("running in background");
       await expect(toolCall(page, "toolu_bg_watch").getByTestId("background-command-chip")).toHaveText("watching");
@@ -187,7 +187,7 @@ for (const width of [390, 1280]) {
       await expect(call).toHaveCount(0);
       await chip("Profile build").click();
       await expect(agent).toHaveAttribute("open", "");
-      await expect(call).toBeInViewport();
+      await expect(call).toBeInViewport({ ratio: width === 1280 ? 1 : 0 });
       await expect(call.locator("summary")).toBeFocused();
       await expect(call).toHaveClass(/revealed/);
       await page.screenshot({ path: testInfo.outputPath(`background-reveal-agent-${width}.png`) });
@@ -226,7 +226,7 @@ for (const width of [390, 1280]) {
       const call = toolCall(page, "toolu_edge_child");
       await chip("Profile build").click();
       await expect(agent).toHaveAttribute("open", "");
-      await expect(call).toBeInViewport();
+      await expect(call).toBeInViewport({ ratio: width === 1280 ? 1 : 0 });
       await expect(call.locator("summary")).toBeFocused();
       await expect(call).toHaveClass(/revealed/);
       await page.screenshot({ path: testInfo.outputPath(`background-reveal-archived-agent-${width}.png`) });

@@ -53,12 +53,12 @@ export function waitForElement(
   });
 }
 
-// revealElement opens the disclosures around el, scrolls it to the vertical
-// center, focuses its summary or button (or el itself), and marks it with
-// highlightClass for a short time. Smooth scrolling honors reduced motion.
-export function revealElement(el: HTMLElement, highlightClass: string): void {
+// Opens the enclosing disclosures, scrolls to the target, focuses its control,
+// and briefly highlights it. The default scroll centers it with reduced-motion
+// support. A caller that owns the viewport can supply its own positioning.
+export function revealElement(el: HTMLElement, highlightClass: string, scroll?: (target: HTMLElement) => void): void {
   for (let d = el.parentElement?.closest("details"); d; d = d.parentElement?.closest("details")) d.open = true;
-  scrollToCenter(el);
+  (scroll ?? scrollToCenter)(el);
   let control = el.querySelector<HTMLElement>(":scope > summary, :scope > button");
   if (!control) {
     if (!el.hasAttribute("tabindex")) el.tabIndex = -1;
