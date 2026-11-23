@@ -1,4 +1,4 @@
-// Activity fold drift: flags a checked log whose live ingestion and adoption replay derive different task state.
+// Checks replayed logs for missing prices and disagreements with live task state.
 
 package main
 
@@ -10,9 +10,9 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 )
 
-// checkFold loads path as task restore does and compares live ingestion with
-// replay. It writes the per-point comparison to out.
-func checkFold(store *history.Store, path, harness string, out io.Writer) (*finding, error) {
+// checkReplay loads path as task restore does, audits prices, and writes the
+// per-point comparison of live ingestion and replay to out.
+func checkReplay(store *history.Store, path, harness string, out io.Writer, prices *priceAudit) (*finding, error) {
 	lt, err := store.LoadSource(path)
 	if err == nil {
 		err = lt.LoadMessages()
@@ -20,6 +20,7 @@ func checkFold(store *history.Store, path, harness string, out io.Writer) (*find
 	if err != nil {
 		return nil, fmt.Errorf("load %s: %w", path, err)
 	}
+	prices.observe(lt, path)
 	c, err := taskrun.CheckFold(lt, out)
 	if err != nil {
 		return nil, fmt.Errorf("fold %s: %w", path, err)

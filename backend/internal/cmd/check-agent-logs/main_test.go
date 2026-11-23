@@ -515,6 +515,44 @@ func TestRun(t *testing.T) {
 		}
 	})
 
+	t.Run("warns once for missing offline prices", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		for _, name := range []string{"a.jsonl", "b.jsonl"} {
+			writeLog(t, filepath.Join(dir, name), []string{
+				taskMeta("antigravity"),
+				`{"t":"agent","ts":1.000,"msg":{"event":"init","conversation_id":"s","init":{"model":"gemini-4-private-high"}}}`,
+				`{"t":"agent","ts":2.000,"msg":{"event":"step_update","step_update":{"conversation_id":"s","step_index":1,"state":"DONE","usage":{"input_tokens":100,"output_tokens":10}}}}`,
+			}, false)
+		}
+		var out bytes.Buffer
+		if err := run([]string{dir}, &out); err != nil {
+			t.Fatal(err)
+		}
+		want := filepath.Join(dir, "a.jsonl") + ": warning: missing offline price for model=\"gemini-4-private-high\" harness=antigravity at 1970-01-01T00:00:02Z in a log with incomplete cost\n" +
+			"checked 2 v3 task logs; found 0 issues\n"
+		if got := out.String(); got != want {
+			t.Errorf("output = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("harness cost covers missing offline price", func(t *testing.T) {
+		t.Parallel()
+		path := writeLog(t, filepath.Join(t.TempDir(), "task.jsonl"), []string{
+			taskMeta("claude"),
+			`{"t":"agent","ts":1.000,"msg":{"type":"system","subtype":"init","model":"claude-private"}}`,
+			`{"t":"agent","ts":2.000,"msg":{"type":"result","usage":{"input_tokens":100,"output_tokens":10}}}`,
+			`{"t":"agent","ts":3.000,"msg":{"type":"result","total_cost_usd":0}}`,
+		}, false)
+		var out bytes.Buffer
+		if err := run([]string{path}, &out); err != nil {
+			t.Fatal(err)
+		}
+		if got := out.String(); got != "checked 1 v3 task logs; found 0 issues\n" {
+			t.Errorf("output = %q", got)
+		}
+	})
+
 	t.Run("newest harness version", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
