@@ -71,7 +71,7 @@ func TestTaskReference(t *testing.T) {
 				raw  string
 				want TaskReference
 			}{
-				{name: "integer", raw: "3", want: "3"},
+				{name: "integer", raw: "3", want: "#3"},
 				{name: "number string", raw: `"3"`, want: "3"},
 				{name: "hashtag string", raw: `"#3"`, want: "#3"},
 			} {

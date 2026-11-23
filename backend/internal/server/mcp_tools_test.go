@@ -1134,7 +1134,10 @@ func TestMCPTools(t *testing.T) {
 			parent := mustNewTask(t, parentID, agent.Prompt{Text: "parent"}, harness.Claude)
 			taskruntest.SetState(parent, task.StateWaiting)
 			insertTestTask(s, parentID, parent)
-			childID := ksid.NewID()
+			childID, err := ksid.Parse("540502916000")
+			if err != nil {
+				t.Fatal(err)
+			}
 			child := mustNewTask(t, childID, agent.Prompt{Text: "child"}, harness.Codex)
 			child.ParentTaskID = parentID
 			taskruntest.SetState(child, task.StateWaiting)
@@ -2714,6 +2717,10 @@ func TestDecodeTaskReference(t *testing.T) {
 	t.Run("valid", func(t *testing.T) {
 		t.Parallel()
 		stableID := ksid.NewID()
+		digitID, err := ksid.Parse("540502916000")
+		if err != nil {
+			t.Fatal(err)
+		}
 		for _, tc := range []struct {
 			name       string
 			ref        mcpschema.TaskReference
@@ -2724,6 +2731,7 @@ func TestDecodeTaskReference(t *testing.T) {
 			{name: "task number", ref: "2", max: 2, wantNumber: 2},
 			{name: "hashtag task number", ref: mcpschema.TaskReference("#2"), max: 2, wantNumber: 2},
 			{name: "stable ID", ref: mcpschema.TaskReference(stableID.String()), max: 2, wantID: stableID},
+			{name: "all-digit stable ID", ref: "540502916000", max: 2, wantID: digitID},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
@@ -2745,8 +2753,9 @@ func TestDecodeTaskReference(t *testing.T) {
 			ref  mcpschema.TaskReference
 			max  int
 		}{
-			{name: "out of range number", ref: "3", max: 2},
+			{name: "out of range number without a canonical ID encoding", ref: "3", max: 2},
 			{name: "out of range hashtag number", ref: mcpschema.TaskReference("#3"), max: 2},
+			{name: "all-digit ID with a number prefix", ref: "#540502916000", max: 2},
 			{name: "invalid reference", ref: "not a task", max: 2},
 		} {
 			t.Run(tc.name, func(t *testing.T) {

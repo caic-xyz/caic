@@ -946,7 +946,7 @@ func (m *mcpTools) sendTaskInput(ctx context.Context, args mcpTaskInputArgs, fie
 }
 
 func (m *mcpTools) entryByNumber(ctx context.Context, num int) (*taskmgr.Entry, error) {
-	_, entry, err := m.entryByTaskRef(ctx, mcpschema.TaskReference(strconv.Itoa(num)), false)
+	_, entry, err := m.entryByTaskRef(ctx, mcpschema.TaskReference("#"+strconv.Itoa(num)), false)
 	return entry, err
 }
 
@@ -980,7 +980,7 @@ func (m *mcpTools) entryByTaskRef(ctx context.Context, ref mcpschema.TaskReferen
 	raw := strings.TrimSpace(string(ref))
 	keys, _ := taskKeys(ctx, m.taskSvc)
 	delegatingTaskID, taskScoped := taskMCPTaskID(ctx)
-	if number, err := parseTaskNumber(raw); err == nil {
+	if number, err := parseTaskNumber(raw, len(keys)); err == nil {
 		if number == 0 && allowSelf && taskScoped {
 			entry, ok := m.taskSvc.taskMgr.GetEntry(delegatingTaskID)
 			if !ok {
@@ -1185,11 +1185,19 @@ func buildBotFixCISchema() *jsonschema.Schema {
 
 var errNotTaskNumber = errors.New("not a task number")
 
-// parseTaskNumber parses an integer task number, allowing a leading '#'.
-func parseTaskNumber(raw string) (int, error) {
-	number, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(raw), "#")))
+// parseTaskNumber accepts an explicit "#N" or a bare integer. A bare
+// integer above the list range can also be a canonical all-digit stable ID.
+func parseTaskNumber(raw string, maxTaskNumber int) (int, error) {
+	raw = strings.TrimSpace(raw)
+	digits, explicit := strings.CutPrefix(raw, "#")
+	number, err := strconv.Atoi(strings.TrimSpace(digits))
 	if err != nil {
 		return 0, errNotTaskNumber
+	}
+	if !explicit && number > maxTaskNumber {
+		if id, err := ksid.Parse(raw); err == nil && id.String() == raw {
+			return 0, errNotTaskNumber
+		}
 	}
 	return number, nil
 }
@@ -1197,7 +1205,7 @@ func parseTaskNumber(raw string) (int, error) {
 // decodeTaskReference resolves a task number up to maxTaskNumber or a stable ID.
 func decodeTaskReference(id mcpschema.TaskReference, maxTaskNumber int) (ksid.ID, int, error) {
 	raw := string(id)
-	if number, err := parseTaskNumber(raw); err == nil {
+	if number, err := parseTaskNumber(raw, maxTaskNumber); err == nil {
 		if number < 1 || number > maxTaskNumber {
 			return 0, 0, fmt.Errorf("task number %d is outside 1 through %d", number, maxTaskNumber)
 		}

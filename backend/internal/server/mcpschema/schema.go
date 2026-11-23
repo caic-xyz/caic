@@ -84,11 +84,11 @@ type AccountEnabledOutput struct {
 // TaskReference accepts a JSON task number or a string task reference.
 type TaskReference string
 
-// UnmarshalJSON preserves numeric task numbers and string IDs without resolving them.
+// UnmarshalJSON marks JSON integers as explicit task numbers and preserves strings.
 func (id *TaskReference) UnmarshalJSON(data []byte) error {
 	var number int
 	if err := json.Unmarshal(data, &number); err == nil {
-		*id = TaskReference(strconv.Itoa(number))
+		*id = TaskReference("#" + strconv.Itoa(number))
 		return nil
 	}
 	var raw string
