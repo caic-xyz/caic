@@ -245,6 +245,23 @@ describe("groupMessages", () => {
     expect(groups.flatMap((g) => g.toolCalls).find((call) => call.use.name === "Read")?.done).toBe(false);
     expect(JSON.stringify(groups)).toContain("orphan output");
   });
+
+  it("keeps synchronous ACP tools in invocation order within a session", () => {
+    const source = { threadID: "antigravity-session" };
+    const calls = [
+      ["first", "Bash"],
+      ["second", "Read"],
+      ["third", "Bash"],
+    ] as const;
+    const events = calls.flatMap(([id, name], index) => [
+      { ...toolUseEvent(id, name), ts: 2 * index + 1, source },
+      { ...toolResultEvent(id), ts: 2 * index + 2, source },
+    ]);
+    const groups = aggregateMessageGroups(groupMessages([...events, { ...resultEvent(), ts: 7, source }]));
+    expect(
+      groups.filter((group) => group.toolCalls.length > 0).map((group) => group.toolCalls.map((call) => call.use.name)),
+    ).toEqual([["Bash", "Read", "Bash"]]);
+  });
   it("retains sourced tools without classifying them as content fragments", () => {
     const event = toolUseEvent("tool", "Read");
     event.source = { agentID: "native:child", threadID: "child", rootThreadID: "root", turnID: "turn", itemID: "item" };

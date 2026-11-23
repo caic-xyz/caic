@@ -142,8 +142,8 @@ report, and no prompt response followed.
 `tools.go` therefore turns each `run_command` still running at `end_turn` into
 a background command bound to its tool call, whose end wakes the agent unless
 `IsDaemon` is set. Its completion settles the card with the reported exit code
-and replaces the late tool result, which belongs to an ended turn. After
-another prompt end, no card is kept.
+and attaches the tool output and result to the launching row, using the
+session and call ID. After another prompt end, no card is kept.
 
 A step agy runs without a prompt, after a background command ends or a child
 reports, is a turn: it starts before the step's first activity. Each model call

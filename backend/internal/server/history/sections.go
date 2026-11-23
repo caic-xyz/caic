@@ -58,6 +58,9 @@ type sectionIndex struct {
 	// its start stands, but the turn no longer runs until root input or
 	// activity resumes it.
 	halted bool
+	// A prompt that returned with a detached tool may receive unsolicited
+	// follow-up. Keep that output with its launching context through the next input.
+	afterBackgroundPrompt bool
 	// contextMeter folds raw root records as the task's context meter does,
 	// with the session identity contextSession tracks as the task does.
 	contextMeter   agent.ContextMeter
@@ -101,7 +104,12 @@ func (s *sectionIndex) append(e *v1.HistoryEvent) {
 	}
 	s.current.Body.Last = p
 	if s.lastResult.RecordID != 0 && s.firstAfterResult.RecordID == 0 {
-		s.firstAfterResult = p
+		if s.afterBackgroundPrompt && !rootBoundary && m.UserInput == nil {
+			s.lastResult = p
+			s.lastResultFact = len(s.facts) - 1
+		} else {
+			s.firstAfterResult = p
+		}
 	}
 	if rootEvent(m) {
 		if (m.Init != nil || m.UserInput != nil) && m.Ts > 0 && (s.metadata.SetupEndedAt.IsZero() || m.Ts < s.metadata.SetupEndedAt.UnixMilli()) {
@@ -217,6 +225,7 @@ func (s *sectionIndex) append(e *v1.HistoryEvent) {
 				// As in the task's turn metrics, a harness that reports no
 				// duration, such as an ACP agent, takes the elapsed time.
 				duration = max(0, m.Ts-s.startAt.UnixMilli())
+				s.facts[len(s.facts)-1].duration = float64(duration) / 1000
 			}
 			s.turns = append(s.turns, v1.HistoryTurn{HistoryPosition: p, Number: len(s.turns) + 1, SectionID: s.current.ID, StartedAt: s.startAt, At: historyTime(m.Ts), Model: model, Effort: s.effort, Usage: r.Usage, DurationMS: duration, DurationAPIMS: int64(math.Round(r.DurationAPI * 1000)), Cost: r.Cost, ContextTokens: s.contextMeter.Tokens()})
 			s.turnStarts = append(s.turnStarts, s.startPos)
@@ -238,6 +247,7 @@ func (s *sectionIndex) append(e *v1.HistoryEvent) {
 			s.lastResult = p
 			s.firstAfterResult = v1.HistoryPosition{}
 			s.lastResultFact = len(s.facts) - 1
+			s.afterBackgroundPrompt = len(m.Result.PendingToolUseIDs) != 0
 		}
 	}
 	s.last = p
@@ -309,6 +319,7 @@ func (s *sectionIndex) close(e *v1.HistoryEvent) {
 	s.current = v1.HistorySection{ID: strconv.Itoa(len(s.closed) + 1), Body: &v1.HistorySlice{First: first, Last: eventPosition(e)}, ReportedModel: s.model, Skills: []v1.EventSkillLoad{}}
 	s.lastResult = v1.HistoryPosition{}
 	s.firstAfterResult = v1.HistoryPosition{}
+	s.afterBackgroundPrompt = false
 	s.facts = slices.Clone(s.facts[factCut:])
 	s.lastResultFact = -1
 	s.activityHomesDirty = true
@@ -343,6 +354,14 @@ func (s *sectionIndex) observeStart(p v1.HistoryPosition, ts int64) {
 func (s *sectionIndex) observeContext(msg agent.Message) {
 	s.contextMeter.Observe(msg, s.contextSession.SessionID)
 	s.contextSession.Apply(msg)
+}
+
+// observeTurnEnd closes a woken turn that has no prompt result to project.
+func (s *sectionIndex) observeTurnEnd(msg agent.Message) {
+	if _, ok := msg.(*agent.TurnEndedMessage); ok && !msg.Provenance().IsChild() && s.startPos.RecordID != 0 {
+		s.clearPrompt()
+		s.revision++
+	}
 }
 
 // runningTurn reports the turn in progress, if any.

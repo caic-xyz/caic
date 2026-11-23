@@ -12,6 +12,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	agentacp "github.com/caic-xyz/caic/backend/internal/agent/acp"
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 )
 
 // inputKeys maps agy 1.5.9 tool argument names to the input keys shared ACP
@@ -36,6 +37,16 @@ const runCommand = "run_command"
 // exitCode matches the exit status agy reports in a run_command output.
 var exitCode = regexp.MustCompile(`Command exited with code (-?\d+)\.`)
 
+type commandCall struct {
+	agent.BackgroundCommand
+
+	sessionID string
+}
+
+func (c *commandCall) message() *agent.BackgroundCommandMessage {
+	return &agent.BackgroundCommandMessage{Source: v3.MessageSource{ThreadID: c.sessionID}, Command: c.BackgroundCommand}
+}
+
 // tools projects agy tool calls, its asynchronous delegations and commands,
 // and the steps agy runs without a prompt.
 type tools struct {
@@ -43,9 +54,9 @@ type tools struct {
 	running []agent.NativeSubagent
 	// commands holds the run_command calls of the current prompt that agy has
 	// announced and not settled.
-	commands []agent.BackgroundCommand
+	commands []commandCall
 	// detached holds the commands that outlived their prompt.
-	detached []agent.BackgroundCommand
+	detached []commandCall
 	// woken reports a turn that agy started without a prompt; see wake.
 	woken bool
 	// stepText reports that the woken turn's current model call streamed text.
@@ -56,20 +67,28 @@ type tools struct {
 // reports only on completion. An invoke_subagent call becomes a native card,
 // and the end of a detached run_command settles its background command.
 // Outside a prompt, it brackets agy's own steps as a turn.
-func (t *tools) Parse(_ string, prompted bool, tool *acp.ToolCallUpdateUpdate, messages []agent.Message) ([]agent.Message, error) {
+func (t *tools) Parse(sid string, prompted bool, tool *acp.ToolCallUpdateUpdate, messages []agent.Message) ([]agent.Message, error) {
 	if prompted {
 		// The prompt's response ends its turn, including one agy started.
 		t.woken, t.stepText = false, false
+	}
+	detached := -1
+	if tool != nil {
+		detached = slices.IndexFunc(t.detached, func(c commandCall) bool { return c.sessionID == sid && c.ToolUseID == tool.ToolCallID })
 	}
 	switch {
 	case tool == nil:
 	case tool.Name == invokeSubagent:
 		messages = t.delegate(tool, messages)
-	case slices.ContainsFunc(t.detached, func(c agent.BackgroundCommand) bool { return c.ToolUseID == tool.ToolCallID }):
-		messages = t.settleDetached(tool, messages)
+	case detached >= 0:
+		wakes := t.detached[detached].WakesAgent
+		messages = t.settleDetached(detached, tool, messages)
+		if !wakes {
+			return messages, nil
+		}
 	default:
 		var err error
-		if messages, err = t.project(tool, messages); err != nil {
+		if messages, err = t.project(sid, tool, messages); err != nil {
 			return nil, err
 		}
 	}
@@ -87,8 +106,9 @@ func (t *tools) Parse(_ string, prompted bool, tool *acp.ToolCallUpdateUpdate, m
 // does; see AGENTS.md. A command still running at end_turn continues in the
 // background, and agy reports its end later. After another end, agy's record
 // of the command is unknown, so caic keeps no card for it.
-func (t *tools) SettlePrompt(stop acp.StopReason) []agent.Message {
+func (t *tools) SettlePrompt(sid string, stop acp.StopReason, r *agent.ResultMessage) []agent.Message {
 	t.woken, t.stepText = false, false
+	r.Source.ThreadID = sid
 	messages := make([]agent.Message, 0, len(t.running)+len(t.commands))
 	for i := range t.running {
 		s := &t.running[i]
@@ -104,18 +124,22 @@ func (t *tools) SettlePrompt(stop acp.StopReason) []agent.Message {
 		messages = append(messages, &agent.NativeSubagentMessage{Subagent: *s})
 	}
 	t.running = t.running[:0]
-	if stop == acp.StopReasonEndTurn {
-		for _, c := range t.commands {
-			t.detached = append(t.detached, c)
-			messages = append(messages, &agent.BackgroundCommandMessage{Command: c})
+	t.commands = slices.DeleteFunc(t.commands, func(c commandCall) bool {
+		if c.sessionID != sid {
+			return false
 		}
-	}
-	t.commands = t.commands[:0]
+		if stop == acp.StopReasonEndTurn {
+			t.detached = append(t.detached, c)
+			messages = append(messages, c.message())
+			r.PendingToolUseIDs = append(r.PendingToolUseIDs, c.ToolUseID)
+		}
+		return true
+	})
 	return messages
 }
 
 // project canonicalizes a generic tool call and tracks a running run_command.
-func (t *tools) project(tool *acp.ToolCallUpdateUpdate, messages []agent.Message) ([]agent.Message, error) {
+func (t *tools) project(sid string, tool *acp.ToolCallUpdateUpdate, messages []agent.Message) ([]agent.Message, error) {
 	for i, m := range messages {
 		use, ok := m.(*agent.ToolUseMessage)
 		if !ok || use.ToolUseID != tool.ToolCallID {
@@ -130,9 +154,6 @@ func (t *tools) project(tool *acp.ToolCallUpdateUpdate, messages []agent.Message
 		messages = slices.Insert(messages, i+1, inferredSkillReads(use.Name, input, tool.ToolCallID)...)
 		break
 	}
-	if tool.Name == runCommand {
-		t.trackCommand(tool)
-	}
 	if tool.Status == acp.StatusCompleted {
 		if output := agentacp.ToolOutput(tool); output != "" {
 			// The output precedes the result, which follows the ToolUseMessage
@@ -144,41 +165,48 @@ func (t *tools) project(tool *acp.ToolCallUpdateUpdate, messages []agent.Message
 			messages = slices.Insert(messages, max(i, 0), agent.Message(&agent.ToolOutputDeltaMessage{ToolUseID: tool.ToolCallID, Delta: output}))
 		}
 	}
+	t.trackCommand(sid, tool)
+	for _, m := range messages {
+		m.Provenance().ThreadID = sid
+	}
 	return messages, nil
 }
 
 // trackCommand records a running run_command call until agy settles it.
-func (t *tools) trackCommand(tool *acp.ToolCallUpdateUpdate) {
-	i := slices.IndexFunc(t.commands, func(c agent.BackgroundCommand) bool { return c.ToolUseID == tool.ToolCallID })
+func (t *tools) trackCommand(sid string, tool *acp.ToolCallUpdateUpdate) {
+	if sid == "" || tool.ToolCallID == "" {
+		return
+	}
+	i := slices.IndexFunc(t.commands, func(c commandCall) bool { return c.sessionID == sid && c.ToolUseID == tool.ToolCallID })
+	if i < 0 && tool.Name != runCommand {
+		return
+	}
 	switch {
 	case tool.Status == acp.StatusCompleted || tool.Status == acp.StatusFailed:
 		if i >= 0 {
 			t.commands = slices.Delete(t.commands, i, i+1)
 		}
-	case i < 0:
+	case i < 0 && tool.Status == acp.StatusInProgress:
 		var in struct {
 			CommandLine string `json:"CommandLine"`
 			IsDaemon    bool   `json:"IsDaemon"`
 		}
 		// A malformed input still identifies the command by its call.
 		_ = json.Unmarshal(tool.RawInput, &in)
-		t.commands = append(t.commands, agent.BackgroundCommand{
-			ID:        "antigravity:command:" + tool.ToolCallID,
+		t.commands = append(t.commands, commandCall{sessionID: sid,
+			ID:        "antigravity:command:" + sid + "/" + tool.ToolCallID,
 			Label:     in.CommandLine,
 			Status:    agent.BackgroundCommandStatusRunning,
 			ToolUseID: tool.ToolCallID,
 			// agy notifies the model when a command ends; a daemon is not
 			// expected to end, so the agent waits for the user meanwhile.
-			WakesAgent: !in.IsDaemon,
-		})
+			WakesAgent: !in.IsDaemon})
 	}
 }
 
-// settleDetached reports the end of a command that outlived its prompt. Its
-// tool row belongs to an ended turn, so the background command carries the
-// outcome instead of a late tool result.
-func (t *tools) settleDetached(tool *acp.ToolCallUpdateUpdate, messages []agent.Message) []agent.Message {
-	messages = agentacp.DropToolMessages(messages, tool.ToolCallID)
+// settleDetached reports the outcome and preserves the tool's captured output
+// for the transcript row in the prompt that launched it.
+func (t *tools) settleDetached(i int, tool *acp.ToolCallUpdateUpdate, messages []agent.Message) []agent.Message {
 	var status agent.BackgroundCommandStatus
 	switch tool.Status {
 	case acp.StatusCompleted:
@@ -186,17 +214,36 @@ func (t *tools) settleDetached(tool *acp.ToolCallUpdateUpdate, messages []agent.
 	case acp.StatusFailed:
 		status = agent.BackgroundCommandStatusFailed
 	default:
-		return messages
+		return agentacp.DropToolMessages(messages, tool.ToolCallID)
 	}
-	i := slices.IndexFunc(t.detached, func(c agent.BackgroundCommand) bool { return c.ToolUseID == tool.ToolCallID })
-	c := agent.BackgroundCommand{ID: t.detached[i].ID, Status: status}
+	call := t.detached[i]
+	c := commandCall{sessionID: call.sessionID, ID: call.ID, Status: status}
 	t.detached = slices.Delete(t.detached, i, i+1)
-	if m := exitCode.FindStringSubmatch(agentacp.ToolOutput(tool)); m != nil {
-		if code, err := strconv.Atoi(m[1]); err == nil {
-			c.ExitCode = &code
+	output := agentacp.ToolOutput(tool)
+	if raw, err := agent.JSONField(tool.RawOutput, "exit_code"); err == nil && len(raw) > 0 {
+		// Keep the terminal status even if the optional exit code is malformed.
+		var code *int
+		if json.Unmarshal(raw, &code) == nil {
+			c.ExitCode = code
 		}
 	}
-	return append(messages, &agent.BackgroundCommandMessage{Command: c})
+	if c.ExitCode == nil {
+		if m := exitCode.FindStringSubmatch(output); m != nil {
+			if code, err := strconv.Atoi(m[1]); err == nil {
+				c.ExitCode = &code
+			}
+		}
+	}
+	if c.ExitCode != nil && *c.ExitCode != 0 {
+		c.Status = agent.BackgroundCommandStatusFailed
+	}
+	if output != "" {
+		messages = slices.Insert(messages, 0, agent.Message(&agent.ToolOutputDeltaMessage{ToolUseID: tool.ToolCallID, Delta: output}))
+	}
+	for _, m := range messages {
+		m.Provenance().ThreadID = call.sessionID
+	}
+	return append(messages, c.message())
 }
 
 // wake brackets the steps agy runs without a prompt, such as after a detached

@@ -31,7 +31,9 @@ func (p *tools) Parse(_ string, _ bool, tool *acp.ToolCallUpdateUpdate, messages
 
 // SettlePrompt adds nothing: OpenCode reports each task delegation's end on
 // its own tool call.
-func (*tools) SettlePrompt(acp.StopReason) []agent.Message { return nil }
+func (*tools) SettlePrompt(string, acp.StopReason, *agent.ResultMessage) []agent.Message {
+	return nil
+}
 
 func newTools() agentacp.ToolParser {
 	return &tools{native: nativeSubagents{tasks: make(map[string]agent.NativeSubagent), taskTools: make(map[string]struct{})}}

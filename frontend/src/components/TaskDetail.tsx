@@ -2662,6 +2662,7 @@ function MessageItem(props: { taskId: string; ev: EventMessage; turnTiming?: His
 
 function ResultCard(props: { result: EventResult; turnTiming?: HistoryTurn }) {
   const result = () => props.result;
+  const pending = () => (result().pendingToolUseIDs?.length ?? 0) > 0;
   const meta = createMemo(() => {
     const current = result();
     const parts: string[] = [];
@@ -2674,9 +2675,13 @@ function ResultCard(props: { result: EventResult; turnTiming?: HistoryTurn }) {
   // The header owns the raw toggle so the text spans the card's full width.
   const [raw, setRaw] = createSignal(false);
   return (
-    <div class={`${styles.result} ${result().isError ? styles.resultError : styles.resultSuccess}`} data-raw-scope>
+    <div
+      class={styles.result}
+      classList={{ [styles.resultError]: result().isError, [styles.resultSuccess]: !result().isError && !pending() }}
+      data-raw-scope
+    >
       <div class={styles.resultHeader}>
-        <strong>{result().isError ? "Error" : "Done"}</strong>
+        <strong>{result().isError ? "Error" : pending() ? "Work continued in background" : "Done"}</strong>
         <span class={styles.resultControls}>
           <Show when={bodyText()}>
             {(value) => <MarkdownRawToolbar text={value()} raw={raw()} onToggle={() => setRaw(!raw())} />}

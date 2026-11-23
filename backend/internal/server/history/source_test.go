@@ -97,6 +97,106 @@ const twoTexts = `{"t":"agent","ts":1.000,"msg":{"type":"assistant","message":{"
 const noOutput = `{"t":"agent","ts":2.000,"msg":{"type":"unknown_history_record"}}`
 const delta = `{"t":"agent","ts":3.000,"msg":{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"next"}}}}`
 
+func TestAntigravityAsyncCommand(t *testing.T) {
+	t.Parallel()
+	data, err := os.ReadFile("testdata/antigravity-async-command.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The recorded prefix stops at end_turn, before the background command returns.
+	lines := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+	path := writeFixture(t, lines[:9]...)
+	live, _ := newFixtureSource(t, path)
+	if _, err := live.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	_, _, pending, err := live.Sections(t.Context(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending.BackgroundCommands) != 1 || pending.BackgroundCommands[0].Status != "running" ||
+		!pending.BackgroundCommands[0].WakesAgent {
+		t.Fatalf("background commands at prompt return = %+v", pending.BackgroundCommands)
+	}
+	if len(pending.Turns) != 1 || pending.Turns[0].DurationMS != 140177 {
+		t.Fatalf("turns at prompt return = %+v", pending.Turns)
+	}
+	appendFixture(t, path, strings.Join(lines[9:], "\n")+"\n")
+	// Check both projection across the live append and a cold replay.
+	replay, _ := newFixtureSource(t, path)
+	for _, src := range []*Source{live, replay} {
+		if _, err := src.Refresh(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		snap, _, md, err := src.Sections(t.Context(), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(md.Turns) != 1 || md.RunningTurn != nil || len(md.BackgroundCommands) != 1 {
+			t.Fatalf("turns = %+v, running = %+v, commands = %+v", md.Turns, md.RunningTurn, md.BackgroundCommands)
+		}
+		cmd := md.BackgroundCommands[0]
+		if cmd.Status != "completed" || cmd.ExitCode == nil || *cmd.ExitCode != 0 {
+			t.Fatalf("completed command = %+v", cmd)
+		}
+		var order []string
+		for e, err := range src.Events(t.Context(), snap, 1, snap.Through) {
+			if err != nil {
+				t.Fatal(err)
+			}
+			m := &e.Message
+			switch {
+			case m.ToolUse != nil && m.ToolUse.ToolUseID == cmd.ToolUseID:
+				order = append(order, "start")
+			case m.Result != nil:
+				if m.Result.Result != "" || !slices.Equal(m.Result.PendingToolUseIDs, []string{cmd.ToolUseID}) || m.Source != cmd.Source {
+					t.Fatalf("prompt result = %+v, source = %+v", m.Result, m.Source)
+				}
+				order = append(order, "prompt returned")
+			case m.ToolOutputDelta != nil && m.ToolOutputDelta.ToolUseID == cmd.ToolUseID:
+				if m.Source != cmd.Source || m.ToolOutputDelta.Delta != "Command exited with code 0.\n" {
+					t.Fatalf("output = %+v, source = %+v", m.ToolOutputDelta, m.Source)
+				}
+				order = append(order, "command output")
+			case m.ToolResult != nil && m.ToolResult.ToolUseID == cmd.ToolUseID:
+				order = append(order, "command completed")
+			case m.Text != nil && strings.HasPrefix(m.Text.Text, "\n\nRebased"):
+				order = append(order, "report")
+			}
+		}
+		if want := []string{"start", "prompt returned", "command output", "command completed", "report"}; !slices.Equal(order, want) {
+			t.Fatalf("projected order = %v, want %v", order, want)
+		}
+	}
+	// Clearing the context archives the report with the prompt that launched it.
+	appendFixture(t, path, `{"t":"context_cleared"}`+"\n")
+	if _, err := live.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	_, sections, md, err := live.Sections(t.Context(), "")
+	if err != nil || len(sections) != 2 || sections[0].Body == nil || sections[0].Body.Last.RecordID != uint64(len(lines)) || md.RunningTurn != nil {
+		t.Fatalf("archived follow-up = %+v, running = %+v, err = %v", sections, md.RunningTurn, err)
+	}
+
+	stopped, _ := newFixtureSource(t, writeFixture(t, append(lines[:9:9], `{"t":"result","state":"stopped"}`)...))
+	snap, err := stopped.Refresh(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var interrupted int
+	for e, err := range stopped.Events(t.Context(), snap, 1, snap.Through) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r := e.Message.ToolResult; r != nil && r.ToolUseID == "verify" && r.Interrupted && e.Message.Source.ThreadID == "rebase-session" {
+			interrupted++
+		}
+	}
+	if interrupted != 1 {
+		t.Fatalf("interrupted background tool results = %d, want one", interrupted)
+	}
+}
+
 func TestUserInputObservationRecovery(t *testing.T) {
 	t.Parallel()
 	path := writeFixture(t, claudeHeader, `{"t":"user_input","text":"unknown"}`, `{"t":"user_input","ts":1234.567,"text":"timed"}`)
@@ -129,6 +229,7 @@ func TestUserInputObservationRecovery(t *testing.T) {
 
 func writeFixture(t testing.TB, lines ...string) string {
 	path := filepath.Join(t.TempDir(), "task.jsonl")
+	// #nosec G703 -- The path is fixed inside this test's private temporary directory.
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}

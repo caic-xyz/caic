@@ -31,6 +31,11 @@ func TestTools(t *testing.T) {
 			if len(msgs) != 3 {
 				t.Fatalf("msgs = %#v, want tool use, output, result", msgs)
 			}
+			for _, m := range msgs {
+				if m.Provenance().ThreadID != "s" {
+					t.Fatalf("%s source = %+v, want session s", m.Type(), m.Provenance())
+				}
+			}
 			if m, ok := msgs[0].(*agent.ToolUseMessage); !ok || m.Name != "Read" || string(m.Input) != `{"filePath":"/w/a.txt"}` {
 				t.Fatalf("msgs[0] = %#v, want Read of /w/a.txt", msgs[0])
 			}
@@ -73,7 +78,7 @@ func TestTools(t *testing.T) {
 						t.Fatalf("spawn acknowledgment = %#v, want nothing", msgs)
 					}
 				}
-				settled := p.SettlePrompt(test.stop)
+				settled := p.SettlePrompt("", test.stop, &agent.ResultMessage{})
 				if len(settled) != 2 {
 					t.Fatalf("settled = %#v, want both cards", settled)
 				}
@@ -92,7 +97,7 @@ func TestTools(t *testing.T) {
 						t.Fatalf("settled[%d] = %#v", i, m)
 					}
 				}
-				if again := p.SettlePrompt(test.stop); len(again) != 0 {
+				if again := p.SettlePrompt("", test.stop, &agent.ResultMessage{}); len(again) != 0 {
 					t.Fatalf("next prompt settled %#v again", again)
 				}
 			})
@@ -104,7 +109,7 @@ func TestTools(t *testing.T) {
 			if m, ok := msgs[0].(*agent.NativeSubagentMessage); len(msgs) != 1 || !ok || m.Subagent.Status != agent.NativeSubagentStatusFailed {
 				t.Fatalf("failed spawn = %#v, want a failed card", msgs)
 			}
-			if settled := p.SettlePrompt(acp.StopReasonEndTurn); len(settled) != 0 {
+			if settled := p.SettlePrompt("", acp.StopReasonEndTurn, &agent.ResultMessage{}); len(settled) != 0 {
 				t.Fatalf("settled = %#v, want the failed card ended already", settled)
 			}
 		})
@@ -140,7 +145,7 @@ func TestTools(t *testing.T) {
 			{false, chunk("Testing; I will report back."), "text_delta"},
 			{false, usage, "text usage"},
 			{false, `{"jsonrpc":"2.0","id":5,"result":{"stopReason":"end_turn"}}`, "background_command(running c1 wakes) result"},
-			{false, command("c1", "tool_call_update", "completed", "make test", `Command exited with code 0.\n\nCommand output:\nok`), "turn_started background_command(completed exit 0)"},
+			{false, command("c1", "tool_call_update", "completed", "make test", `Command exited with code 0.\n\nCommand output:\nok`), "turn_started tool_output_delta tool_result background_command(completed exit 0)"},
 			{false, usage, "usage"},
 			{false, command("c2", "tool_call", "in_progress", "git status", ""), "tool_use"},
 			{false, command("c2", "tool_call_update", "completed", "git status", `Command exited with code 0.`), "tool_output_delta tool_result"},

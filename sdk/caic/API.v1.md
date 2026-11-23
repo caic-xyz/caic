@@ -2288,7 +2288,7 @@ EventCost is one completed turn's reported or API-equivalent estimated cost.
 
 ### EventResult
 
-EventResult is emitted when the task reaches a terminal state.
+EventResult reports the end of an agent prompt.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
@@ -2302,6 +2302,7 @@ EventResult is emitted when the task reaches a terminal state.
 | `durationAPI` | `float64` | Seconds. | yes |
 | `numTurns` | `int` |  | yes |
 | `usage` | `EventUsage` |  | yes |
+| `pendingToolUseIDs` | `string[]` | PendingToolUseIDs identifies calls in this result's scope still running at the prompt response. |  |
 
 ### EventSystem
 

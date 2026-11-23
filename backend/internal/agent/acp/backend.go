@@ -539,6 +539,7 @@ func (w *wireFormat) parseOutputRecord(line []byte) ([]agent.Message, error) {
 		return nil, fmt.Errorf("unmarshal probe: %w", err)
 	}
 
+	var responseSession string
 	if probe.Method == "" && probe.ID != nil {
 		var id int64
 		if err := json.Unmarshal(probe.ID, &id); err != nil {
@@ -547,6 +548,7 @@ func (w *wireFormat) parseOutputRecord(line []byte) ([]agent.Message, error) {
 		w.mu.Lock()
 		request, matched := w.requests[id]
 		w.mu.Unlock()
+		responseSession = request.sessionID
 		if matched && request.method == acp.MethodInitialize {
 			result, err := agent.JSONField(line, "result")
 			if err != nil {
@@ -569,8 +571,8 @@ func (w *wireFormat) parseOutputRecord(line []byte) ([]agent.Message, error) {
 	}
 	if handled {
 		if len(metadata) > 0 {
-			if _, ok := metadata[len(metadata)-1].(*agent.ResultMessage); ok {
-				return w.finishPrompt(line, metadata)
+			if r, ok := metadata[len(metadata)-1].(*agent.ResultMessage); ok {
+				return w.finishPrompt(responseSession, line, metadata, r)
 			}
 		}
 		if w.tools != nil {
@@ -709,7 +711,7 @@ func (w *wireFormat) allocIDLocked() int64 {
 // finishPrompt emits the evidence the prompt response settles before the
 // response's messages: a compaction boundary, if any, then the normalized
 // terminal report.
-func (w *wireFormat) finishPrompt(line []byte, response []agent.Message) ([]agent.Message, error) {
+func (w *wireFormat) finishPrompt(sid string, line []byte, response []agent.Message, r *agent.ResultMessage) ([]agent.Message, error) {
 	var settled []agent.Message
 	if w.tools != nil {
 		// promptResult already validated the response shape.
@@ -723,7 +725,7 @@ func (w *wireFormat) finishPrompt(line []byte, response []agent.Message) ([]agen
 				return nil, err
 			}
 		}
-		settled = w.tools.SettlePrompt(acp.StopReason(stop))
+		settled = w.tools.SettlePrompt(sid, acp.StopReason(stop), r)
 	}
 	w.mu.Lock()
 	clear(w.skillReadCalls)

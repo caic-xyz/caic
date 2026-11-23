@@ -411,7 +411,7 @@ func (t *SkillReadTracker) Confirm(m Message) (bool, []Message) {
 		for pending := range t.pending {
 			key := pending
 			key.ToolUseID = ""
-			if key == scope {
+			if key == scope && !slices.Contains(m.PendingToolUseIDs, pending.ToolUseID) {
 				delete(t.pending, pending)
 			}
 		}

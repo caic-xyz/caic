@@ -1954,6 +1954,29 @@ describe("TaskDetail", () => {
     expect(getByText("Provider request failed.")).toBeInTheDocument();
   });
 
+  it("shows a neutral prompt outcome when a command continues", async () => {
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+      emit(handlers, { kind: "textDelta", ts: 1_000, textDelta: { text: "Tests are running." } });
+      emit(handlers, { kind: "text", ts: 1_500, text: { text: "Tests are running." } });
+      const event = resultEvent(2_000);
+      if (!event.result) throw new Error("result fixture is missing payload");
+      event.result.pendingToolUseIDs = ["verify"];
+      event.result.result = "";
+      emit(handlers, event);
+      return {
+        addEventListener: vi.fn(),
+        close: vi.fn(),
+        onerror: null,
+      } as unknown as EventSource;
+    });
+
+    const { getAllByText, getByText, queryByText } = await renderTaskDetail();
+
+    expect(getAllByText("Tests are running.")).toHaveLength(1);
+    expect(getByText("Work continued in background")).toBeInTheDocument();
+    expect(queryByText("Done")).not.toBeInTheDocument();
+  });
+
   it("opens the turn's Performance view from its result card", async () => {
     const user = userEvent.setup();
     taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {

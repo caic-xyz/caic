@@ -150,6 +150,7 @@ func (s *Source) Refresh(ctx context.Context) (Snapshot, error) {
 			// The context meter folds raw messages, as the task does, before
 			// their events can end a turn.
 			s.sections.observeContext(m)
+			s.sections.observeTurnEnd(m)
 			for i := first; i < len(events); i++ {
 				s.sections.append(&events[i])
 			}

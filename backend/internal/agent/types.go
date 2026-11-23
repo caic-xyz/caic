@@ -655,6 +655,9 @@ type ResultMessage struct {
 	// the turn, or reports the turn's end later with a TurnEndedMessage. The
 	// adapter derives it from native records.
 	TurnContinues bool `json:"-"`
+	// PendingToolUseIDs identifies root tool calls that survive this response.
+	// It is derived from native records and uses the result's tool scope.
+	PendingToolUseIDs []string `json:"-"`
 }
 
 // Type implements Message.

@@ -6,6 +6,8 @@ import {
   IncrementalMessageGrouper,
   isChildEvent,
   isSessionBoundary,
+  toolEventID,
+  toolIdentity,
   updateWarningPercentages,
   type MessageGroup,
   type Turn,
@@ -22,6 +24,7 @@ export class RootConversationProjection {
   private last: EventMessage | null = null;
   private completed: EventMessage[] = [];
   private pending: EventMessage[] = [];
+  private detached = new Set<string>();
   private warnings = new Map<string, number>();
   private completedGrouper = new IncrementalMessageGrouper();
   private liveGrouper = new IncrementalMessageGrouper();
@@ -40,11 +43,23 @@ export class RootConversationProjection {
     )
       this.reset();
     let committed = false;
+    let lateTool = false;
     for (let i = this.processed; i < messages.length; i++) {
       const event = messages[i];
       if (!event) throw new Error("Missing context event");
-      if (displayedAtRoot(event) && (isChildEvent(event) || !isSessionBoundary(event))) this.pending.push(event);
+      if (displayedAtRoot(event) && (isChildEvent(event) || !isSessionBoundary(event))) {
+        const id = this.detached.size > 0 && event.kind !== "toolUse" ? toolEventID(event) : null;
+        const key = id && toolIdentity(event.source, id);
+        if (key && this.detached.has(key)) {
+          this.completed.push(event);
+          if (event.kind === "toolResult") this.detached.delete(key);
+          lateTool = true;
+        } else {
+          this.pending.push(event);
+        }
+      }
       if (event.kind === "result" && !isChildEvent(event)) {
+        for (const id of event.result?.pendingToolUseIDs ?? []) this.detached.add(toolIdentity(event.source, id));
         for (const root of this.pending) {
           this.completed.push(root);
           updateWarningPercentages(this.warnings, root);
@@ -56,9 +71,10 @@ export class RootConversationProjection {
     this.processed = messages.length;
     this.first = messages[0] ?? null;
     this.last = messages.at(-1) ?? null;
-    const turns = committed
-      ? groupTurns(aggregateMessageGroups(this.completedGrouper.group(this.completed)))
-      : this.snapshot.turns;
+    const turns =
+      committed || lateTool
+        ? groupTurns(aggregateMessageGroups(this.completedGrouper.group(this.completed)))
+        : this.snapshot.turns;
     if (committed) {
       this.liveGrouper.reset(this.warnings);
       this.grouped = null;
@@ -79,6 +95,7 @@ export class RootConversationProjection {
     this.first = this.last = null;
     this.completed = [];
     this.pending = [];
+    this.detached.clear();
     this.warnings = new Map();
     this.completedGrouper = new IncrementalMessageGrouper();
     this.liveGrouper = new IncrementalMessageGrouper();

@@ -3166,7 +3166,7 @@ data class EventUsage(
 @Serializable
 data class EventCost(val usd: Double, val source: EventCostSource)
 
-/** EventResult is emitted when the task reaches a terminal state. */
+/** EventResult reports the end of an agent prompt. */
 @Serializable
 data class EventResult(
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val cost: EventCost? = null,
@@ -3181,6 +3181,8 @@ data class EventResult(
     @SerialName("durationAPI") val durationAPI: Double,
     val numTurns: Int,
     val usage: EventUsage,
+    /** PendingToolUseIDs identifies calls in this result's scope still running at the prompt response. */
+    @SerialName("pendingToolUseIDs") @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val pendingToolUseIDs: List<String>? = null,
 )
 
 /** EventSystem is a harness or caic system event that clients present. */

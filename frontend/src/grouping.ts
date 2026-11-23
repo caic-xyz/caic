@@ -101,7 +101,7 @@ export function childAgentID(event: EventMessage): string | null {
   return event.source?.agentID || null;
 }
 
-function toolEventID(event: EventMessage): string | null {
+export function toolEventID(event: EventMessage): string | null {
   if (event.kind === "toolUse") return event.toolUse?.toolUseID ?? null;
   if (event.kind === "toolResult") return event.toolResult?.toolUseID ?? null;
   if (event.kind === "toolOutputDelta") return event.toolOutputDelta?.toolUseID ?? null;
@@ -222,6 +222,8 @@ export function aggregateMessageGroups(groups: MessageGroup[]): MessageGroup[] {
       };
   };
   for (const group of groups) {
+    if (group.kind === "other" && group.events.some((event) => event.result && !isChildEvent(event)))
+      aggregates.clear();
     if (isThinkingGroup(group)) {
       joinThinking(group);
       continue;
@@ -241,7 +243,7 @@ export function aggregateMessageGroups(groups: MessageGroup[]): MessageGroup[] {
     const scope = toolIdentity(group.tool.source, "");
     let aggregate = aggregates.get(scope);
     if (!aggregate) {
-      aggregate = { kind: "action", messageKey: `tools:${scope}`, events: [], toolCalls: [] };
+      aggregate = { kind: "action", messageKey: `tools:${group.tool.key}`, events: [], toolCalls: [] };
       aggregates.set(scope, aggregate);
       result.push(aggregate);
     }
@@ -338,6 +340,8 @@ function groupMessagesAfter(
   const groups: MessageGroup[] = [];
   const byIdentity = new Map<string, MessageGroup>();
   const byTool = new Map<string, MessageGroup>();
+  const openTools = new Set<MessageGroup>();
+  const detached = new Set<string>();
 
   function lastGroup(): MessageGroup | undefined {
     const group = groups[groups.length - 1];
@@ -364,10 +368,13 @@ function groupMessagesAfter(
     }
     if (ev.kind === "result" && ev.source) {
       const scope = toolIdentity(ev.source, "");
-      for (const group of byTool.values()) {
+      for (const id of ev.result?.pendingToolUseIDs ?? []) detached.add(toolIdentity(ev.source, id));
+      for (const group of openTools) {
         if (group.tool && toolIdentity(group.tool.source, "") === scope) {
+          if (detached.has(group.tool.key)) continue;
           group.tool = { ...group.tool, ended: true };
           group.toolCalls = group.toolCalls.map((call) => (call.use.background ? call : { ...call, done: true }));
+          openTools.delete(group);
         }
       }
     }
@@ -380,6 +387,11 @@ function groupMessagesAfter(
         groups.push(group);
       }
       appendScopedTool(group, ev, key, false);
+      if (ev.kind === "toolUse" && !group.tool?.result) openTools.add(group);
+      if (ev.kind === "toolResult") {
+        openTools.delete(group);
+        detached.delete(key);
+      }
       continue;
     }
     const messageKey = messageIdentity(ev);

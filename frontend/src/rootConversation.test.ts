@@ -56,6 +56,65 @@ describe("one current root context", () => {
       true,
     );
   });
+  it("keeps a detached command in its original turn after the prompt returns", () => {
+    const projection = new RootConversationProjection();
+    const source = { threadID: "session" };
+    const completion = result(8);
+    assert.ok(completion.result);
+    completion.source = source;
+    completion.result.pendingToolUseIDs = ["verify"];
+    const events: EventMessage[] = [
+      { kind: "thinkingDelta", ts: 1, thinkingDelta: { text: "Think" } },
+      {
+        kind: "toolUse",
+        ts: 2,
+        source,
+        toolUse: { toolUseID: "verify", name: "Bash", input: {}, inputTruncated: false, background: false },
+      },
+      { kind: "textDelta", ts: 3, textDelta: { text: "Testing…" } },
+      { kind: "thinking", ts: 7, thinking: { text: "Think" } },
+      completion,
+    ];
+    const first = projection.derive(events, () => true, false);
+    assert.equal(first.turns[0]?.groups.flatMap((group) => group.toolCalls)[0]?.done, false);
+    assert.equal(first.turns[0]?.textCount, 1);
+
+    events.push(
+      { kind: "toolOutputDelta", ts: 9, source, toolOutputDelta: { toolUseID: "verify", delta: "ok" } },
+      { kind: "toolResult", ts: 10, source, toolResult: { toolUseID: "verify", duration: 0.008, error: "" } },
+      text("Verification passed.", 11),
+    );
+    const next = projection.derive(events, () => true, false);
+    assert.equal(next.turns.length, 1);
+    const calls = next.turns[0]?.groups.flatMap((group) => group.toolCalls);
+    assert.equal(calls?.length, 1);
+    assert.equal(calls[0]?.done, true);
+    assert.equal(calls[0]?.output, "ok");
+    assert.deepEqual(
+      next.groups.flatMap((group) => group.events).map((event) => event.text?.text),
+      ["Verification passed."],
+    );
+    assert.deepEqual(
+      next,
+      new RootConversationProjection().derive(events, () => true, false),
+    );
+
+    events.push(
+      {
+        kind: "toolUse",
+        ts: 12,
+        source,
+        toolUse: { toolUseID: "status", name: "Bash", input: {}, inputTruncated: false, background: false },
+      },
+      { kind: "toolResult", ts: 13, source, toolResult: { toolUseID: "status", duration: 0.001, error: "" } },
+      result(14),
+    );
+    const second = projection.derive(events, () => true, false);
+    const [firstTurn, secondTurn] = second.turns.map((turn) => turn.groups.find((group) => group.toolCalls.length > 0));
+    assert.equal(firstTurn?.toolCalls[0]?.use.toolUseID, "verify");
+    assert.equal(secondTurn?.toolCalls[0]?.use.toolUseID, "status");
+    assert.notEqual(firstTurn?.messageKey, secondTurn?.messageKey);
+  });
   it("reprojects ownership only when the server routing revision changes", () => {
     const projection = new RootConversationProjection();
     const event = text("pending correlation", 1);

@@ -2149,7 +2149,7 @@ export interface EventCost {
   source: EventCostSource;
 }
 
-/** EventResult is emitted when the task reaches a terminal state. */
+/** EventResult reports the end of an agent prompt. */
 export interface EventResult {
   cost?: EventCost;
   subtype: string;
@@ -2163,6 +2163,8 @@ export interface EventResult {
   durationAPI: number /* float64 */;
   numTurns: number /* int */;
   usage: EventUsage;
+  /** PendingToolUseIDs identifies calls in this result's scope still running at the prompt response. */
+  pendingToolUseIDs?: string[];
 }
 
 /** EventSystem is a harness or caic system event that clients present. */

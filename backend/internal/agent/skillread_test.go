@@ -209,6 +209,17 @@ func TestSkillsFromCommand(t *testing.T) {
 }
 
 func TestSkillReadTracker(t *testing.T) {
+	t.Run("detached tool confirms a skill after the prompt returns", func(t *testing.T) {
+		t.Parallel()
+		var tracker agent.SkillReadTracker
+		src := taskslogv3.MessageSource{ThreadID: "session"}
+		read := &agent.SkillReadMessage{Source: src, Skill: "review", Inferred: true, SourceToolUseID: "command"}
+		tracker.Confirm(read)
+		tracker.Confirm(&agent.ResultMessage{Source: src, PendingToolUseIDs: []string{"command"}})
+		if _, confirmed := tracker.Confirm(&agent.ToolResultMessage{Source: src, ToolUseID: "command"}); !slices.Equal(confirmed, []agent.Message{read}) {
+			t.Fatalf("confirmed reads = %v, want the detached command's read", confirmed)
+		}
+	})
 	t.Run("child completion and parent turn boundary", func(t *testing.T) {
 		t.Parallel()
 		var tracker agent.SkillReadTracker

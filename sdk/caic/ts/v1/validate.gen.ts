@@ -754,6 +754,7 @@ export function validateEventResult(raw: ValidatorInput): EventResult {
     durationAPI: asNumber(obj["durationAPI"], "EventResult.durationAPI"),
     numTurns: asNumber(obj["numTurns"], "EventResult.numTurns"),
     usage: validateEventUsage(obj["usage"]),
+    ...(Object.prototype.hasOwnProperty.call(obj, "pendingToolUseIDs") ? { pendingToolUseIDs: validateArray(obj["pendingToolUseIDs"], "EventResult.pendingToolUseIDs", (v) => asString(v, "EventResult.pendingToolUseIDs[element]")) } : {}),
   };
 }
 

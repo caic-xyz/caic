@@ -319,7 +319,7 @@ func (tt *ToolTimingTracker) convertMessage(recordID uint64, messageIndex int, m
 		// fallback before resetting the window for the next turn.
 		result := m.Result
 		nativeDuration, _ := agent.NativeDuration(m)
-		if result == "" && !m.Source.IsChild() {
+		if result == "" && !m.Source.IsChild() && len(m.PendingToolUseIDs) == 0 {
 			result = tt.window.Value()
 		}
 		tt.window.Update(m)
@@ -331,15 +331,16 @@ func (tt *ToolTimingTracker) convertMessage(recordID uint64, messageIndex int, m
 			Kind: v1.EventKindResult,
 			Ts:   ts,
 			Result: &v1.EventResult{
-				Cost:         cost,
-				Subtype:      m.Subtype,
-				IsError:      m.IsError,
-				Result:       result,
-				DiffStat:     DiffStat(m.DiffStat),
-				TotalCostUSD: m.TotalCostUSD,
-				Duration:     nativeDuration.Seconds(),
-				DurationAPI:  float64(m.DurationAPIMs) / 1e3,
-				NumTurns:     m.NumTurns,
+				PendingToolUseIDs: m.PendingToolUseIDs,
+				Cost:              cost,
+				Subtype:           m.Subtype,
+				IsError:           m.IsError,
+				Result:            result,
+				DiffStat:          DiffStat(m.DiffStat),
+				TotalCostUSD:      m.TotalCostUSD,
+				Duration:          nativeDuration.Seconds(),
+				DurationAPI:       float64(m.DurationAPIMs) / 1e3,
+				NumTurns:          m.NumTurns,
 				Usage: v1.EventUsage{
 					InputTokens:              m.Usage.InputTokens,
 					OutputTokens:             m.Usage.OutputTokens,

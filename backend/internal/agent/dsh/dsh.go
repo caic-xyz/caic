@@ -237,7 +237,7 @@ func (p *toolParser) Parse(sessionID string, _ bool, tool *acp.ToolCallUpdateUpd
 // internal to its subagent lifecycle. Once dsh emits child start and end
 // session updates, map them in Parse and keep this settlement as the fallback
 // for children without an end update.
-func (p *toolParser) SettlePrompt(stop acp.StopReason) []agent.Message {
+func (p *toolParser) SettlePrompt(_ string, stop acp.StopReason, _ *agent.ResultMessage) []agent.Message {
 	clear(p.subagents)
 	clear(p.waits)
 	messages := make([]agent.Message, 0, len(p.running))

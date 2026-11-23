@@ -227,7 +227,7 @@ type EventUsage struct {
 	ContextWindow            int    `json:"contextWindow,omitempty"` // Active model context capacity.
 }
 
-// EventResult is emitted when the task reaches a terminal state.
+// EventResult reports the end of an agent prompt.
 type EventResult struct {
 	Cost         EventCost  `json:"cost,omitzero"`
 	Subtype      string     `json:"subtype"`
@@ -239,6 +239,8 @@ type EventResult struct {
 	DurationAPI  float64    `json:"durationAPI"` // Seconds.
 	NumTurns     int        `json:"numTurns"`
 	Usage        EventUsage `json:"usage"`
+	// PendingToolUseIDs identifies calls in this result's scope still running at the prompt response.
+	PendingToolUseIDs []string `json:"pendingToolUseIDs,omitempty"`
 }
 
 // EventCost is one completed turn's reported or API-equivalent estimated cost.

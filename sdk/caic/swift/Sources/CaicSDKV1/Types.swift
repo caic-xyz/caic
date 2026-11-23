@@ -4590,7 +4590,7 @@ public struct EventCost: Codable {
     }
 }
 
-/// EventResult is emitted when the task reaches a terminal state.
+/// EventResult reports the end of an agent prompt.
 public struct EventResult: Codable {
     public let cost: EventCost?
     public let subtype: String
@@ -4604,8 +4604,10 @@ public struct EventResult: Codable {
     public let durationAPI: Double
     public let numTurns: Int
     public let usage: EventUsage
+    /// PendingToolUseIDs identifies calls in this result's scope still running at the prompt response.
+    public let pendingToolUseIDs: [String]?
 
-    public init(cost: EventCost? = nil, subtype: String, isError: Bool, result: String, diffStat: DiffStat? = nil, totalCostUSD: Double, duration: Double, durationAPI: Double, numTurns: Int, usage: EventUsage) {
+    public init(cost: EventCost? = nil, subtype: String, isError: Bool, result: String, diffStat: DiffStat? = nil, totalCostUSD: Double, duration: Double, durationAPI: Double, numTurns: Int, usage: EventUsage, pendingToolUseIDs: [String]? = nil) {
         self.cost = cost
         self.subtype = subtype
         self.isError = isError
@@ -4616,6 +4618,7 @@ public struct EventResult: Codable {
         self.durationAPI = durationAPI
         self.numTurns = numTurns
         self.usage = usage
+        self.pendingToolUseIDs = pendingToolUseIDs
     }
 }
 
