@@ -170,6 +170,23 @@ describe("TaskList", () => {
     expect(level("busy", "cpu")).toHaveClass(levelStyles.normal);
   });
 
+  it("keeps the focused collapse control as tasks arrive and the first repository changes", () => {
+    const [tasks, setTasks] = createSignal<Task[]>([]);
+    const setSidebarOpen = vi.fn();
+    const { getByRole } = renderList(() => (
+      <TaskList {...taskListProps([])} tasks={tasks} selectedId="1" setSidebarOpen={setSidebarOpen} />
+    ));
+    const collapse = getByRole("button", { name: "Collapse sidebar" });
+    collapse.focus();
+    const running = { ...task("1"), repos: [{ name: "beta", branch: "work" }] };
+    setTasks([running]);
+    expect(collapse).toHaveFocus();
+    setTasks([running, { ...task("2"), repos: [{ name: "alpha", branch: "work" }] }]);
+    expect(collapse).toHaveFocus();
+    fireEvent.click(collapse);
+    expect(setSidebarOpen).toHaveBeenCalledWith(false);
+  });
+
   it("puts repositories with active tasks first, with natural ordering within each tier", () => {
     const inactive: Task["state"][] = ["stopped", "stopping", "crashed", "purged", "purging", "failed"];
     const tasks: Task[] = inactive.map((state, index) => ({

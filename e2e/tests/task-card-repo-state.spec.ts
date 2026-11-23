@@ -65,12 +65,13 @@ test("task navigation reveals the repository when it fits with the selected card
   const last = await createTaskAPI(api, uniquePrompt("crowded repo"));
   await waitForTaskState(api, last, "waiting");
   const task = await api.getTask(last);
+  const firstRepo = "alpha/" + "long-repository-name".repeat(4);
   const crowded = { ...task, repos: [{ name: "crowded", branch: "work" }] };
   const snapshot = {
     kind: "snapshot",
     snapshot: [
-      { ...task, id: first, repos: [{ name: "alpha", branch: "work" }] },
-      { ...task, id: second, repos: [{ name: "alpha", branch: "work" }] },
+      { ...task, id: first, repos: [{ name: firstRepo, branch: "work" }] },
+      { ...task, id: second, repos: [{ name: firstRepo, branch: "work" }] },
       ...Array.from({ length: 30 }, (_, i) => ({ ...crowded, id: `${last}${i}` })),
       crowded,
     ],
@@ -82,6 +83,18 @@ test("task navigation reveals the repository when it fits with the selected card
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto(`/task/@${first}`);
   const list = page.getByRole("region", { name: "Tasks" });
+  const header = list.getByText(firstRepo, { exact: true }).first();
+  const collapse = list.getByRole("button", { name: "Collapse sidebar" });
+  await expect(header).toBeInViewport({ ratio: 1 });
+  await expect(collapse).toBeInViewport({ ratio: 1 });
+  const nameBox = await header.boundingBox();
+  const buttonBox = await collapse.boundingBox();
+  ok(nameBox && buttonBox);
+  expect(nameBox.x + nameBox.width).toBeLessThanOrEqual(buttonBox.x);
+  expect(buttonBox.y + buttonBox.height / 2).toBeGreaterThanOrEqual(nameBox.y);
+  expect(buttonBox.y + buttonBox.height / 2).toBeLessThanOrEqual(nameBox.y + nameBox.height);
+  await collapse.click();
+  await page.getByRole("button", { name: "Expand sidebar" }).click();
   const prompt = page.getByTestId("task-detail-prompt");
   await prompt.press("PageUp");
   await expect(page).toHaveURL(new RegExp(`/task/@${last}`));
@@ -90,7 +103,7 @@ test("task navigation reveals the repository when it fits with the selected card
 
   await prompt.press("PageDown");
   await expect(page).toHaveURL(new RegExp(`/task/@${first}`));
-  await expect(list.getByText("alpha", { exact: true }).first()).toBeInViewport({ ratio: 1 });
+  await expect(header).toBeInViewport({ ratio: 1 });
   await expect(list.locator(`[data-task-id="${first}"]`)).toBeInViewport({ ratio: 1 });
 
   await prompt.press("PageDown");
@@ -99,11 +112,10 @@ test("task navigation reveals the repository when it fits with the selected card
   await expect(page).toHaveURL(new RegExp(`/task/@${last}`));
   await page.goBack();
   await expect(list.locator(`[data-task-id="${second}"]`)).toBeInViewport({ ratio: 1 });
-  await expect(list.getByText("alpha", { exact: true }).first()).toBeInViewport({ ratio: 1 });
+  await expect(header).toBeInViewport({ ratio: 1 });
 
   // Size the list so both boxes fit only if the card overlaps the bottom fade.
   const secondCard = list.locator(`[data-task-id="${second}"]`);
-  const header = list.getByText("alpha", { exact: true }).first();
   const cardBox = await secondCard.boundingBox();
   const headerBox = await header.boundingBox();
   ok(cardBox && headerBox);

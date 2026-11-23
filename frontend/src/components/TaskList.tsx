@@ -424,7 +424,7 @@ export default function TaskList(props: TaskListProps) {
             return (
               <div class={styles.repoGroup}>
                 <div class={styles.repoGroupHeader}>
-                  <Show when={purgedOnly()} fallback={repo || "Other"}>
+                  <Show when={purgedOnly()} fallback={<span>{repo || "Other"}</span>}>
                     <button
                       class={styles.repoDisclosure}
                       aria-label={`${repo || "Other"}: Purged (${group().purged.length})`}

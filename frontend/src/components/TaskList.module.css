@@ -71,9 +71,9 @@
   }
 }
 
-button.collapseBtn {
-  display: flex;
-  margin-left: auto;
+.collapseBtn {
+  float: inline-end;
+  margin-inline-start: 0.375rem;
 }
 
 .expandBtn {
@@ -81,6 +81,8 @@ button.collapseBtn {
 }
 
 .placeholder {
+  display: flex;
+  align-items: center;
   color: var(--color-text-muted);
 }
 
@@ -98,6 +100,15 @@ button.collapseBtn {
   font-size: 0.75rem;
   font-weight: 600;
   color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* Keep the first card below the control, even beside a single-line name. */
+.collapseBtn + .repoGroup > .repoGroupHeader,
+.collapseBtn + .placeholder {
+  box-sizing: border-box;
+  min-height: 28px;
+  margin-block-start: 0;
 }
 
 .subGroupHeader {
