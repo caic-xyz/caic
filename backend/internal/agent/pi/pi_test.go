@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -26,6 +25,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	"github.com/caic-xyz/caic/internal/testlog"
 	"github.com/gomodedev/gomode/mcp/mcptest"
 )
 
@@ -239,7 +239,7 @@ func TestPiConn(t *testing.T) {
 				stdout, output := io.Pipe()
 				messages := make(chan agent.TimedMessage, 16)
 				owner := piProtocolRecords(t, t.Context(), agent.DiscardLogSink{}, &agenttest.RecordHandler{Messages: messages})
-				conn := newPiConn(t.Context(), slog.New(slog.DiscardHandler), stdin, &agent.Options{MCP: mcptest.FakeRegistry{}, Records: owner})
+				conn := newPiConn(t.Context(), testlog.New(t), stdin, &agent.Options{MCP: mcptest.FakeRegistry{}, Records: owner})
 				var workers sync.WaitGroup
 				t.Cleanup(func() { conn.Cancel(); _ = output.Close(); _ = stdin.Reader.Close(); workers.Wait() })
 				sent := make(chan error, 1)
@@ -334,7 +334,7 @@ func TestBackend(t *testing.T) {
 		owner := piProtocolRecords(t, t.Context(), log, &agenttest.RecordHandler{Messages: msgs})
 		sess, err := New("", nil).Start(t.Context(), &agent.Options{
 			ResumeSessionID: "ses-1",
-			Logger:          slog.New(slog.DiscardHandler),
+			Logger:          testlog.New(t),
 			Target:          runtime.ConnectionTarget{SSHHost: "task"},
 			Dir:             "/workspace",
 			Model:           "openai-codex/gpt-5.6-terra",
@@ -432,7 +432,7 @@ func TestBackend(t *testing.T) {
 				msgs := make(chan agent.TimedMessage, 64)
 				log := &agenttest.LogSink{}
 				owner := piProtocolRecords(t, t.Context(), log, &agenttest.RecordHandler{Messages: msgs})
-				sess, err := New("", nil).Start(t.Context(), &agent.Options{Logger: slog.New(slog.DiscardHandler), Target: runtime.ConnectionTarget{SSHHost: "task"}, Dir: "/workspace", Model: "requested/model", ResumeSessionID: tc.want.SessionID, Records: owner})
+				sess, err := New("", nil).Start(t.Context(), &agent.Options{Logger: testlog.New(t), Target: runtime.ConnectionTarget{SSHHost: "task"}, Dir: "/workspace", Model: "requested/model", ResumeSessionID: tc.want.SessionID, Records: owner})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -515,7 +515,7 @@ func TestBackend(t *testing.T) {
 			t.Fatal(err)
 		}
 		owner := piProtocolRecords(t, t.Context(), &agenttest.LogSink{}, &agenttest.RecordHandler{})
-		_, err = New("", nil).Start(t.Context(), &agent.Options{Logger: slog.New(slog.DiscardHandler), Target: runtime.ConnectionTarget{SSHHost: "task"}, Dir: "/workspace", ResumeSessionID: "original-session", Records: owner})
+		_, err = New("", nil).Start(t.Context(), &agent.Options{Logger: testlog.New(t), Target: runtime.ConnectionTarget{SSHHost: "task"}, Dir: "/workspace", ResumeSessionID: "original-session", Records: owner})
 		if err == nil || !strings.Contains(err.Error(), "does not match requested session") {
 			t.Fatalf("resume mismatch error=%v", err)
 		}

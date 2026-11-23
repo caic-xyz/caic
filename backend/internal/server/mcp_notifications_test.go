@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"math"
 	"sync"
 	"testing"
@@ -23,6 +22,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/mcpschema"
 	taskstate "github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun/taskruntest"
+	"github.com/caic-xyz/caic/internal/testlog"
 )
 
 func TestTaskQuotaBlocked(t *testing.T) {
@@ -184,7 +184,7 @@ func TestNotificationFeed(t *testing.T) {
 			return []v1.Task{metadata}, map[string]taskStateReplay{tk.ID.String(): {seq: seq, timelineID: tk.TimelineID()}}
 		}
 		tasks, replays := capture()
-		notificationSnapshot(feed, t.Context(), tasks, replays, v1.UsageResp{}, "")
+		notificationSnapshot(t, feed, t.Context(), tasks, replays, v1.UsageResp{}, "")
 		taskruntest.SetState(tk, taskstate.StateWaiting)
 		captured, release := make(chan struct{}), make(chan struct{})
 		result := make(chan []mcpschema.ServiceNotification, 1)
@@ -196,7 +196,7 @@ func TestNotificationFeed(t *testing.T) {
 			close(captured)
 			select {
 			case <-release:
-				result <- notificationSnapshot(feed, ctx, old, oldReplay, v1.UsageResp{}, "")
+				result <- notificationSnapshot(t, feed, ctx, old, oldReplay, v1.UsageResp{}, "")
 			case <-ctx.Done():
 			}
 		})
@@ -204,7 +204,7 @@ func TestNotificationFeed(t *testing.T) {
 		taskruntest.SetState(tk, taskstate.StateStopped)
 		taskruntest.SetState(tk, taskstate.StateWaiting)
 		tasks, replays = capture()
-		current := notificationSnapshot(feed, t.Context(), tasks, replays, v1.UsageResp{}, "")
+		current := notificationSnapshot(t, feed, t.Context(), tasks, replays, v1.UsageResp{}, "")
 		if len(current) != 1 {
 			t.Fatalf("latest=%+v", current)
 		}
@@ -213,23 +213,23 @@ func TestNotificationFeed(t *testing.T) {
 		if len(stale) != 1 || stale[0].ID != current[0].ID {
 			t.Errorf("stale snapshot manufactured/removed alert: %+v", stale)
 		}
-		repeated := notificationSnapshot(feed, t.Context(), tasks, replays, v1.UsageResp{}, "")
+		repeated := notificationSnapshot(t, feed, t.Context(), tasks, replays, v1.UsageResp{}, "")
 		if len(repeated) != 1 || repeated[0].ID != current[0].ID {
 			t.Errorf("newer repeat manufactured alert: %+v", repeated)
 		}
 		tk.SetTitle("Updated attention title")
 		tasks, replays = capture()
-		updated := notificationSnapshot(feed, t.Context(), tasks, replays, v1.UsageResp{}, "")
+		updated := notificationSnapshot(t, feed, t.Context(), tasks, replays, v1.UsageResp{}, "")
 		if len(updated) != 1 || updated[0].ID != current[0].ID || updated[0].Body != "Updated attention title" {
 			t.Errorf("equal-sequence metadata=%+v", updated)
 		}
 		oldTasks, oldReplays := tasks, replays
 		taskruntest.SetState(tk, taskstate.StateStopped)
 		tasks, replays = capture()
-		if got := notificationSnapshot(feed, t.Context(), tasks, replays, v1.UsageResp{}, ""); len(got) != 0 {
+		if got := notificationSnapshot(t, feed, t.Context(), tasks, replays, v1.UsageResp{}, ""); len(got) != 0 {
 			t.Errorf("withdrawal=%+v", got)
 		}
-		if got := notificationSnapshot(feed, t.Context(), oldTasks, oldReplays, v1.UsageResp{}, ""); len(got) != 0 {
+		if got := notificationSnapshot(t, feed, t.Context(), oldTasks, oldReplays, v1.UsageResp{}, ""); len(got) != 0 {
 			t.Errorf("stale snapshot resurrected withdrawn alert: %+v", got)
 		}
 	})
@@ -237,7 +237,7 @@ func TestNotificationFeed(t *testing.T) {
 		t.Parallel()
 		feed := newNotificationFeed()
 		owner := func(id string) {
-			notificationSnapshot(feed, auth.NewContext(t.Context(), &auth.User{ID: id}), nil, nil, v1.UsageResp{}, "")
+			notificationSnapshot(t, feed, auth.NewContext(t.Context(), &auth.User{ID: id}), nil, nil, v1.UsageResp{}, "")
 		}
 		owner("recent")
 		owner("victim")
@@ -352,40 +352,40 @@ func TestNotificationFeed(t *testing.T) {
 		feed := newNotificationFeed()
 		task := v1.Task{ID: ksid.NewID(), Title: "Claude task", State: v1.TaskStateWaiting, Harness: v1.HarnessAntigravity, RequestedModel: "claude-sonnet"}
 		usage := v1.UsageResp{Providers: []v1.ProviderQuota{{Provider: v1.QuotaProviderAntigravity, FetchStatus: v1.ProviderFetchStatusFresh, RateLimits: []v1.QuotaRateLimit{{Window: "gemini-weekly", Utilization: 1, ResetsAt: time.Now().Add(time.Hour)}, {Window: "3p-weekly", ResetsAt: time.Now().Add(time.Hour)}, {Window: "3p-5h", ResetsAt: time.Now().Add(time.Hour)}}}}}
-		if got := notificationSnapshot(feed, t.Context(), []v1.Task{task}, nil, usage, ""); len(got) != 0 {
+		if got := notificationSnapshot(t, feed, t.Context(), []v1.Task{task}, nil, usage, ""); len(got) != 0 {
 			t.Fatal(got)
 		}
 		usage.Providers[0].RateLimits[0].Utilization = 0
-		if got := notificationSnapshot(feed, t.Context(), []v1.Task{task}, nil, usage, ""); len(got) != 0 {
+		if got := notificationSnapshot(t, feed, t.Context(), []v1.Task{task}, nil, usage, ""); len(got) != 0 {
 			t.Fatalf("unrelated pool recovery notified Claude task: %#v", got)
 		}
 		usage.Providers[0].RateLimits[1].Utilization = 1
-		notificationSnapshot(feed, t.Context(), []v1.Task{task}, nil, usage, "")
+		notificationSnapshot(t, feed, t.Context(), []v1.Task{task}, nil, usage, "")
 		usage.Providers[0].FetchStatus = v1.ProviderFetchStatusStale
-		if got := notificationSnapshot(feed, t.Context(), []v1.Task{task}, nil, usage, ""); len(got) != 0 {
+		if got := notificationSnapshot(t, feed, t.Context(), []v1.Task{task}, nil, usage, ""); len(got) != 0 {
 			t.Fatalf("stale quota claimed recovery: %#v", got)
 		}
 		usage.Providers[0].FetchStatus = v1.ProviderFetchStatusFresh
 		usage.Providers[0].RateLimits[1].Utilization = 0
 		task.RequestedModel = ""
-		if got := notificationSnapshot(feed, t.Context(), []v1.Task{task}, nil, usage, ""); len(got) != 0 {
+		if got := notificationSnapshot(t, feed, t.Context(), []v1.Task{task}, nil, usage, ""); len(got) != 0 {
 			t.Fatalf("unknown model claimed recovery: %#v", got)
 		}
 		task.RequestedModel = "claude-sonnet"
 		usage.Providers[0].UnassessedWindows = []v1.UnassessedQuotaWindow{{Group: "Claude and GPT models", Window: "3p-monthly"}}
-		if got := notificationSnapshot(feed, t.Context(), []v1.Task{task}, nil, usage, ""); len(got) != 0 {
+		if got := notificationSnapshot(t, feed, t.Context(), []v1.Task{task}, nil, usage, ""); len(got) != 0 {
 			t.Fatalf("unassessed quota claimed recovery: %#v", got)
 		}
 		usage.Providers[0].UnassessedWindows = nil
-		if got := notificationSnapshot(feed, t.Context(), []v1.Task{task}, nil, usage, ""); len(got) != 1 || got[0].Title != "Quota available" {
+		if got := notificationSnapshot(t, feed, t.Context(), []v1.Task{task}, nil, usage, ""); len(got) != 1 || got[0].Title != "Quota available" {
 			t.Fatalf("pool recovery = %#v", got)
 		}
 		usage.Providers[0].FetchStatus = v1.ProviderFetchStatusStale
-		if got := notificationSnapshot(feed, t.Context(), []v1.Task{task}, nil, usage, ""); len(got) != 0 {
+		if got := notificationSnapshot(t, feed, t.Context(), []v1.Task{task}, nil, usage, ""); len(got) != 0 {
 			t.Fatalf("unknown quota retained recovery alert: %#v", got)
 		}
 		usage.Providers[0].FetchStatus = v1.ProviderFetchStatusFresh
-		if got := notificationSnapshot(feed, t.Context(), []v1.Task{task}, nil, usage, ""); len(got) != 0 {
+		if got := notificationSnapshot(t, feed, t.Context(), []v1.Task{task}, nil, usage, ""); len(got) != 0 {
 			t.Fatalf("reobserving availability replayed recovery: %#v", got)
 		}
 	})
@@ -398,9 +398,9 @@ func TestNotificationFeed(t *testing.T) {
 			tasks[i] = v1.Task{ID: ksid.NewID(), Title: "Other task", State: v1.TaskStateRunning}
 		}
 		tasks[3].Title = "Foreground notification investigation"
-		notificationSnapshot(feed, t.Context(), tasks, nil, v1.UsageResp{}, "")
+		notificationSnapshot(t, feed, t.Context(), tasks, nil, v1.UsageResp{}, "")
 		tasks[3].State = v1.TaskStateWaiting
-		got := notificationSnapshot(feed, t.Context(), tasks, nil, v1.UsageResp{}, "")
+		got := notificationSnapshot(t, feed, t.Context(), tasks, nil, v1.UsageResp{}, "")
 		if len(got) != 1 || got[0].Title != "Task #4 is waiting" || got[0].Body != "Foreground notification investigation" {
 			t.Fatalf("numbered notification = %#v", got)
 		}
@@ -414,9 +414,9 @@ func TestNotificationFeed(t *testing.T) {
 			{ID: ksid.NewID(), Title: "Focused task", State: v1.TaskStateRunning},
 			{ID: ksid.NewID(), Title: "Third task", State: v1.TaskStateRunning},
 		}
-		notificationSnapshot(feed, t.Context(), tasks, nil, v1.UsageResp{}, "")
+		notificationSnapshot(t, feed, t.Context(), tasks, nil, v1.UsageResp{}, "")
 		tasks[1].State = v1.TaskStateWaiting
-		got := notificationSnapshot(feed, t.Context(), tasks, nil, v1.UsageResp{}, tasks[1].ID.String())
+		got := notificationSnapshot(t, feed, t.Context(), tasks, nil, v1.UsageResp{}, tasks[1].ID.String())
 		if len(got) != 1 {
 			t.Fatalf("notifications = %#v, want one alert", got)
 		}
@@ -434,7 +434,7 @@ func TestNotificationFeed(t *testing.T) {
 		if decoded["activeTaskId"] != tasks[1].ID.String() || decoded["activeTaskNumber"] != float64(2) {
 			t.Fatalf("active task JSON = %s", data)
 		}
-		if got := notificationSnapshot(feed, t.Context(), tasks, nil, v1.UsageResp{}, ""); len(got) != 1 || got[0].ActiveTaskID != "" || got[0].ActiveTaskNumber != 0 {
+		if got := notificationSnapshot(t, feed, t.Context(), tasks, nil, v1.UsageResp{}, ""); len(got) != 1 || got[0].ActiveTaskID != "" || got[0].ActiveTaskNumber != 0 {
 			t.Fatalf("unfocused notifications = %#v, want no active task", got)
 		}
 	})
@@ -455,32 +455,32 @@ func TestNotificationFeed(t *testing.T) {
 				t.Parallel()
 				feed := newNotificationFeed()
 				task := v1.Task{ID: ksid.NewID(), Title: "Review plan", State: tc.state}
-				if got := notificationSnapshot(feed, t.Context(), []v1.Task{task}, nil, v1.UsageResp{}, ""); len(got) != 0 {
+				if got := notificationSnapshot(t, feed, t.Context(), []v1.Task{task}, nil, v1.UsageResp{}, ""); len(got) != 0 {
 					t.Fatalf("initial attention state notified: %#v", got)
 				}
 				task.State = v1.TaskStateRunning
-				notificationSnapshot(feed, t.Context(), []v1.Task{task}, nil, v1.UsageResp{}, "")
+				notificationSnapshot(t, feed, t.Context(), []v1.Task{task}, nil, v1.UsageResp{}, "")
 				task.State = tc.state
-				got := notificationSnapshot(feed, t.Context(), []v1.Task{task}, nil, v1.UsageResp{}, "")
+				got := notificationSnapshot(t, feed, t.Context(), []v1.Task{task}, nil, v1.UsageResp{}, "")
 				if len(got) != 1 || got[0].Title != tc.title || got[0].Body != "Review plan" || got[0].ItemID != task.ID.String() || got[0].URL != "/task/@"+task.ID.String() {
 					t.Fatalf("attention notification = %#v", got)
 				}
 				first := got[0]
-				if got := notificationSnapshot(feed, t.Context(), []v1.Task{task}, nil, v1.UsageResp{}, ""); len(got) != 1 || got[0].ID != first.ID {
+				if got := notificationSnapshot(t, feed, t.Context(), []v1.Task{task}, nil, v1.UsageResp{}, ""); len(got) != 1 || got[0].ID != first.ID {
 					t.Fatalf("repeated snapshot changed occurrence: %#v", got)
 				}
 				task.State = v1.TaskStateRunning
-				if got := notificationSnapshot(feed, t.Context(), []v1.Task{task}, nil, v1.UsageResp{}, ""); len(got) != 0 {
+				if got := notificationSnapshot(t, feed, t.Context(), []v1.Task{task}, nil, v1.UsageResp{}, ""); len(got) != 0 {
 					t.Fatalf("running task retained alert: %#v", got)
 				}
 				task.State = tc.state
-				if got := notificationSnapshot(feed, t.Context(), []v1.Task{task}, nil, v1.UsageResp{}, ""); len(got) != 1 || got[0].ID == first.ID {
+				if got := notificationSnapshot(t, feed, t.Context(), []v1.Task{task}, nil, v1.UsageResp{}, ""); len(got) != 1 || got[0].ID == first.ID {
 					t.Fatalf("second occurrence = %#v", got)
 				}
-				if got := notificationSnapshot(feed, t.Context(), nil, nil, v1.UsageResp{}, ""); len(got) != 0 {
+				if got := notificationSnapshot(t, feed, t.Context(), nil, nil, v1.UsageResp{}, ""); len(got) != 0 {
 					t.Fatalf("deleted task retained alert: %#v", got)
 				}
-				if got := notificationSnapshot(feed, t.Context(), []v1.Task{task}, nil, v1.UsageResp{}, ""); len(got) != 0 {
+				if got := notificationSnapshot(t, feed, t.Context(), []v1.Task{task}, nil, v1.UsageResp{}, ""); len(got) != 0 {
 					t.Fatalf("reappearing task notified: %#v", got)
 				}
 			})
@@ -495,10 +495,10 @@ func TestNotificationFeed(t *testing.T) {
 			ids := make(map[string]struct{})
 			for range 2 {
 				task.State = v1.TaskStateRunning
-				notificationSnapshot(feed, t.Context(), []v1.Task{task}, nil, v1.UsageResp{}, "")
+				notificationSnapshot(t, feed, t.Context(), []v1.Task{task}, nil, v1.UsageResp{}, "")
 				for _, state := range []v1.TaskState{v1.TaskStateWaiting, v1.TaskStateAsking, v1.TaskStateHasPlan} {
 					task.State = state
-					got := notificationSnapshot(feed, t.Context(), []v1.Task{task}, nil, v1.UsageResp{}, "")
+					got := notificationSnapshot(t, feed, t.Context(), []v1.Task{task}, nil, v1.UsageResp{}, "")
 					if len(got) != 1 {
 						t.Fatalf("changed attention state = %#v", got)
 					}
@@ -520,7 +520,7 @@ func TestNotificationFeed(t *testing.T) {
 		id := task.ID.String()
 		read := func(ctx context.Context, state v1.TaskState, seq uint64, timeline string) []mcpschema.ServiceNotification {
 			task.State = state
-			return notificationSnapshot(feed, ctx, []v1.Task{task}, map[string]taskStateReplay{id: {seq: seq, timelineID: timeline}}, v1.UsageResp{}, "")
+			return notificationSnapshot(t, feed, ctx, []v1.Task{task}, map[string]taskStateReplay{id: {seq: seq, timelineID: timeline}}, v1.UsageResp{}, "")
 		}
 		read(t.Context(), v1.TaskStateRunning, 124, "A")
 		first := read(t.Context(), v1.TaskStateAsking, 125, "A")
@@ -539,7 +539,7 @@ func TestNotificationFeed(t *testing.T) {
 		}
 		// Owner eviction re-baselines silently instead of re-announcing.
 		for i := range maxNotificationOwners {
-			notificationSnapshot(feed, auth.NewContext(t.Context(), &auth.User{ID: fmt.Sprintf("owner-%d", i)}), nil, nil, v1.UsageResp{}, "")
+			notificationSnapshot(t, feed, auth.NewContext(t.Context(), &auth.User{ID: fmt.Sprintf("owner-%d", i)}), nil, nil, v1.UsageResp{}, "")
 		}
 		for range 2 {
 			if got := read(t.Context(), v1.TaskStateAsking, 3, "B"); len(got) != 0 {
@@ -566,9 +566,9 @@ func TestNotificationFeed(t *testing.T) {
 			var previous string
 			for range 2 {
 				task.RateLimit = v1.TaskRateLimit{Blocked: true, ResetsAt: time.Now().Add(time.Hour)}
-				notificationSnapshot(feed, t.Context(), []v1.Task{task}, nil, v1.UsageResp{}, "")
+				notificationSnapshot(t, feed, t.Context(), []v1.Task{task}, nil, v1.UsageResp{}, "")
 				task.RateLimit = v1.TaskRateLimit{}
-				got := notificationSnapshot(feed, t.Context(), []v1.Task{task}, nil, v1.UsageResp{}, "")
+				got := notificationSnapshot(t, feed, t.Context(), []v1.Task{task}, nil, v1.UsageResp{}, "")
 				if len(got) != 1 || got[0].ID == previous {
 					t.Fatalf("quota recovery occurrence = %#v", got)
 				}
@@ -584,12 +584,12 @@ func TestNotificationFeed(t *testing.T) {
 			{ID: ksid.NewID(), State: v1.TaskStateRunning},
 			{ID: ksid.NewID(), Title: "Target task", State: v1.TaskStateRunning},
 		}
-		notificationSnapshot(feed, t.Context(), tasks, nil, v1.UsageResp{}, "")
+		notificationSnapshot(t, feed, t.Context(), tasks, nil, v1.UsageResp{}, "")
 		tasks[1].State = v1.TaskStateWaiting
-		first := notificationSnapshot(feed, t.Context(), tasks, nil, v1.UsageResp{}, "")[0]
+		first := notificationSnapshot(t, feed, t.Context(), tasks, nil, v1.UsageResp{}, "")[0]
 		tasks[0], tasks[1] = tasks[1], tasks[0]
 		tasks[0].Title = "Renamed task"
-		got := notificationSnapshot(feed, t.Context(), tasks, nil, v1.UsageResp{}, "")
+		got := notificationSnapshot(t, feed, t.Context(), tasks, nil, v1.UsageResp{}, "")
 		if len(got) != 1 || got[0].Title != "Task #1 is waiting" || got[0].Body != "Renamed task" || got[0].ID != first.ID || got[0].URL != first.URL || got[0].ItemID != first.ItemID {
 			t.Fatalf("reordered notification = %#v; originally %#v", got, first)
 		}
@@ -602,15 +602,15 @@ func TestNotificationFeed(t *testing.T) {
 		for i := range tasks {
 			tasks[i] = v1.Task{ID: ksid.NewID(), State: v1.TaskStateRunning}
 		}
-		notificationSnapshot(feed, t.Context(), tasks, nil, v1.UsageResp{}, "")
+		notificationSnapshot(t, feed, t.Context(), tasks, nil, v1.UsageResp{}, "")
 		for i := range tasks {
 			tasks[i].State = v1.TaskStateWaiting
 		}
-		if got := notificationSnapshot(feed, t.Context(), tasks, nil, v1.UsageResp{}, ""); len(got) != 100 {
+		if got := notificationSnapshot(t, feed, t.Context(), tasks, nil, v1.UsageResp{}, ""); len(got) != 100 {
 			t.Fatalf("feed bound = %d", len(got))
 		}
 		feed.events["local"][50].ExpiresAt = time.Now().Add(-time.Hour)
-		if got := notificationSnapshot(feed, t.Context(), tasks, nil, v1.UsageResp{}, ""); len(got) != 99 {
+		if got := notificationSnapshot(t, feed, t.Context(), tasks, nil, v1.UsageResp{}, ""); len(got) != 99 {
 			t.Fatalf("expired alert retained: %d", len(got))
 		}
 	})
@@ -638,25 +638,25 @@ func TestNotificationFeed(t *testing.T) {
 		}},
 	}}}
 
-	if got := notificationSnapshot(feed, t.Context(), []v1.Task{task}, nil, blockedUsage, ""); got == nil || len(got) != 0 {
+	if got := notificationSnapshot(t, feed, t.Context(), []v1.Task{task}, nil, blockedUsage, ""); got == nil || len(got) != 0 {
 		t.Fatalf("initial notifications = %#v, want empty array", got)
 	}
-	got := notificationSnapshot(feed, t.Context(), []v1.Task{task}, nil, availableUsage, "")
+	got := notificationSnapshot(t, feed, t.Context(), []v1.Task{task}, nil, availableUsage, "")
 	if len(got) != 1 {
 		t.Fatalf("notifications = %#v, want one", got)
 	}
 	if got[0].Title != "Quota available" || got[0].Body != "Build feature can continue." || got[0].ItemID != task.ID.String() || got[0].URL != "/task/@"+task.ID.String() {
 		t.Fatalf("notification = %#v", got[0])
 	}
-	if got := notificationSnapshot(feed, t.Context(), []v1.Task{task}, nil, availableUsage, ""); len(got) != 1 {
+	if got := notificationSnapshot(t, feed, t.Context(), []v1.Task{task}, nil, availableUsage, ""); len(got) != 1 {
 		t.Fatalf("notifications after repeated availability = %#v, want one retained event", got)
 	}
-	if got := notificationSnapshot(feed, t.Context(), []v1.Task{task}, nil, blockedUsage, ""); len(got) != 0 {
+	if got := notificationSnapshot(t, feed, t.Context(), []v1.Task{task}, nil, blockedUsage, ""); len(got) != 0 {
 		t.Fatalf("quota blocked again retained recovery: %#v", got)
 	}
-	notificationSnapshot(feed, t.Context(), []v1.Task{task}, nil, availableUsage, "")
+	notificationSnapshot(t, feed, t.Context(), []v1.Task{task}, nil, availableUsage, "")
 	task.State = v1.TaskStateRunning
-	if got := notificationSnapshot(feed, t.Context(), []v1.Task{task}, nil, availableUsage, ""); len(got) != 0 {
+	if got := notificationSnapshot(t, feed, t.Context(), []v1.Task{task}, nil, availableUsage, ""); len(got) != 0 {
 		t.Fatalf("resumed task retained recovery: %#v", got)
 	}
 }
@@ -667,15 +667,15 @@ func BenchmarkNotificationFeed(b *testing.B) {
 		tasks[i] = v1.Task{ID: ksid.NewID(), Title: "Build feature", State: v1.TaskStateRunning}
 	}
 	feed := newNotificationFeed()
-	notificationSnapshot(feed, b.Context(), tasks, nil, v1.UsageResp{}, "")
+	notificationSnapshot(b, feed, b.Context(), tasks, nil, v1.UsageResp{}, "")
 	b.ResetTimer()
 	for b.Loop() {
-		notificationSnapshot(feed, b.Context(), tasks, nil, v1.UsageResp{}, "")
+		notificationSnapshot(b, feed, b.Context(), tasks, nil, v1.UsageResp{}, "")
 	}
 }
 
-func notificationSnapshot(f *notificationFeed, ctx context.Context, tasks []v1.Task, replays map[string]taskStateReplay, usage v1.UsageResp, activeTaskID string) []mcpschema.ServiceNotification {
+func notificationSnapshot(tb testing.TB, f *notificationFeed, ctx context.Context, tasks []v1.Task, replays map[string]taskStateReplay, usage v1.UsageResp, activeTaskID string) []mcpschema.ServiceNotification {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.reconcileLocked(ctx, slog.New(slog.DiscardHandler), tasks, replays, usage, activeTaskID)
+	return f.reconcileLocked(ctx, testlog.New(tb), tasks, replays, usage, activeTaskID)
 }

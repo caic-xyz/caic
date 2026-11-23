@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -20,6 +19,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+	"github.com/caic-xyz/caic/internal/testlog"
 	claudedto "github.com/maruel/genai/providers/claudecode"
 )
 
@@ -270,7 +270,7 @@ func TestRecordingRetainsNativeCorrelation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	conn := agent.NewConn(t.Context(), slog.New(slog.DiscardHandler), stdin, records, nil)
+	conn := agent.NewConn(t.Context(), testlog.New(t), stdin, records, nil)
 	if err := conn.SendPrompt(agent.Prompt{Text: "hello"}, nil); err != nil {
 		t.Fatal(err)
 	}

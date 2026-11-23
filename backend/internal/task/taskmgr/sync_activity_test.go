@@ -26,6 +26,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun/taskruntest"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+	"github.com/caic-xyz/caic/internal/testlog"
 )
 
 // syncSink collects the records of a recorder under test.
@@ -78,7 +79,7 @@ func TestSyncRecorder(t *testing.T) {
 		t.Run("orders_start_output_end", func(t *testing.T) {
 			t.Parallel()
 			sink := &syncSink{}
-			s := startSyncRecorder(t.Context(), testLogger(), sink.record, SyncTargetOrigin, "caic-3")
+			s := startSyncRecorder(t.Context(), testlog.New(t), sink.record, SyncTargetOrigin, "caic-3")
 			if _, err := io.WriteString(s, "one\ntwo\n"); err != nil {
 				t.Fatal(err)
 			}
@@ -105,7 +106,7 @@ func TestSyncRecorder(t *testing.T) {
 		t.Run("bounds_output_with_marker", func(t *testing.T) {
 			t.Parallel()
 			sink := &syncSink{}
-			s := startSyncRecorder(t.Context(), testLogger(), sink.record, SyncTargetOrigin, "b")
+			s := startSyncRecorder(t.Context(), testlog.New(t), sink.record, SyncTargetOrigin, "b")
 			line := strings.Repeat("x", 999) + "\n"
 			total := 0
 			for total < 3*maxSyncOutputBytes {
@@ -139,7 +140,7 @@ func TestSyncRecorder(t *testing.T) {
 		t.Run("coalesces_many_small_writes", func(t *testing.T) {
 			t.Parallel()
 			sink := &syncSink{}
-			s := startSyncRecorder(t.Context(), testLogger(), sink.record, SyncTargetOrigin, "b")
+			s := startSyncRecorder(t.Context(), testlog.New(t), sink.record, SyncTargetOrigin, "b")
 			for range 10000 {
 				if _, err := io.WriteString(s, "progress line\n"); err != nil {
 					t.Fatal(err)
@@ -158,7 +159,7 @@ func TestSyncRecorder(t *testing.T) {
 		t.Run("keeps_runes_whole_across_flushes", func(t *testing.T) {
 			t.Parallel()
 			sink := &syncSink{}
-			s := startSyncRecorder(t.Context(), testLogger(), sink.record, SyncTargetOrigin, "b")
+			s := startSyncRecorder(t.Context(), testlog.New(t), sink.record, SyncTargetOrigin, "b")
 			if _, err := s.Write([]byte{'a', 0xC3}); err != nil {
 				t.Fatal(err)
 			}
@@ -179,7 +180,7 @@ func TestSyncRecorder(t *testing.T) {
 		t.Run("sink_does_not_wait_for_the_log", func(t *testing.T) {
 			t.Parallel()
 			sink := &syncSink{gate: make(chan struct{})}
-			s := startSyncRecorder(t.Context(), testLogger(), sink.record, SyncTargetOrigin, "b")
+			s := startSyncRecorder(t.Context(), testlog.New(t), sink.record, SyncTargetOrigin, "b")
 			written := make(chan error, 1)
 			go func() {
 				for range 200 {
@@ -208,7 +209,7 @@ func TestSyncRecorder(t *testing.T) {
 		t.Run("end_error_is_bounded", func(t *testing.T) {
 			t.Parallel()
 			sink := &syncSink{}
-			s := startSyncRecorder(t.Context(), testLogger(), sink.record, SyncTargetDefault, "main")
+			s := startSyncRecorder(t.Context(), testlog.New(t), sink.record, SyncTargetDefault, "main")
 			s.finish(v3.SyncStatusFailed, errors.New(strings.Repeat("é", maxSyncErrorBytes)))
 			got := sink.snapshot()
 			end := got[len(got)-1]
@@ -222,7 +223,7 @@ func TestSyncRecorder(t *testing.T) {
 		t.Run("failing_log_stops_the_sink_but_not_the_end_record", func(t *testing.T) {
 			t.Parallel()
 			sink := &syncSink{failOut: errors.New("log closed")}
-			s := startSyncRecorder(t.Context(), testLogger(), sink.record, SyncTargetOrigin, "b")
+			s := startSyncRecorder(t.Context(), testlog.New(t), sink.record, SyncTargetOrigin, "b")
 			if _, err := io.WriteString(s, "x"); err != nil {
 				t.Fatal(err)
 			}
@@ -252,7 +253,7 @@ func (b *hookBackend) RunPrePush(_ context.Context, _ runtime.ID, _ int, _ strin
 func newSyncTestEntry(t *testing.T, backend func(dir string, fetched []runtime.FetchedBranch) testRuntimeBackend) *Entry {
 	dir := t.TempDir()
 	initTaskRepo(t, dir, []string{"branch", "caic-0"})
-	checkout, err := repo.NewCheckout(t.Context(), testLogger(), dir, "", nil)
+	checkout, err := repo.NewCheckout(t.Context(), testlog.New(t), dir, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

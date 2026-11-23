@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -24,6 +23,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+	"github.com/caic-xyz/caic/internal/testlog"
 )
 
 func TestBackend(t *testing.T) {
@@ -46,7 +46,7 @@ func TestBackend(t *testing.T) {
 			}
 		})
 		stdin, writer := io.Pipe()
-		conn := agent.NewConn(t.Context(), slog.New(slog.DiscardHandler), writer, records, nil)
+		conn := agent.NewConn(t.Context(), testlog.New(t), writer, records, nil)
 		lines := make(chan string, 2)
 		var workers sync.WaitGroup
 		workers.Go(func() {

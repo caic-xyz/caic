@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"io/fs"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -19,6 +18,7 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 
+	"github.com/caic-xyz/caic/internal/testlog"
 	"github.com/caic-xyz/caic/metrics"
 	v2 "github.com/caic-xyz/caic/metricsdb/data/v2"
 )
@@ -33,7 +33,7 @@ func newTestLog(t *testing.T, dir string, now time.Time) *Log {
 }
 
 func newTestLogResource(t *testing.T, dir string, now time.Time, res metrics.Resource) *Log {
-	log, err := NewLog(slog.New(slog.DiscardHandler), dir, res)
+	log, err := NewLog(testlog.New(t), dir, res)
 	if err != nil {
 		t.Fatalf("NewLog: %v", err)
 	}
@@ -89,14 +89,14 @@ func TestNewLog(t *testing.T) {
 
 	t.Run("requires a directory", func(t *testing.T) {
 		t.Parallel()
-		if _, err := NewLog(slog.New(slog.DiscardHandler), "", testResource()); err == nil {
+		if _, err := NewLog(testlog.New(t), "", testResource()); err == nil {
 			t.Fatal("NewLog accepted an empty directory")
 		}
 	})
 
 	t.Run("requires a service name", func(t *testing.T) {
 		t.Parallel()
-		if _, err := NewLog(slog.New(slog.DiscardHandler), t.TempDir(), metrics.Resource{}); err == nil {
+		if _, err := NewLog(testlog.New(t), t.TempDir(), metrics.Resource{}); err == nil {
 			t.Fatal("NewLog accepted an unnamed service")
 		}
 	})
@@ -495,7 +495,7 @@ func BenchmarkLogRecord(b *testing.B) {
 	}
 	for _, tc := range cases {
 		b.Run(tc.name, func(b *testing.B) {
-			log, err := NewLog(slog.New(slog.DiscardHandler), b.TempDir(), metrics.Resource{ServiceName: "caic"})
+			log, err := NewLog(testlog.New(b), b.TempDir(), metrics.Resource{ServiceName: "caic"})
 			if err != nil {
 				b.Fatalf("NewLog: %v", err)
 			}

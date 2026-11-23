@@ -33,6 +33,7 @@ import (
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/usage"
+	"github.com/caic-xyz/caic/internal/testlog"
 )
 
 type missingLogSystem struct {
@@ -229,7 +230,7 @@ func TestStartupReadiness(t *testing.T) {
 	created := make(chan result, 1)
 	var startup sync.WaitGroup
 	t.Cleanup(func() { cancel(); startup.Wait() })
-	startup.Go(func() { a, err := New(ctx, slog.New(slog.DiscardHandler), t.TempDir(), cfg); created <- result{a, err} })
+	startup.Go(func() { a, err := New(ctx, testlog.New(t), t.TempDir(), cfg); created <- result{a, err} })
 	var a *App
 	select {
 	case res := <-created:
@@ -340,7 +341,7 @@ func BenchmarkAppStartupWithSlowImport(b *testing.B) {
 		IPGeo:         geoip.Config{AllowOrigins: []string{"0.0.0.0/0", "::/0"}},
 		UsageFetchers: []usage.ProviderFetcher{},
 	}
-	log := slog.New(slog.DiscardHandler)
+	log := testlog.New(b)
 	b.ResetTimer()
 	for range b.N {
 		ctx, cancel := context.WithCancel(b.Context())
@@ -420,7 +421,7 @@ func TestApp(t *testing.T) {
 		cfg.LLM.Disable = true
 		system := &cancellationListSystem{done: make(chan struct{})}
 		cfg.Runtime.System = system
-		_, err := New(t.Context(), slog.New(slog.DiscardHandler), filepath.Join(t.TempDir(), "missing"), cfg)
+		_, err := New(t.Context(), testlog.New(t), filepath.Join(t.TempDir(), "missing"), cfg)
 		if err == nil || !strings.Contains(err.Error(), "discover repos") {
 			t.Fatalf("New() = %v, want repo discovery failure", err)
 		}
@@ -438,7 +439,7 @@ func TestApp(t *testing.T) {
 		// registered the provider, exercising the startup-failure close path.
 		cfg.IPGeo.DB = filepath.Join(t.TempDir(), "missing.mmdb")
 
-		_, err := New(t.Context(), slog.New(slog.DiscardHandler), t.TempDir(), cfg)
+		_, err := New(t.Context(), testlog.New(t), t.TempDir(), cfg)
 		if err == nil || !strings.Contains(err.Error(), "ipgeo") {
 			t.Fatalf("New() = %v, want ipgeo startup failure", err)
 		}
@@ -465,7 +466,7 @@ func TestApp(t *testing.T) {
 				cfg := closeSpyConfig(t, registerCloseSpyProvider(t, spy))
 				cfg.IPGeo.AllowOrigins = tc.origins
 				cfg.Auth.SuperAdmin = tc.superAdmin
-				srv, err := New(ctx, slog.New(slog.DiscardHandler), t.TempDir(), cfg)
+				srv, err := New(ctx, testlog.New(t), t.TempDir(), cfg)
 				if err != nil {
 					t.Fatalf("New() = %v", err)
 				}

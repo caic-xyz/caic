@@ -5,7 +5,6 @@ package app
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"math"
 	"slices"
 	"testing"
@@ -15,6 +14,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	usagedbv1 "github.com/caic-xyz/caic/backend/internal/usagedb/data/v1"
+	"github.com/caic-xyz/caic/internal/testlog"
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/providers"
 )
@@ -64,7 +64,7 @@ func TestPingProvider(t *testing.T) {
 				},
 			}
 			t.Cleanup(func() { delete(providers.All, name) })
-			got := pingProvider(t.Context(), slog.New(slog.DiscardHandler), name, genai.ModelCheap, nil)
+			got := pingProvider(t.Context(), testlog.New(t), name, genai.ModelCheap, nil)
 			if tc.err == nil {
 				if got != p || p.closed {
 					t.Errorf("pingProvider() = %v, closed = %v, want the open provider", got, p.closed)

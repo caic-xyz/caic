@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -32,6 +31,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun/taskruntest"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/caic-xyz/caic/internal/testlog"
 	"github.com/caic-xyz/caic/metrics"
 	"github.com/maruel/ksid"
 )
@@ -53,7 +53,7 @@ func TestService(t *testing.T) {
 				}
 				client := &admissionForge{}
 				backend := &admissionBackend{}
-				svc := NewService(slog.New(slog.DiscardHandler), cache, nil, backend)
+				svc := NewService(testlog.New(t), cache, nil, backend)
 				t.Cleanup(svc.Close)
 				entry.Task().SetPR("owner", "repo", 42)
 				var worked atomic.Bool
@@ -110,7 +110,7 @@ func TestService(t *testing.T) {
 	t.Run("owner cancellation joins detached worker", func(t *testing.T) {
 		t.Parallel()
 		manager, entry, store, user := ownedCIEntry(t)
-		svc := NewService(slog.New(slog.DiscardHandler), nil, nil, nil)
+		svc := NewService(testlog.New(t), nil, nil, nil)
 		t.Cleanup(svc.Close)
 		request, cancel := context.WithCancel(auth.NewContext(t.Context(), &user))
 		t.Cleanup(cancel)
@@ -144,7 +144,7 @@ func TestService(t *testing.T) {
 		}
 		synctest.Test(t, func(t *testing.T) {
 			client := &blockedOwnerMerge{started: make(chan struct{}), cancelled: make(chan struct{}), release: make(chan struct{})}
-			svc := NewService(slog.New(slog.DiscardHandler), cache, nil, &notificationBackend{})
+			svc := NewService(testlog.New(t), cache, nil, &notificationBackend{})
 			t.Cleanup(svc.Close)
 			entry.Task().SetPR("owner", "repo", 42)
 			var workers sync.WaitGroup
@@ -180,7 +180,7 @@ func TestService(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		svc := NewService(slog.New(slog.DiscardHandler), cache, nil, &notificationBackend{})
+		svc := NewService(testlog.New(t), cache, nil, &notificationBackend{})
 		t.Cleanup(svc.Close)
 		entry.Task().SetPR("owner", "repo", 42)
 		if err := store.SetDisabled(user.ID, true); err != nil {
@@ -207,7 +207,7 @@ func TestService(t *testing.T) {
 			t.Parallel()
 			t.Run("missing journal preserves task metadata", func(t *testing.T) {
 				t.Parallel()
-				log := slog.New(slog.DiscardHandler)
+				log := testlog.New(t)
 				router, err := runtime.NewRouter([]runtime.System{&runtimetest.FakeSystem{}}, metrics.Nop{})
 				if err != nil {
 					t.Fatal(err)
@@ -247,7 +247,7 @@ func TestService(t *testing.T) {
 	})
 	t.Run("Close", func(t *testing.T) {
 		t.Parallel()
-		svc := NewService(slog.New(slog.DiscardHandler), nil, nil, nil)
+		svc := NewService(testlog.New(t), nil, nil, nil)
 		requestCtx, cancel := context.WithCancel(t.Context())
 		started := make(chan context.Context, 1)
 		done := make(chan struct{})
@@ -308,7 +308,7 @@ func ownedCIEntryWithPolicy(t *testing.T, policy func(*auth.Store) task.OwnerPol
 	if err != nil {
 		t.Fatal(err)
 	}
-	log := slog.New(slog.DiscardHandler)
+	log := testlog.New(t)
 	system := &runtimetest.FakeSystem{}
 	router, err := runtime.NewRouter([]runtime.System{system}, metrics.Nop{})
 	if err != nil {

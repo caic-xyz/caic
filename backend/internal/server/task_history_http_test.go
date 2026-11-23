@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -29,6 +28,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/caic-xyz/caic/internal/testlog"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/maruel/ksid"
@@ -258,7 +258,7 @@ func TestTaskHistoryHTTP(t *testing.T) {
 }
 
 func historyRequest(t testing.TB, s *testRouter, target, user string) *httptest.ResponseRecorder {
-	r := httptest.NewRequestWithContext(context.WithValue(t.Context(), httpLoggerKey{}, slog.New(slog.DiscardHandler)), http.MethodGet, strings.TrimPrefix(target, "/api/caic/v1"), nil)
+	r := httptest.NewRequestWithContext(context.WithValue(t.Context(), httpLoggerKey{}, testlog.New(t)), http.MethodGet, strings.TrimPrefix(target, "/api/caic/v1"), nil)
 	if user != "" {
 		r = r.WithContext(auth.NewContext(r.Context(), &auth.User{ID: user}))
 	}
@@ -451,7 +451,7 @@ func TestHistoryResources(t *testing.T) {
 		r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, strings.TrimPrefix(recentHistoryURL(&b), "/api/caic/v1"), http.NoBody)
 		ctx, cancel := context.WithCancel(r.Context())
 		cancel()
-		r = r.WithContext(context.WithValue(ctx, httpLoggerKey{}, slog.New(slog.DiscardHandler)))
+		r = r.WithContext(context.WithValue(ctx, httpLoggerKey{}, testlog.New(t)))
 		w := httptest.NewRecorder()
 		s.taskHandlers.routes().ServeHTTP(w, r)
 		if w.Code == 200 || w.Header().Get("Cache-Control") != "no-store" {
@@ -1205,7 +1205,7 @@ func TestHistorySettlementKeepsPositions(t *testing.T) {
 	}
 	cached := events(historyRequest(t, s, recentHistoryURL(&initial), ""))
 
-	store := taskhistory.NewStore(slog.New(slog.DiscardHandler), taskslog.NewStore(filepath.Dir(path)), agent.Backends{harness.Claude: claudecode.New()})
+	store := taskhistory.NewStore(testlog.New(t), taskslog.NewStore(filepath.Dir(path)), agent.Backends{harness.Claude: claudecode.New()})
 	compressed, err := store.Compress(path, nil, task.StatePurged)
 	if err != nil {
 		t.Fatal(err)

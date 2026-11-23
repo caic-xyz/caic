@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"maps"
 	"os"
 	"path/filepath"
@@ -27,6 +26,7 @@ import (
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
 	usagedbv1 "github.com/caic-xyz/caic/backend/internal/usagedb/data/v1"
+	"github.com/caic-xyz/caic/internal/testlog"
 	"github.com/maruel/ksid"
 )
 
@@ -78,7 +78,7 @@ func TestStore(t *testing.T) {
 				if err := rollup.Close(); err != nil {
 					t.Fatal(err)
 				}
-				restored, err := usagedb.New(t.Context(), usagedb.Config{Log: slog.New(slog.DiscardHandler), Dir: usageDir})
+				restored, err := usagedb.New(t.Context(), usagedb.Config{Log: testlog.New(t), Dir: usageDir})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -124,7 +124,7 @@ func TestStore(t *testing.T) {
 			if err := rollup.Close(); err != nil {
 				t.Fatal(err)
 			}
-			restored, err := usagedb.New(t.Context(), usagedb.Config{Log: slog.New(slog.DiscardHandler), Dir: usageDir})
+			restored, err := usagedb.New(t.Context(), usagedb.Config{Log: testlog.New(t), Dir: usageDir})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -366,12 +366,12 @@ func newUsageStores(t *testing.T) (usageDir string, logStore *history.Store, rol
 	dir := t.TempDir()
 	usageDir = filepath.Join(dir, "usagedb")
 	var err error
-	rollup, err = usagedb.New(t.Context(), usagedb.Config{Log: slog.New(slog.DiscardHandler), Dir: usageDir})
+	rollup, err = usagedb.New(t.Context(), usagedb.Config{Log: testlog.New(t), Dir: usageDir})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = rollup.Close() })
-	return usageDir, history.NewStore(slog.New(slog.DiscardHandler), taskslog.NewStore(filepath.Join(dir, "tasks")), usageResolver()), rollup
+	return usageDir, history.NewStore(testlog.New(t), taskslog.NewStore(filepath.Join(dir, "tasks")), usageResolver()), rollup
 }
 
 func usageResolver() agent.Backends {
@@ -445,14 +445,14 @@ func BenchmarkUsageBackfill(b *testing.B) {
 		logBytes += writeUsageBenchmarkLog(b, logDir, ksid.NewID().String(), times)
 	}
 
-	logStore := history.NewStore(slog.New(slog.DiscardHandler), taskslog.NewStore(logDir), usageResolver())
+	logStore := history.NewStore(testlog.New(b), taskslog.NewStore(logDir), usageResolver())
 
 	b.SetBytes(int64(logBytes))
 	b.ReportAllocs()
 	b.StartTimer()
 	for i := range b.N {
 		rollup, err := usagedb.New(b.Context(), usagedb.Config{
-			Log: slog.New(slog.DiscardHandler),
+			Log: testlog.New(b),
 			Dir: filepath.Join(dir, "rollups", strconv.Itoa(i)),
 		})
 		if err != nil {

@@ -5,8 +5,10 @@ package history
 import (
 	"errors"
 	"path/filepath"
+	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/caic-xyz/caic/internal/testlog"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
@@ -36,8 +38,8 @@ func (r testParserResolver) ResolveMetadataParser(h harness.Name) (agent.Message
 }
 
 // loadMessagesForTest reconstructs through the same configured source as production.
-func loadMessagesForTest(lt *LoadedTask, resolver ParserResolver) error {
-	source, err := NewStore(testLogger(), taskslog.NewStore(filepath.Dir(lt.LogPath())), resolver).LoadSource(lt.LogPath())
+func loadMessagesForTest(tb testing.TB, lt *LoadedTask, resolver ParserResolver) error {
+	source, err := NewStore(testlog.New(tb), taskslog.NewStore(filepath.Dir(lt.LogPath())), resolver).LoadSource(lt.LogPath())
 	if err != nil {
 		return err
 	}

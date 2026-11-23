@@ -32,6 +32,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/logtest"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	"github.com/caic-xyz/caic/internal/testlog"
 	"github.com/caic-xyz/caic/metrics"
 )
 
@@ -244,8 +245,8 @@ func (*idleEventsClient) WatchEvents(ctx context.Context, _ runtime.EventFilter)
 	return func(func(runtime.Event, error) bool) { <-ctx.Done() }, nil
 }
 
-func newTestBackend(c mdClient) *Backend {
-	return &Backend{log: slog.New(slog.DiscardHandler), client: c, containers: make(map[string]mdContainer), vncPorts: make(map[string]int32)}
+func newTestBackend(tb testing.TB, c mdClient) *Backend {
+	return &Backend{log: testlog.New(tb), client: c, containers: make(map[string]mdContainer), vncPorts: make(map[string]int32)}
 }
 
 type statsCapacityClient struct {
@@ -349,7 +350,7 @@ func TestMDClientAdapter(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				synctest.Test(t, func(t *testing.T) {
-					log := slog.New(slog.DiscardHandler)
+					log := testlog.New(t)
 					a := mdClientAdapter{log: log, c: &md.Client{Runtime: &tc.r, Logger: log}}
 					seq, err := a.WatchStats(t.Context(), []runtime.InstanceID{"task"})
 					if err != nil {
@@ -373,9 +374,9 @@ func TestMDClientAdapter(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
 			r := &cpuInfoRuntime{}
-			log := slog.New(slog.DiscardHandler)
+			log := testlog.New(t)
 			a := mdClientAdapter{log: log, c: &md.Client{Runtime: r, Logger: log}}
-			b := newTestBackend(a)
+			b := newTestBackend(t, a)
 			seq, err := b.WatchStats(t.Context(), []runtime.ID{"docker:task"})
 			if err != nil {
 				t.Fatal(err)
@@ -412,7 +413,7 @@ func TestMDClientAdapter(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
 			r := &cpuInfoRuntime{delay: 5 * time.Second}
-			log := slog.New(slog.DiscardHandler)
+			log := testlog.New(t)
 			a := mdClientAdapter{log: log, c: &md.Client{Runtime: r, Logger: log}}
 			start := time.Now()
 			seq, err := a.WatchStats(t.Context(), []runtime.InstanceID{"task"})
@@ -450,7 +451,7 @@ func TestBackend(t *testing.T) {
 					t.Parallel()
 					c := &fakeMDContainer{name: "task", forkResult: &fakeMDContainer{name: "fork"}}
 					client := &fakeMDClient{container: c, getResult: c, info: &containers.Info{MemTotal: tc.total}}
-					b := newTestBackend(client)
+					b := newTestBackend(t, client)
 					opts := &runtime.StartOptions{Harness: harness.Claude}
 					id, err := b.Launch(t.Context(), nil, opts)
 					if err != nil {
@@ -497,7 +498,7 @@ func TestBackend(t *testing.T) {
 					t.Parallel()
 					c := &fakeMDContainer{name: "task"}
 					client := &fakeMDClient{container: c, getResult: c, info: &containers.Info{MemTotal: tc.total}, infoErr: tc.err}
-					b := newTestBackend(client)
+					b := newTestBackend(t, client)
 					_, err := b.Launch(t.Context(), nil, &runtime.StartOptions{Harness: harness.Claude})
 					if err == nil || !strings.Contains(err.Error(), "memory") {
 						t.Fatalf("launch error = %v", err)
@@ -515,7 +516,7 @@ func TestBackend(t *testing.T) {
 	t.Run("WatchEvents cancellation closes an idle stream", func(t *testing.T) {
 		t.Parallel()
 		ctx, cancel := context.WithCancel(t.Context())
-		stream, err := newTestBackend(&idleEventsClient{}).WatchEvents(ctx, runtime.EventFilter{})
+		stream, err := newTestBackend(t, &idleEventsClient{}).WatchEvents(ctx, runtime.EventFilter{})
 		if err != nil {
 			cancel()
 			t.Fatal(err)
@@ -527,7 +528,7 @@ func TestBackend(t *testing.T) {
 	})
 	t.Run("WatchStats", func(t *testing.T) {
 		t.Parallel()
-		b := newTestBackend(&statsCapacityClient{})
+		b := newTestBackend(t, &statsCapacityClient{})
 		stream, err := b.WatchStats(t.Context(), []runtime.ID{"docker:task"})
 		if err != nil {
 			t.Fatal(err)
@@ -562,7 +563,7 @@ func TestBackend(t *testing.T) {
 		if err := os.WriteFile(empty, nil, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		b := newTestBackend(&fakeMDClient{getResult: &fileCommandContainer{}})
+		b := newTestBackend(t, &fakeMDClient{getResult: &fileCommandContainer{}})
 		id := runtime.NewID("docker", "file-test")
 		var got []byte
 		count := 0
@@ -618,7 +619,7 @@ func TestBackend(t *testing.T) {
 		if err := os.WriteFile(name, []byte("0123456789"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		b := newTestBackend(&fakeMDClient{getResult: &fileCommandContainer{}})
+		b := newTestBackend(t, &fakeMDClient{getResult: &fileCommandContainer{}})
 		id := runtime.NewID("docker", "file-test")
 		size, err := b.FileSize(t.Context(), id, name)
 		if err != nil || size != 10 {
@@ -653,7 +654,7 @@ func TestBackend(t *testing.T) {
 		if err := os.Symlink(filepath.Join(dir, "a dir"), filepath.Join(dir, "c link")); err != nil {
 			t.Fatal(err)
 		}
-		b := newTestBackend(&fakeMDClient{getResult: &fileCommandContainer{}})
+		b := newTestBackend(t, &fakeMDClient{getResult: &fileCommandContainer{}})
 		id := runtime.NewID("docker", "file-test")
 		entries, truncated, err := b.ReadDir(t.Context(), id, dir)
 		if err != nil || truncated {
@@ -723,7 +724,7 @@ func TestBackend(t *testing.T) {
 		t.Parallel()
 		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 		t.Cleanup(cancel)
-		b := newTestBackend(&fakeMDClient{getResult: &streamCommandContainer{command: "exec yes x"}})
+		b := newTestBackend(t, &fakeMDClient{getResult: &streamCommandContainer{command: "exec yes x"}})
 		count := 0
 		for chunk, err := range b.ReadFile(ctx, runtime.NewID("docker", "file-test"), "/file", 0, -1) {
 			if err != nil || len(chunk) != 64<<10 {
@@ -740,7 +741,7 @@ func TestBackend(t *testing.T) {
 		t.Parallel()
 		ctx, cancel := context.WithCancel(t.Context())
 		t.Cleanup(cancel)
-		b := newTestBackend(&fakeMDClient{getResult: &streamCommandContainer{command: "exec yes x"}})
+		b := newTestBackend(t, &fakeMDClient{getResult: &streamCommandContainer{command: "exec yes x"}})
 		seenErr := false
 		for _, err := range b.ReadFile(ctx, runtime.NewID("docker", "file-test"), "/file", 0, -1) {
 			if err != nil {
@@ -758,7 +759,7 @@ func TestBackend(t *testing.T) {
 	})
 	t.Run("ReadFile late error", func(t *testing.T) {
 		t.Parallel()
-		b := newTestBackend(&fakeMDClient{getResult: &streamCommandContainer{command: "head -c 65536 /dev/zero; head -c 1048576 /dev/zero >&2; printf 'useful diagnostic' >&2; exit 1"}})
+		b := newTestBackend(t, &fakeMDClient{getResult: &streamCommandContainer{command: "head -c 65536 /dev/zero; head -c 1048576 /dev/zero >&2; printf 'useful diagnostic' >&2; exit 1"}})
 		bytesRead := 0
 		seenErr := false
 		for data, err := range b.ReadFile(t.Context(), runtime.NewID("docker", "file-test"), "/file", 0, -1) {
@@ -794,7 +795,7 @@ func TestBackend(t *testing.T) {
 	t.Run("batch disk usage", func(t *testing.T) {
 		t.Parallel()
 		client := &fakeMDClient{diskSizes: map[runtime.InstanceID]int64{"one": 10, "two": 20}}
-		backend := newTestBackend(client)
+		backend := newTestBackend(t, client)
 		usage, err := backend.DiskUsage(t.Context(), []runtime.ID{"docker:one", "docker:two"})
 		if err != nil {
 			t.Fatal(err)
@@ -812,7 +813,7 @@ func TestBackend(t *testing.T) {
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
 			ctr := &fakeMDContainer{name: "ctr-x", vncPort: 5901}
-			b := newTestBackend(&fakeMDClient{container: ctr})
+			b := newTestBackend(t, &fakeMDClient{container: ctr})
 			name, err := b.Launch(t.Context(), nil, &runtime.StartOptions{
 				Metadata: runtime.Metadata{runtime.MetadataTaskID: "task-1"},
 				Harness:  harness.Claude,
@@ -836,7 +837,7 @@ func TestBackend(t *testing.T) {
 		t.Run("error unknown harness", func(t *testing.T) {
 			t.Parallel()
 			fc := &fakeMDClient{}
-			b := newTestBackend(fc)
+			b := newTestBackend(t, fc)
 			_, err := b.Launch(t.Context(), nil, &runtime.StartOptions{Harness: "bogus"})
 			if err == nil {
 				t.Fatal("want error for unknown harness")
@@ -848,7 +849,7 @@ func TestBackend(t *testing.T) {
 		t.Run("error launch failure", func(t *testing.T) {
 			t.Parallel()
 			ctr := &fakeMDContainer{name: "ctr-y", launchErr: errors.New("boom")}
-			b := newTestBackend(&fakeMDClient{container: ctr})
+			b := newTestBackend(t, &fakeMDClient{container: ctr})
 			if _, err := b.Launch(t.Context(), nil, &runtime.StartOptions{Harness: harness.Claude}); err == nil {
 				t.Fatal("want error from container.Launch")
 			}
@@ -865,7 +866,7 @@ func TestBackend(t *testing.T) {
 			{GitRoot: "/home/user/src/genai", Branches: []string{"caic-0"}, ContainerPath: "/home/user/src/genai"},
 		}}
 		fc := &fakeMDClient{getResult: ctr}
-		b := newTestBackend(fc)
+		b := newTestBackend(t, fc)
 		if _, err := b.Diff(t.Context(), "docker:ctr-1", 1, runtime.DiffPatch{Path: "file.txt", Prefix: "genai"}); err != nil {
 			t.Fatalf("Diff: %v", err)
 		}
@@ -990,7 +991,7 @@ func TestBackend(t *testing.T) {
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
 			ctr := &fakeMDContainer{repo: []md.Repo{{ContainerPath: "/repo/one"}, {ContainerPath: "/repo/two"}}}
-			b := newTestBackend(&fakeMDClient{getResult: ctr})
+			b := newTestBackend(t, &fakeMDClient{getResult: ctr})
 			if err := b.RefreshRefs(t.Context(), "docker:ctr-1"); err != nil {
 				t.Fatal(err)
 			}
@@ -1002,7 +1003,7 @@ func TestBackend(t *testing.T) {
 			t.Parallel()
 			syncErr := errors.New("upstream sync failed")
 			ctr := &fakeMDContainer{repo: []md.Repo{{ContainerPath: "/repo/one"}, {ContainerPath: "/repo/two"}}, syncErr: syncErr}
-			b := newTestBackend(&fakeMDClient{getResult: ctr})
+			b := newTestBackend(t, &fakeMDClient{getResult: ctr})
 			err := b.RefreshRefs(t.Context(), "docker:ctr-1")
 			if !errors.Is(err, syncErr) || !strings.Contains(err.Error(), "/repo/one") {
 				t.Fatalf("refresh must surface repository error: %v", err)
@@ -1023,7 +1024,7 @@ func TestBackend(t *testing.T) {
 			{{BranchName: "caic-0", CommitHash: "2222222"}},
 		}}
 		fc := &fakeMDClient{getResult: ctr}
-		b := newTestBackend(fc)
+		b := newTestBackend(t, fc)
 		fetched, err := b.Fetch(t.Context(), "docker:ctr-1", runtime.FetchOpts{Commit: true})
 		if err != nil {
 			t.Fatalf("Fetch: %v", err)
@@ -1059,7 +1060,7 @@ func TestBackend(t *testing.T) {
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
 			ctr := &fakeMDContainer{name: "ctr-x", connectRes: &md.StartResult{TailscaleFQDN: "host.ts.net"}}
-			b := newTestBackend(&fakeMDClient{container: ctr})
+			b := newTestBackend(t, &fakeMDClient{container: ctr})
 			if _, err := b.Launch(t.Context(), nil, &runtime.StartOptions{Harness: harness.Claude}); err != nil {
 				t.Fatalf("Launch: %v", err)
 			}
@@ -1077,7 +1078,7 @@ func TestBackend(t *testing.T) {
 		})
 		t.Run("error no pending", func(t *testing.T) {
 			t.Parallel()
-			b := newTestBackend(&fakeMDClient{})
+			b := newTestBackend(t, &fakeMDClient{})
 			if _, err := b.Connect(t.Context(), "docker:missing", &runtime.StartOptions{Harness: harness.Claude}); err == nil {
 				t.Fatal("want error when no pending container")
 			}
@@ -1088,7 +1089,7 @@ func TestBackend(t *testing.T) {
 		t.Parallel()
 		ctr := &fakeMDContainer{name: "ctr-1"}
 		fc := &fakeMDClient{getResult: ctr}
-		b := newTestBackend(fc)
+		b := newTestBackend(t, fc)
 		if err := b.Stop(t.Context(), "docker:ctr-1"); err != nil {
 			t.Fatalf("Stop: %v", err)
 		}
@@ -1107,7 +1108,7 @@ func TestBackend(t *testing.T) {
 		t.Parallel()
 		ctr := &fakeMDContainer{name: "ctr-1", repo: []md.Repo{{GitRoot: "/repo", Branches: []string{"caic-0"}, ContainerPath: "/repo"}}}
 		fc := &fakeMDClient{getResult: ctr}
-		b := newTestBackend(fc)
+		b := newTestBackend(t, fc)
 		if err := b.Purge(t.Context(), "docker:ctr-1"); err != nil {
 			t.Fatalf("Purge: %v", err)
 		}
@@ -1144,7 +1145,7 @@ func TestBackend(t *testing.T) {
 		runGit("branch", "-D", "caic-0")
 		ctr := &fakeMDContainer{name: "ctr-1", vncPort: 5903, repo: []md.Repo{{GitRoot: dir, Branches: []string{"caic-0"}, ContainerPath: "/repo", DefaultRemote: "upstream", DefaultBranch: "main"}}}
 		fc := &fakeMDClient{getResult: ctr}
-		b := newTestBackend(fc)
+		b := newTestBackend(t, fc)
 		if err := b.Revive(t.Context(), "docker:ctr-1"); err != nil {
 			t.Fatalf("Revive: %v", err)
 		}
@@ -1201,7 +1202,7 @@ func TestBackend(t *testing.T) {
 		// A task working directly on a base branch survives that branch's
 		// deletion both locally and on the remote, e.g. after a merge.
 		voice := &fakeMDContainer{name: "ctr-voice", repo: []md.Repo{{GitRoot: dir, Branches: []string{"voice"}, ContainerPath: "/repo", DefaultRemote: "upstream", DefaultBranch: "voice"}}}
-		bv := newTestBackend(&fakeMDClient{getResult: voice})
+		bv := newTestBackend(t, &fakeMDClient{getResult: voice})
 		if err := bv.Revive(t.Context(), "docker:ctr-voice"); err != nil {
 			t.Fatalf("Revive with deleted base branch: %v", err)
 		}
@@ -1228,7 +1229,7 @@ func TestBackend(t *testing.T) {
 	t.Run("Fork", func(t *testing.T) {
 		t.Parallel()
 		src := &fakeMDContainer{forkResult: &fakeMDContainer{name: "fork-1", vncPort: 5902, repo: []md.Repo{{Branches: []string{"caic-2"}}}}}
-		b := newTestBackend(&fakeMDClient{getResult: src})
+		b := newTestBackend(t, &fakeMDClient{getResult: src})
 		name, conn, err := b.Fork(t.Context(), "docker:src", &runtime.ForkOptions{Harness: harness.Claude})
 		if err != nil {
 			t.Fatalf("Fork: %v", err)
@@ -1260,7 +1261,7 @@ func TestBackend(t *testing.T) {
 	t.Run("Fork extraEnv", func(t *testing.T) {
 		t.Parallel()
 		src := &fakeMDContainer{forkResult: &fakeMDContainer{name: "fork-1"}}
-		b := newTestBackend(&fakeMDClient{getResult: src})
+		b := newTestBackend(t, &fakeMDClient{getResult: src})
 		b.HarnessEnv = map[string][]string{string(harness.Claude): {"FOO=bar"}}
 		_, _, err := b.Fork(t.Context(), "docker:src", &runtime.ForkOptions{
 			Harness:  harness.Claude,
@@ -1288,7 +1289,7 @@ func TestBackend(t *testing.T) {
 	t.Run("VNCPort", func(t *testing.T) {
 		t.Run("valid cached", func(t *testing.T) {
 			t.Parallel()
-			b := newTestBackend(&fakeMDClient{})
+			b := newTestBackend(t, &fakeMDClient{})
 			b.vncPorts["c"] = 4242
 			if got := b.VNCPort(t.Context(), "docker:c"); got != 4242 {
 				t.Errorf("VNCPort = %d, want 4242 (in-memory hit)", got)
@@ -1297,7 +1298,7 @@ func TestBackend(t *testing.T) {
 		t.Run("valid inspect fallback", func(t *testing.T) {
 			t.Parallel()
 			fc := &fakeMDClient{getResult: &fakeMDContainer{vncPort: 5901}}
-			b := newTestBackend(fc)
+			b := newTestBackend(t, fc)
 			if got := b.VNCPort(t.Context(), "docker:c"); got != 5901 {
 				t.Errorf("VNCPort = %d, want 5901", got)
 			}
@@ -1310,7 +1311,7 @@ func TestBackend(t *testing.T) {
 	t.Run("DSHMounts", func(t *testing.T) {
 		t.Parallel()
 		fc := &fakeMDContainer{}
-		b := newTestBackend(&fakeMDClient{})
+		b := newTestBackend(t, &fakeMDClient{})
 		b.HarnessEnv = map[string][]string{"dsh": {"DSH_HOME=/home/user/.dsh"}}
 		opts, err := b.mdStartOpts(fc, &runtime.StartOptions{Harness: harness.Dsh})
 		if err != nil {
@@ -1329,7 +1330,7 @@ func TestBackend(t *testing.T) {
 		fc := &fakeMDContainer{
 			agentMounts: []md.Mount{{HostPath: "/home/user/.claude", ContainerPath: "/home/user/.claude"}},
 		}
-		b := newTestBackend(&fakeMDClient{})
+		b := newTestBackend(t, &fakeMDClient{})
 		b.HarnessEnv = map[string][]string{string(harness.Claude): {"FOO=bar"}}
 		opts, err := b.mdStartOpts(fc, &runtime.StartOptions{
 			Metadata:          runtime.Metadata{runtime.MetadataTaskID: "task-1", runtime.MetadataSmokeRun: "run-token"},
@@ -1394,7 +1395,7 @@ func TestBackend(t *testing.T) {
 			agentMounts: []md.Mount{{HostPath: dir, ContainerPath: dir}},
 			forkResult:  &fakeMDContainer{name: "agy-fork"},
 		}
-		b := newTestBackend(&fakeMDClient{getResult: src})
+		b := newTestBackend(t, &fakeMDClient{getResult: src})
 		opts, err := b.mdStartOpts(src, &runtime.StartOptions{Harness: harness.Antigravity})
 		if err != nil {
 			t.Fatal(err)
@@ -1429,7 +1430,7 @@ func TestBackend(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				src := &fakeMDContainer{forkResult: &fakeMDContainer{name: "fork-1"}}
-				b := newTestBackend(&fakeMDClient{getResult: src})
+				b := newTestBackend(t, &fakeMDClient{getResult: src})
 				opts, err := b.mdStartOpts(src, &runtime.StartOptions{Harness: harness.Claude, MaxCPUs: tc.cpus})
 				if err != nil {
 					t.Fatal(err)
@@ -1517,7 +1518,7 @@ func (*sshCommandContainer) SSHCommand([]string, string) []string {
 
 func TestCommandOutput(t *testing.T) {
 	t.Parallel()
-	b := newTestBackend(nil)
+	b := newTestBackend(t, nil)
 	res, err := b.commandOutput(t.Context(), &sshCommandContainer{name: "md-caic-1"}, "ignored")
 	if err != nil {
 		t.Fatalf("commandOutput() error = %v", err)
@@ -1614,7 +1615,7 @@ func TestRunPrePush(t *testing.T) {
 		}
 		home = t.TempDir()
 		ct := &homeCommandContainer{repo: []md.Repo{{GitRoot: dir, ContainerPath: dir}}, home: home}
-		return newTestBackend(&fakeMDClient{getResult: ct}), dir, commit, home
+		return newTestBackend(t, &fakeMDClient{getResult: ct}), dir, commit, home
 	}
 	dest := func(base string) runtime.PushRefs {
 		return runtime.PushRefs{Remote: "origin", Branch: "task", RemoteCommit: base}
@@ -1715,7 +1716,7 @@ func TestRunPrePush(t *testing.T) {
 		dir := initStatusRepo(t)
 		commit := runTestGitOutput(t, dir, "rev-parse", "HEAD")
 		ct := &homeCommandContainer{repo: []md.Repo{{GitRoot: dir, ContainerPath: dir}}, home: t.TempDir()}
-		b := newTestBackend(&fakeMDClient{getResult: ct})
+		b := newTestBackend(t, &fakeMDClient{getResult: ct})
 		if err := b.RunPrePush(t.Context(), "docker:ctr", 0, commit, dest(commit), nil); err != nil {
 			t.Fatal(err)
 		}
@@ -1795,7 +1796,7 @@ func TestTurnSnapshotBackend(t *testing.T) {
 	t.Run("valid", func(t *testing.T) {
 		t.Parallel()
 		ct := &gitCommandContainer{repo: []md.Repo{{GitRoot: dir, ContainerPath: dir, Branches: []string{"main"}, DefaultRemote: "origin", DefaultBranch: "main"}}, fetchResults: [][]md.FetchedBranch{{{BranchName: "main", CommitHash: tip}}}}
-		backend := newTestBackend(&fakeMDClient{getResult: ct})
+		backend := newTestBackend(t, &fakeMDClient{getResult: ct})
 		measured, err := backend.TurnSnapshot(t.Context(), "docker:ctr", []runtime.FetchedBranch{{RepositoryPath: dir, BranchName: "main", CommitHash: tip}})
 		if err != nil {
 			t.Fatalf("measurement error = %v", err)
@@ -1818,7 +1819,7 @@ func TestTurnSnapshotBackend(t *testing.T) {
 		t.Parallel()
 		fetched := strings.Repeat("f", 40)
 		ct := &gitCommandContainer{repo: []md.Repo{{GitRoot: dir, ContainerPath: dir, Branches: []string{"main"}, DefaultRemote: "origin", DefaultBranch: "main"}}, fetchResults: [][]md.FetchedBranch{{{BranchName: "main", CommitHash: fetched}}}}
-		backend := newTestBackend(&fakeMDClient{getResult: ct})
+		backend := newTestBackend(t, &fakeMDClient{getResult: ct})
 		measured, err := backend.TurnSnapshot(t.Context(), "docker:ctr", []runtime.FetchedBranch{{RepositoryPath: dir, BranchName: "main", CommitHash: tip}})
 		if err == nil {
 			t.Fatal("measurement error = nil, want error")
@@ -1874,7 +1875,7 @@ func BenchmarkReadFile(b *testing.B) {
 			if err := os.WriteFile(path, bytes.Repeat([]byte("x"), tc.size), 0o600); err != nil {
 				b.Fatal(err)
 			}
-			backend := newTestBackend(&fakeMDClient{getResult: &fileCommandContainer{}})
+			backend := newTestBackend(b, &fakeMDClient{getResult: &fileCommandContainer{}})
 			id := runtime.NewID("docker", "file-benchmark")
 			b.ReportAllocs()
 			b.SetBytes(int64(tc.size))
@@ -1926,7 +1927,7 @@ func newSubmoduleBackend(t *testing.T) *submoduleBackendFixture {
 	rootTip := runTestGitOutput(t, root, "rev-parse", "HEAD")
 	previous = append(previous, runtime.FetchedBranch{RepositoryPath: root, BranchName: "main", CommitHash: rootTip})
 	ct := &gitCommandContainer{repo: []md.Repo{{ContainerPath: root, Branches: []string{"main"}, DefaultRemote: "origin", DefaultBranch: "main"}}, modules: modules, fetchResults: [][]md.FetchedBranch{{{BranchName: "main", CommitHash: rootTip}}}}
-	backend := newTestBackend(&fakeMDClient{getResult: ct})
+	backend := newTestBackend(t, &fakeMDClient{getResult: ct})
 
 	return &submoduleBackendFixture{root: root, backend: backend, child: child, childCommit: parent.CommitHash, previous: previous, nested: nested}
 }
@@ -1944,7 +1945,7 @@ func BenchmarkBackend(b *testing.B) {
 					modules = append(modules, &md.Submodule{GitlinkPath: fmt.Sprintf("lib-%d", i), ContainerPath: initStatusRepo(b)})
 				}
 				ct := &gitCommandContainer{repo: []md.Repo{{ContainerPath: root, DefaultRemote: "origin", DefaultBranch: "main"}}, modules: modules}
-				backend := newTestBackend(&fakeMDClient{getResult: ct})
+				backend := newTestBackend(b, &fakeMDClient{getResult: ct})
 				b.ReportAllocs()
 				for b.Loop() {
 					if _, err := backend.CompactRepositoryStatus(b.Context(), "docker:ctr", 0); err != nil {

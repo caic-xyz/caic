@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"math"
 	"os"
 	"os/exec"
@@ -25,6 +24,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/task"
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+	"github.com/caic-xyz/caic/internal/testlog"
 
 	"github.com/klauspost/compress/zstd"
 
@@ -532,7 +532,7 @@ func TestSource(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		loaded, err := taskhistory.NewStore(slog.New(slog.DiscardHandler), taskslog.NewStore(filepath.Dir(path)), backends.Default("", nil)).LoadSource(path)
+		loaded, err := taskhistory.NewStore(testlog.New(t), taskslog.NewStore(filepath.Dir(path)), backends.Default("", nil)).LoadSource(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -901,7 +901,7 @@ func BenchmarkSource(b *testing.B) {
 func benchmarkSource(b *testing.B, path string, appends []string) {
 	resolver := backends.Default("", nil)
 	b.Run("RawReplayBaseline", func(b *testing.B) {
-		loaded, err := taskhistory.NewStore(slog.New(slog.DiscardHandler), taskslog.NewStore(filepath.Dir(path)), backends.Default("", nil)).LoadSource(path)
+		loaded, err := taskhistory.NewStore(testlog.New(b), taskslog.NewStore(filepath.Dir(path)), backends.Default("", nil)).LoadSource(path)
 		if err != nil {
 			b.Fatal(err)
 		}

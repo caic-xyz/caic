@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/caic-xyz/caic/internal/testlog"
 
 	"github.com/caic-xyz/caic/backend/internal/tokens"
 
@@ -49,7 +50,7 @@ func TestPrepareRelay(t *testing.T) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	id := "session with spaces'; printf INJECTED; $(printf SUBSTITUTED)"
 	opts := &Options{
-		Logger:  slog.New(slog.DiscardHandler),
+		Logger:  testlog.New(t),
 		Target:  runtime.ConnectionTarget{SSHHost: "task"},
 		Dir:     "/workspace with spaces",
 		Records: newTestRecords(t, t.Context(), &testLogSink{}, nil),
@@ -197,8 +198,6 @@ func (testWire) ParseOutput(line []byte) ([]Message, error) {
 	return testParseFn(line)
 }
 
-func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
-
 type testLogSink struct {
 	bytes.Buffer
 }
@@ -266,7 +265,7 @@ func TestNewConn(t *testing.T) {
 		if err := owner.AppendMessage(t.Context(), &MetaSessionMessage{SessionID: "session-1"}); err != nil {
 			t.Fatal(err)
 		}
-		conn := NewConn(t.Context(), testLogger(), &closeErrorWriter{}, owner, nil)
+		conn := NewConn(t.Context(), testlog.New(t), &closeErrorWriter{}, owner, nil)
 		if err := conn.SendPrompt(Prompt{Text: "first"}, nil); err != nil {
 			t.Fatal(err)
 		}
@@ -316,7 +315,7 @@ func TestNewConn(t *testing.T) {
 		if err := owner.AppendMessage(t.Context(), &MetaSessionMessage{SessionID: "rejected-session"}); err != nil {
 			t.Fatal(err)
 		}
-		conn := NewConn(t.Context(), testLogger(), &closeErrorWriter{}, owner, nil)
+		conn := NewConn(t.Context(), testlog.New(t), &closeErrorWriter{}, owner, nil)
 		err := conn.RecordInputFailure(Prompt{Text: "rejected"}, io.ErrClosedPipe)
 		if !errors.Is(err, io.ErrClosedPipe) {
 			t.Fatalf("failure = %v", err)
@@ -371,7 +370,7 @@ func TestNewConn(t *testing.T) {
 			t.Parallel()
 			stdinR, stdinW := io.Pipe()
 			logBuf := &testLogSink{}
-			c := NewConn(t.Context(), testLogger(), stdinW, newTestRecords(t, t.Context(), logBuf, nil), nil)
+			c := NewConn(t.Context(), testlog.New(t), stdinW, newTestRecords(t, t.Context(), logBuf, nil), nil)
 
 			payload := []byte(`{"type":"update_environment_variables","variables":{"FOO":"bar"}}` + "\n")
 			got := make([]byte, len(payload))
@@ -409,7 +408,7 @@ func TestNewConn(t *testing.T) {
 			stdinR, stdinW := io.Pipe()
 			_ = stdinR.Close()
 			logBuf := &testLogSink{}
-			c := NewConn(t.Context(), testLogger(), stdinW, newTestRecords(t, t.Context(), logBuf, nil), nil)
+			c := NewConn(t.Context(), testlog.New(t), stdinW, newTestRecords(t, t.Context(), logBuf, nil), nil)
 			if err := c.SendRaw([]byte(`{"type":"test"}` + "\n")); !errors.Is(err, io.ErrClosedPipe) {
 				t.Fatalf("SendRaw = %v, want closed pipe", err)
 			}
@@ -428,7 +427,7 @@ func TestNewConn(t *testing.T) {
 	t.Run("ReadMessages/error_closing_stdin", func(t *testing.T) {
 		t.Parallel()
 		closeErr := errors.New("close stdin")
-		c := NewConn(t.Context(), testLogger(), &closeErrorWriter{err: closeErr}, newTestRecords(t, t.Context(), DiscardLogSink{}, nil), nil)
+		c := NewConn(t.Context(), testlog.New(t), &closeErrorWriter{err: closeErr}, newTestRecords(t, t.Context(), DiscardLogSink{}, nil), nil)
 		if err := c.ReadMessages(io.NopCloser(strings.NewReader("")), nil); !errors.Is(err, closeErr) {
 			t.Fatalf("ReadMessages = %v, want close error", err)
 		}
@@ -437,7 +436,7 @@ func TestNewConn(t *testing.T) {
 		t.Parallel()
 		failure := errors.New("stdout close failed")
 		records := newTestRecords(t, t.Context(), DiscardLogSink{}, nil)
-		conn := NewConn(t.Context(), testLogger(), &closeErrorWriter{}, records, nil)
+		conn := NewConn(t.Context(), testlog.New(t), &closeErrorWriter{}, records, nil)
 		stdout := &closeErrorReader{Reader: strings.NewReader(""), err: errors.Join(os.ErrClosed, failure)}
 		if err := conn.ReadMessages(stdout, nil); !errors.Is(err, failure) {
 			t.Fatalf("ReadMessages = %v, want independent close failure", err)
@@ -449,7 +448,7 @@ func TestNewConn(t *testing.T) {
 		stdin, input := io.Pipe()
 		stdout, output := io.Pipe()
 		registry := &canceledRegistry{started: make(chan struct{})}
-		c := NewConn(ctx, testLogger(), input, newTestRecords(t, ctx, DiscardLogSink{}, nil), registry)
+		c := NewConn(ctx, testlog.New(t), input, newTestRecords(t, ctx, DiscardLogSink{}, nil), registry)
 		read := make(chan error, 1)
 		var workers sync.WaitGroup
 		workers.Go(func() { read <- c.ReadMessages(stdout, nil) })
@@ -471,7 +470,7 @@ func TestNewConn(t *testing.T) {
 		stdout, output := io.Pipe()
 		registry := &canceledRegistry{started: make(chan struct{})}
 		messages := make(chan TimedMessage, 1)
-		c := NewConn(ctx, testLogger(), input, newTestRecords(t, ctx, DiscardLogSink{}, messages), registry)
+		c := NewConn(ctx, testlog.New(t), input, newTestRecords(t, ctx, DiscardLogSink{}, messages), registry)
 		read := make(chan error, 1)
 		var workers sync.WaitGroup
 		workers.Go(func() { read <- c.ReadMessages(stdout, nil) })
@@ -509,7 +508,7 @@ func TestNewConn(t *testing.T) {
 			stdout, output := io.Pipe()
 			sink := &testLogSink{}
 			messages := make(chan TimedMessage, 1)
-			c := NewConn(t.Context(), testLogger(), input, newTestRecords(t, t.Context(), sink, messages), registry)
+			c := NewConn(t.Context(), testlog.New(t), input, newTestRecords(t, t.Context(), sink, messages), registry)
 			read := make(chan error, 1)
 			var workers sync.WaitGroup
 			workers.Go(func() { read <- c.ReadMessages(stdout, nil) })
@@ -552,7 +551,7 @@ func TestNewConn(t *testing.T) {
 		t.Parallel()
 		stdin, input := io.Pipe()
 		stdout, output := io.Pipe()
-		c := NewConn(t.Context(), testLogger(), input, newTestRecords(t, t.Context(), &testLogSink{}, nil), nil)
+		c := NewConn(t.Context(), testlog.New(t), input, newTestRecords(t, t.Context(), &testLogSink{}, nil), nil)
 		read := make(chan error, 1)
 		var workers sync.WaitGroup
 		workers.Go(func() { read <- c.ReadMessages(stdout, nil) })
@@ -651,8 +650,8 @@ func TestSession(t *testing.T) {
 		}
 		stdin, input := io.Pipe()
 		stdout, output := io.Pipe()
-		c := NewConn(ctx, testLogger(), input, newTestRecords(t, ctx, DiscardLogSink{}, nil), nil)
-		s := NewSession(ctx, cmd, c, stdout, testLogger())
+		c := NewConn(ctx, testlog.New(t), input, newTestRecords(t, ctx, DiscardLogSink{}, nil), nil)
+		s := NewSession(ctx, cmd, c, stdout, testlog.New(t))
 		var workers sync.WaitGroup
 		t.Cleanup(func() { cancel(); s.Cancel(); _ = output.Close(); _ = s.Wait(); workers.Wait() })
 		if err := stdin.CloseWithError(io.ErrUnexpectedEOF); err != nil {
@@ -699,7 +698,7 @@ func TestSession(t *testing.T) {
 			t.Cleanup(func() { _ = connStdin.Close(); _ = connStdinW.Close() })
 			ctx, cancel := context.WithCancel(t.Context())
 			t.Cleanup(cancel)
-			s := NewSession(ctx, cmd, NewConn(ctx, testLogger(), connStdinW, newTestRecords(t, ctx, DiscardLogSink{}, make(chan TimedMessage)), nil), stdout, testLogger())
+			s := NewSession(ctx, cmd, NewConn(ctx, testlog.New(t), connStdinW, newTestRecords(t, ctx, DiscardLogSink{}, make(chan TimedMessage)), nil), stdout, testlog.New(t))
 			t.Cleanup(func() { cancel(); s.Cancel(); _ = s.Wait() })
 			return s, cancel, childStdin
 		}
@@ -739,7 +738,7 @@ func TestSession(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			s := NewSession(t.Context(), cmd, NewConn(t.Context(), testLogger(), w, newTestRecords(t, t.Context(), DiscardLogSink{}, make(chan TimedMessage)), nil), stdout, testLogger())
+			s := NewSession(t.Context(), cmd, NewConn(t.Context(), testlog.New(t), w, newTestRecords(t, t.Context(), DiscardLogSink{}, make(chan TimedMessage)), nil), stdout, testlog.New(t))
 			t.Cleanup(func() { s.Cancel(); _ = output.Close(); _ = s.Wait() })
 			got := make(chan []byte, 1)
 			var reader sync.WaitGroup
@@ -764,7 +763,7 @@ func TestSession(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			s := NewSession(ctx, cmd, NewConn(ctx, testLogger(), writer, newTestRecords(t, ctx, DiscardLogSink{}, make(chan TimedMessage)), nil), stdout, testLogger())
+			s := NewSession(ctx, cmd, NewConn(ctx, testlog.New(t), writer, newTestRecords(t, ctx, DiscardLogSink{}, make(chan TimedMessage)), nil), stdout, testlog.New(t))
 			t.Cleanup(func() { cancel(); _ = output.Close(); _ = s.Wait() })
 			result := make(chan error, 1)
 			var stopper sync.WaitGroup
@@ -787,7 +786,7 @@ func TestSession(t *testing.T) {
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}
-		s := NewSession(t.Context(), cmd, NewConn(t.Context(), testLogger(), stdinW, newTestRecords(t, t.Context(), DiscardLogSink{}, msgCh), nil), stdoutR, testLogger())
+		s := NewSession(t.Context(), cmd, NewConn(t.Context(), testlog.New(t), stdinW, newTestRecords(t, t.Context(), DiscardLogSink{}, msgCh), nil), stdoutR, testlog.New(t))
 
 		var workers sync.WaitGroup
 		t.Cleanup(func() { s.Cancel(); _ = s.Wait(); workers.Wait() })
@@ -880,7 +879,7 @@ func TestSession(t *testing.T) {
 				t.Fatal(err)
 			}
 			messages := make(chan TimedMessage, 8)
-			s := NewSession(ctx, cmd, NewConn(ctx, testLogger(), stdin, newTestRecords(t, ctx, rejectedLog{}, messages), nil), stdout, testLogger())
+			s := NewSession(ctx, cmd, NewConn(ctx, testlog.New(t), stdin, newTestRecords(t, ctx, rejectedLog{}, messages), nil), stdout, testlog.New(t))
 			t.Cleanup(func() { cancel(); s.Cancel(); _ = s.Wait() })
 			if err := s.SendPrompt(Prompt{Text: "unrecorded"}); err == nil {
 				t.Fatal("expected append failure")
@@ -905,7 +904,7 @@ func TestSession(t *testing.T) {
 			writer := &stopTestWriter{PipeWriter: pipe, started: started}
 			log := &testLogSink{}
 			msgCh := make(chan TimedMessage, 2)
-			s := NewSession(ctx, cmd, NewConn(ctx, testLogger(), writer, newTestRecords(t, ctx, log, msgCh), nil), stdout, testLogger())
+			s := NewSession(ctx, cmd, NewConn(ctx, testlog.New(t), writer, newTestRecords(t, ctx, log, msgCh), nil), stdout, testlog.New(t))
 			result := make(chan error, 1)
 			var sends sync.WaitGroup
 			sends.Go(func() { result <- s.SendPrompt(Prompt{Text: "follow up"}) })
@@ -1093,7 +1092,7 @@ func TestDirectionalNativeRecords(t *testing.T) {
 		live = append(live, message)
 		return nil
 	}})
-	if err := NewConn(t.Context(), testLogger(), &closeErrorWriter{}, owner, nil).ReadMessages(io.NopCloser(bytes.NewReader(log.Bytes())), nil); err != nil {
+	if err := NewConn(t.Context(), testlog.New(t), &closeErrorWriter{}, owner, nil).ReadMessages(io.NopCloser(bytes.NewReader(log.Bytes())), nil); err != nil {
 		t.Fatal(err)
 	}
 	want := slices.Concat(input.Messages, relay.Messages)
@@ -1309,7 +1308,7 @@ func TestTurnCommitSnapshotReplay(t *testing.T) {
 		producerAt = parsed.ProducerTime
 		return nil
 	}})
-	err = NewConn(t.Context(), testLogger(), &closeErrorWriter{}, owner, nil).ReadMessages(io.NopCloser(strings.NewReader(string(snapshot)+"\n")), nil)
+	err = NewConn(t.Context(), testlog.New(t), &closeErrorWriter{}, owner, nil).ReadMessages(io.NopCloser(strings.NewReader(string(snapshot)+"\n")), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1376,7 +1375,7 @@ func TestReadMessages(t *testing.T) {
 			ch <- m.Message
 			return nil
 		}})
-		if err := NewConn(t.Context(), testLogger(), &closeErrorWriter{}, owner, nil).ReadMessages(io.NopCloser(strings.NewReader(input)), nil); err != nil {
+		if err := NewConn(t.Context(), testlog.New(t), &closeErrorWriter{}, owner, nil).ReadMessages(io.NopCloser(strings.NewReader(input)), nil); err != nil {
 			t.Fatal(err)
 		}
 		close(ch)
@@ -1409,7 +1408,7 @@ func TestReadMessages(t *testing.T) {
 			ch <- m.Message
 			return nil
 		}})
-		if err := NewConn(t.Context(), testLogger(), &closeErrorWriter{}, owner, nil).ReadMessages(io.NopCloser(strings.NewReader(input)), nil); err != nil {
+		if err := NewConn(t.Context(), testlog.New(t), &closeErrorWriter{}, owner, nil).ReadMessages(io.NopCloser(strings.NewReader(input)), nil); err != nil {
 			t.Fatal(err)
 		}
 		close(ch)
@@ -1445,7 +1444,7 @@ func TestReadMessages(t *testing.T) {
 				t.Cleanup(func() { _ = stdinR.Close() })
 				log := &testLogSink{}
 				got := make(chan TimedMessage, 1)
-				conn := NewConn(t.Context(), testLogger(), stdinW, newTestRecords(t, t.Context(), log, got), nil)
+				conn := NewConn(t.Context(), testlog.New(t), stdinW, newTestRecords(t, t.Context(), log, got), nil)
 				err := conn.ReadMessages(io.NopCloser(strings.NewReader(tc.input)), nil)
 				if !errors.Is(err, io.ErrUnexpectedEOF) {
 					t.Fatalf("ReadMessages error = %v, want unexpected EOF", err)
@@ -1460,7 +1459,7 @@ func TestReadMessages(t *testing.T) {
 		t.Parallel()
 		stdout, output := io.Pipe()
 		log := &testLogSink{}
-		conn := NewConn(t.Context(), testLogger(), &closeErrorWriter{}, newTestRecords(t, t.Context(), log, nil), nil)
+		conn := NewConn(t.Context(), testlog.New(t), &closeErrorWriter{}, newTestRecords(t, t.Context(), log, nil), nil)
 		readDone := make(chan error, 1)
 		var workers sync.WaitGroup
 		workers.Go(func() { readDone <- conn.ReadMessages(stdout, nil) })
@@ -1489,7 +1488,7 @@ func TestReadMessages(t *testing.T) {
 		log := &testLogSink{}
 		owner := newTestRecordsWithHandler(t, t.Context(), log, &testMessageParser{}, &testRecordHandler{consumer: t.Context()})
 		input := `{"t":"agent","ts":1.000,"msg":{"text":"` + strings.Repeat("x", 2<<20) + `","bad":}}` + "\n"
-		err := NewConn(t.Context(), testLogger(), &closeErrorWriter{}, owner, nil).ReadMessages(io.NopCloser(strings.NewReader(input)), nil)
+		err := NewConn(t.Context(), testlog.New(t), &closeErrorWriter{}, owner, nil).ReadMessages(io.NopCloser(strings.NewReader(input)), nil)
 		if err == nil || log.Len() != 0 {
 			t.Fatalf("malformed record: error=%v persisted=%d", err, log.Len())
 		}
@@ -1504,7 +1503,7 @@ func TestReadMessages(t *testing.T) {
 			got = append(got, msg)
 			return nil
 		}})
-		err := NewConn(t.Context(), testLogger(), &closeErrorWriter{}, owner, nil).ReadMessages(io.NopCloser(strings.NewReader(`{"t":"agent","time":1.000,"msg":{}}`+"\n")), nil)
+		err := NewConn(t.Context(), testlog.New(t), &closeErrorWriter{}, owner, nil).ReadMessages(io.NopCloser(strings.NewReader(`{"t":"agent","time":1.000,"msg":{}}`+"\n")), nil)
 		if err == nil || log.Len() != 0 || len(got) != 0 {
 			t.Fatalf("err=%v persisted=%d dispatched=%d", err, log.Len(), len(got))
 		}

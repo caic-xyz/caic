@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"iter"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
 	usagedbv1 "github.com/caic-xyz/caic/backend/internal/usagedb/data/v1"
+	"github.com/caic-xyz/caic/internal/testlog"
 	"github.com/maruel/ksid"
 )
 
@@ -147,15 +147,13 @@ func TestStore(t *testing.T) {
 
 func newStore(t *testing.T) (string, *usagedb.Store) {
 	dir := t.TempDir()
-	store, err := usagedb.New(t.Context(), usagedb.Config{Log: testLogger(), Dir: dir})
+	store, err := usagedb.New(t.Context(), usagedb.Config{Log: testlog.New(t), Dir: dir})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	return dir, store
 }
-
-func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 func testRow(day int) usagedbv1.UsageRow {
 	at := time.Date(2026, time.February, day, 10, 0, 0, 0, time.UTC)

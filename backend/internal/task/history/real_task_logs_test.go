@@ -16,6 +16,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/caic-xyz/caic/internal/testlog"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 )
@@ -69,11 +70,11 @@ func TestRealTaskLogCorpus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	paths, err := logPaths(testLogger(), dir, nil, false, time.Time{})
+	paths, err := logPaths(testlog.New(t), dir, nil, false, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
+	tasks, err := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +110,7 @@ func BenchmarkRealTaskLogCorpus(b *testing.B) {
 		// Clear the header cache each iteration to measure the cold scan, the
 		// same way the synthetic settled benchmarks do.
 		clearHeaderCaches(b, dir)
-		if _, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled(); err != nil {
+		if _, err := NewStore(testlog.New(b), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled(); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -218,7 +219,7 @@ func BenchmarkRealTaskLogReplay(b *testing.B) {
 func TestRealTaskLogRecordedResultParity(t *testing.T) {
 	checked := 0
 	for _, c := range realTaskLogColdQueryFixture(t, realTaskLogColdQueryLogs*4) {
-		lt, err := loadLogHeader(testLogger(), c.path, false, resolverForBenchmark())
+		lt, err := loadLogHeader(testlog.New(t), c.path, false, resolverForBenchmark())
 		if err != nil {
 			continue
 		}
@@ -249,7 +250,7 @@ func TestRealTaskLogRecordedResultParity(t *testing.T) {
 // -bench '^BenchmarkRealTaskLogColdQuery$' -benchtime=1x -timeout=30m.
 func BenchmarkRealTaskLogColdQuery(b *testing.B) {
 	for _, c := range realTaskLogColdQueryFixture(b, realTaskLogColdQueryLogs) {
-		lt, err := loadLogHeader(testLogger(), c.path, true, resolverForBenchmark())
+		lt, err := loadLogHeader(testlog.New(b), c.path, true, resolverForBenchmark())
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -258,7 +259,7 @@ func BenchmarkRealTaskLogColdQuery(b *testing.B) {
 			b.Run("header-read", func(b *testing.B) {
 				b.ReportAllocs()
 				for range b.N {
-					if _, err := loadLogHeader(testLogger(), c.path, true, resolverForBenchmark()); err != nil {
+					if _, err := loadLogHeader(testlog.New(b), c.path, true, resolverForBenchmark()); err != nil {
 						b.Fatal(err)
 					}
 				}
@@ -289,7 +290,7 @@ func realTaskLogColdQueryFixture(t testing.TB, limit int) []realTaskLogCandidate
 	}
 	var staged []realTaskLogCandidate
 	for _, c := range largestRealTaskLogs(t, limit*4) {
-		lt, err := loadLogHeader(testLogger(), c.path, false, resolverForBenchmark())
+		lt, err := loadLogHeader(testlog.New(t), c.path, false, resolverForBenchmark())
 		if err != nil || !lt.State.IsTerminal() || lt.LastTrailer == nil || lt.LastTrailer.AgentResult == "" {
 			// The corpus keeps retired log formats the loader rejects.
 			continue

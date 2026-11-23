@@ -31,6 +31,7 @@ import (
 	agentbackends "github.com/caic-xyz/caic/backend/internal/agent/backends"
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun/taskruntest"
+	"github.com/caic-xyz/caic/internal/testlog"
 
 	logdata "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
@@ -144,7 +145,7 @@ func newTestRuntime(t testing.TB, backend testRuntimeBackend) *runtime.Router {
 
 func newTestTaskManager(t testing.TB, cfg taskmgr.Config) *taskmgr.Manager { //nolint:gocritic // Config mirrors New's value bag in tests.
 	if cfg.Log == nil {
-		cfg.Log = slog.New(slog.DiscardHandler)
+		cfg.Log = testlog.New(t)
 	}
 	if cfg.Rollup == nil {
 		cfg.Rollup = task.DiscardRollup{}
@@ -153,7 +154,7 @@ func newTestTaskManager(t testing.TB, cfg taskmgr.Config) *taskmgr.Manager { //n
 		cfg.Backends = agentbackends.Default("", nil)
 	}
 	if cfg.LogStore == nil {
-		cfg.LogStore = taskhistory.NewStore(testLogger(), taskslog.NewStore(t.TempDir()), agentbackends.Default("", nil))
+		cfg.LogStore = taskhistory.NewStore(testlog.New(t), taskslog.NewStore(t.TempDir()), agentbackends.Default("", nil))
 	}
 	if cfg.RuntimeStartTimeout == 0 {
 		cfg.RuntimeStartTimeout = time.Hour
@@ -170,10 +171,8 @@ func newTestTaskManager(t testing.TB, cfg taskmgr.Config) *taskmgr.Manager { //n
 	return m
 }
 
-func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
-
 func newTestUsageRollup(t testing.TB) *usagedb.Store {
-	rollup, err := usagedb.New(t.Context(), usagedb.Config{Log: testLogger(), Dir: t.TempDir()})
+	rollup, err := usagedb.New(t.Context(), usagedb.Config{Log: testlog.New(t), Dir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("usagedb.New: %v", err)
 	}
@@ -186,19 +185,19 @@ func newTestUsageRollup(t testing.TB) *usagedb.Store {
 }
 
 func newTestRouter(t testing.TB, backends map[harness.Name]agent.Backend) *testRouter {
-	checker, err := geoip.NewChecker(t.Context(), testLogger(), "0.0.0.0/0,::/0", "", "")
+	checker, err := geoip.NewChecker(t.Context(), testlog.New(t), "0.0.0.0/0,::/0", "", "")
 	if err != nil {
 		t.Fatalf("geoip.NewChecker: %v", err)
 	}
 	backend := &runtimetest.FakeBackend{}
 	runtimeRouter := newTestRuntime(t, backend)
 	checkoutRegistry := repo.NewRegistry()
-	logStore := taskhistory.NewStore(testLogger(), taskslog.NewStore(t.TempDir()), agentbackends.Default("", nil))
+	logStore := taskhistory.NewStore(testlog.New(t), taskslog.NewStore(t.TempDir()), agentbackends.Default("", nil))
 	taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Backends: backends, Checkouts: checkoutRegistry, LogStore: logStore})
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
-	forgeManager := forgemgr.New(testLogger(), "", "", nil, forgemgr.NoOAuthTokenSource())
-	s, err := New(t.Context(), testLogger(), Dependencies{
+	forgeManager := forgemgr.New(testlog.New(t), "", "", nil, forgemgr.NoOAuthTokenSource())
+	s, err := New(t.Context(), testlog.New(t), Dependencies{
 		Checkouts:    checkoutRegistry,
 		RepoStatus:   repoStatus,
 		Runtimes:     runtimeRouter,
@@ -207,7 +206,7 @@ func newTestRouter(t testing.TB, backends map[harness.Name]agent.Backend) *testR
 		IPGeoChecker: checker,
 		ForgeMgr:     forgeManager,
 		Warnings:     NewWarningStore(taskMgr),
-		CacheSizes:   NewCacheSizeStore(testLogger()),
+		CacheSizes:   NewCacheSizeStore(testlog.New(t)),
 		Metrics:      metrics.NewStore(metrics.Resource{ServiceName: "caic"}),
 		UsageRollup:  newTestUsageRollup(t),
 	})
@@ -221,7 +220,7 @@ func newTestRouter(t testing.TB, backends map[harness.Name]agent.Backend) *testR
 // OAuth tests that need s.oauthServer to be non-nil at construction time.
 // If refreshTokenPath is non-empty, it is used as the OAuth refresh token store.
 func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshTokenPath string, hostPolicy *httpserver.HostPolicy) *testRouter {
-	checker, err := geoip.NewChecker(t.Context(), testLogger(), "0.0.0.0/0,::/0", "", "")
+	checker, err := geoip.NewChecker(t.Context(), testlog.New(t), "0.0.0.0/0,::/0", "", "")
 	if err != nil {
 		t.Fatalf("geoip.NewChecker: %v", err)
 	}
@@ -231,8 +230,8 @@ func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshToken
 	taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Checkouts: checkoutRegistry, OwnerPolicy: authStore})
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
-	forgeManager := forgemgr.New(testLogger(), "", "", nil, forgemgr.NoOAuthTokenSource())
-	s, err := New(t.Context(), testLogger(), Dependencies{
+	forgeManager := forgemgr.New(testlog.New(t), "", "", nil, forgemgr.NoOAuthTokenSource())
+	s, err := New(t.Context(), testlog.New(t), Dependencies{
 		Checkouts:                  checkoutRegistry,
 		RepoStatus:                 repoStatus,
 		Runtimes:                   runtimeRouter,
@@ -241,7 +240,7 @@ func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshToken
 		IPGeoChecker:               checker,
 		ForgeMgr:                   forgeManager,
 		Warnings:                   NewWarningStore(taskMgr),
-		CacheSizes:                 NewCacheSizeStore(testLogger()),
+		CacheSizes:                 NewCacheSizeStore(testlog.New(t)),
 		Metrics:                    metrics.NewStore(metrics.Resource{ServiceName: "caic"}),
 		UsageRollup:                newTestUsageRollup(t),
 		AuthStore:                  authStore,
@@ -280,9 +279,9 @@ func TestNew(t *testing.T) {
 			Runtimes:    runtimeRouter,
 			TaskMgr:     taskMgr,
 			Preferences: newTestPrefs(t),
-			ForgeMgr:    forgemgr.New(testLogger(), "", "", nil, forgemgr.NoOAuthTokenSource()),
+			ForgeMgr:    forgemgr.New(testlog.New(t), "", "", nil, forgemgr.NoOAuthTokenSource()),
 			Warnings:    NewWarningStore(taskMgr),
-			CacheSizes:  NewCacheSizeStore(testLogger()),
+			CacheSizes:  NewCacheSizeStore(testlog.New(t)),
 			Metrics:     metrics.NewStore(metrics.Resource{ServiceName: "caic"}),
 			UsageRollup: newTestUsageRollup(t),
 		}
@@ -290,7 +289,7 @@ func TestNew(t *testing.T) {
 
 	t.Run("missing runtime", func(t *testing.T) {
 		t.Parallel()
-		if _, err := New(t.Context(), testLogger(), Dependencies{}); err == nil {
+		if _, err := New(t.Context(), testlog.New(t), Dependencies{}); err == nil {
 			t.Fatal("New() error = nil, want runtime required")
 		}
 	})
@@ -299,7 +298,7 @@ func TestNew(t *testing.T) {
 		t.Parallel()
 		runtimeRouter := newTestRuntime(t, &runtimetest.FakeBackend{})
 		checkoutRegistry := repo.NewRegistry()
-		_, err := New(t.Context(), testLogger(), Dependencies{
+		_, err := New(t.Context(), testlog.New(t), Dependencies{
 			Runtimes:    runtimeRouter,
 			TaskMgr:     newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Checkouts: checkoutRegistry}),
 			Preferences: newTestPrefs(t),
@@ -314,7 +313,7 @@ func TestNew(t *testing.T) {
 		t.Parallel()
 		runtimeRouter := newTestRuntime(t, &runtimetest.FakeBackend{})
 		checkoutRegistry := repo.NewRegistry()
-		_, err := New(t.Context(), testLogger(), Dependencies{
+		_, err := New(t.Context(), testlog.New(t), Dependencies{
 			Checkouts:   checkoutRegistry,
 			Runtimes:    runtimeRouter,
 			TaskMgr:     newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Checkouts: checkoutRegistry}),
@@ -329,7 +328,7 @@ func TestNew(t *testing.T) {
 		t.Parallel()
 		runtimeRouter := newTestRuntime(t, &runtimetest.FakeBackend{})
 		checkoutRegistry := repo.NewRegistry()
-		_, err := New(t.Context(), testLogger(), Dependencies{
+		_, err := New(t.Context(), testlog.New(t), Dependencies{
 			Checkouts:   checkoutRegistry,
 			RepoStatus:  ci.NewRepoStatusStore(),
 			Runtimes:    runtimeRouter,
@@ -345,7 +344,7 @@ func TestNew(t *testing.T) {
 		t.Parallel()
 		d := validDependencies(t)
 		d.Warnings = nil
-		if _, err := New(t.Context(), testLogger(), d); err == nil || err.Error() != "warning store is required" {
+		if _, err := New(t.Context(), testlog.New(t), d); err == nil || err.Error() != "warning store is required" {
 			t.Fatalf("New() error = %v, want warning store required", err)
 		}
 	})
@@ -354,7 +353,7 @@ func TestNew(t *testing.T) {
 		t.Parallel()
 		d := validDependencies(t)
 		d.CacheSizes = nil
-		if _, err := New(t.Context(), testLogger(), d); err == nil || err.Error() != "cache size store is required" {
+		if _, err := New(t.Context(), testlog.New(t), d); err == nil || err.Error() != "cache size store is required" {
 			t.Fatalf("New() error = %v, want cache size store required", err)
 		}
 	})
@@ -372,7 +371,7 @@ func TestNew(t *testing.T) {
 		d.GitHubOAuth = oauthclient.NewGitHubConfig("client-id", "client-secret", func(*http.Request) string {
 			return "https://caic.example.com/auth/github/callback"
 		})
-		s, err := New(t.Context(), testLogger(), d)
+		s, err := New(t.Context(), testlog.New(t), d)
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
@@ -518,15 +517,15 @@ func testEntries(s *testRouter) []*taskmgr.Entry {
 // settleLogs compresses the terminal plain logs in logDir, moving them to the
 // settled (compressed) form that the per-repo cap applies to.
 func settleLogs(t *testing.T, logDir string) {
-	if err := taskhistory.NewStore(testLogger(), taskslog.NewStore(logDir), agentbackends.Default("", nil)).SettleTerminal(nil); err != nil {
+	if err := taskhistory.NewStore(testlog.New(t), taskslog.NewStore(logDir), agentbackends.Default("", nil)).SettleTerminal(nil); err != nil {
 		t.Fatal(err)
 	}
 }
 
 // loadPurgedTasksForTest reads logs from disk and registers purged tasks via
 // the manager. Replaces the deleted Server.loadPurgedTasks helper.
-func loadPurgedTasksForTest(s *testRouter, logDir string) error {
-	store := taskhistory.NewStore(testLogger(), taskslog.NewStore(logDir), agentbackends.Default("", nil))
+func loadPurgedTasksForTest(tb testing.TB, s *testRouter, logDir string) error {
+	store := taskhistory.NewStore(testlog.New(tb), taskslog.NewStore(logDir), agentbackends.Default("", nil))
 	plain, err := store.LoadUnsettled()
 	if err != nil {
 		return err
@@ -555,7 +554,7 @@ func newCheckoutConstructionTestServer(t *testing.T, root string) checkoutConstr
 	checkoutRegistry := repo.NewRegistry()
 	taskMgr := newTestTaskManager(t, taskmgr.Config{
 		ServerCtx:  t.Context(),
-		LogStore:   taskhistory.NewStore(testLogger(), taskslog.NewStore(logDir), agentbackends.Default("", nil)),
+		LogStore:   taskhistory.NewStore(testlog.New(t), taskslog.NewStore(logDir), agentbackends.Default("", nil)),
 		Runtimes:   runtimeRouter,
 		Backends:   backends,
 		HarnessEnv: harnessEnv,
@@ -563,16 +562,16 @@ func newCheckoutConstructionTestServer(t *testing.T, root string) checkoutConstr
 	})
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
-	s, err := New(t.Context(), testLogger(), Dependencies{
+	s, err := New(t.Context(), testlog.New(t), Dependencies{
 		Checkouts:    checkoutRegistry,
 		CheckoutRoot: root,
 		RepoStatus:   repoStatus,
 		Runtimes:     runtimeRouter,
 		TaskMgr:      taskMgr,
 		Preferences:  prefs,
-		ForgeMgr:     forgemgr.New(testLogger(), "", "", nil, forgemgr.NoOAuthTokenSource()),
+		ForgeMgr:     forgemgr.New(testlog.New(t), "", "", nil, forgemgr.NoOAuthTokenSource()),
 		Warnings:     NewWarningStore(taskMgr),
-		CacheSizes:   NewCacheSizeStore(testLogger()),
+		CacheSizes:   NewCacheSizeStore(testlog.New(t)),
 		Metrics:      metrics.NewStore(metrics.Resource{ServiceName: "caic"}),
 		UsageRollup:  newTestUsageRollup(t),
 	})
@@ -1425,7 +1424,7 @@ func TestSignalProcess(t *testing.T) {
 		insertTestTask(s, tk.ID, tk)
 		backend := &runtimetest.FakeBackend{}
 		processes := &runtimeProcessHandlers{
-			log:      testLogger(),
+			log:      testlog.New(t),
 			taskMgr:  s.taskMgr,
 			runtimes: newTestRuntime(t, backend),
 		}
@@ -1454,7 +1453,7 @@ func TestSignalProcess(t *testing.T) {
 		insertTestTask(s, tk.ID, tk)
 		backend := &runtimetest.FakeBackend{}
 		processes := &runtimeProcessHandlers{
-			log:      testLogger(),
+			log:      testlog.New(t),
 			taskMgr:  s.taskMgr,
 			runtimes: newTestRuntime(t, backend),
 		}
@@ -1558,7 +1557,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		}
 
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
-		if err := loadPurgedTasksForTest(s, logDir); err != nil {
+		if err := loadPurgedTasksForTest(t, s, logDir); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1621,7 +1620,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		}
 
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
-		if err := loadPurgedTasksForTest(s, logDir); err != nil {
+		if err := loadPurgedTasksForTest(t, s, logDir); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1661,7 +1660,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		settleLogs(t, logDir)
 
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
-		if err := loadPurgedTasksForTest(s, logDir); err != nil {
+		if err := loadPurgedTasksForTest(t, s, logDir); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1706,7 +1705,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, result, trailer)
 
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
-		if err := loadPurgedTasksForTest(s, logDir); err != nil {
+		if err := loadPurgedTasksForTest(t, s, logDir); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1769,7 +1768,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "b.jsonl", metaB, trailerB)
 
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
-		if err := loadPurgedTasksForTest(s, logDir); err != nil {
+		if err := loadPurgedTasksForTest(t, s, logDir); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1817,7 +1816,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		t.Parallel()
 		logDir := t.TempDir()
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
-		if err := loadPurgedTasksForTest(s, logDir); err != nil {
+		if err := loadPurgedTasksForTest(t, s, logDir); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1858,7 +1857,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "task.jsonl", lines...)
 
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
-		if err := loadPurgedTasksForTest(s, logDir); err != nil {
+		if err := loadPurgedTasksForTest(t, s, logDir); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1924,7 +1923,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		}
 
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
-		if err := loadPurgedTasksForTest(s, logDir); err != nil {
+		if err := loadPurgedTasksForTest(t, s, logDir); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1979,7 +1978,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "purged.jsonl", meta("purged task"), trailer)
 
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
-		if err := loadPurgedTasksForTest(s, logDir); err != nil {
+		if err := loadPurgedTasksForTest(t, s, logDir); err != nil {
 			t.Fatal(err)
 		}
 
@@ -2015,7 +2014,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "feat.jsonl", meta, trailer)
 
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
-		if err := loadPurgedTasksForTest(s, logDir); err != nil {
+		if err := loadPurgedTasksForTest(t, s, logDir); err != nil {
 			t.Fatal(err)
 		}
 
@@ -2361,7 +2360,7 @@ func TestBuildHandler(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				s := newTestRouter(t, nil)
-				checker, err := geoip.NewChecker(t.Context(), testLogger(), "local", "", "")
+				checker, err := geoip.NewChecker(t.Context(), testlog.New(t), "local", "", "")
 				if err != nil {
 					t.Fatalf("geoip.NewChecker: %v", err)
 				}
@@ -2391,7 +2390,7 @@ func TestBuildHandler(t *testing.T) {
 		var logs bytes.Buffer
 		s.log = slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 		s.trustedProxies = []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")}
-		checker, err := geoip.NewChecker(t.Context(), testLogger(), "local", "", "")
+		checker, err := geoip.NewChecker(t.Context(), testlog.New(t), "local", "", "")
 		if err != nil {
 			t.Fatalf("geoip.NewChecker: %v", err)
 		}

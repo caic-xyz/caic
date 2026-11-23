@@ -14,6 +14,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+	"github.com/caic-xyz/caic/internal/testlog"
 
 	"github.com/maruel/ksid"
 
@@ -75,7 +76,7 @@ func newSettledHistoryTestManager(t *testing.T, logStore *taskhistory.Store) *ta
 	}
 	m, err := taskmgr.New(taskmgr.Config{
 		ServerCtx:           t.Context(),
-		Log:                 slog.New(slog.DiscardHandler),
+		Log:                 testlog.New(t),
 		LogStore:            logStore,
 		Runtimes:            router,
 		Checkouts:           repo.NewRegistry(),

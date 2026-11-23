@@ -15,6 +15,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	auditv1 "github.com/caic-xyz/caic/backend/internal/server/data/audit/v1"
+	"github.com/caic-xyz/caic/internal/testlog"
 )
 
 func TestAuditStore(t *testing.T) {
@@ -31,7 +32,7 @@ func TestAuditStore(t *testing.T) {
 			t.Fatalf("historical event = %+v", e)
 		}
 		path := filepath.Join(t.TempDir(), "audit.jsonl")
-		store := &auditStore{log: testLogger(), path: path}
+		store := &auditStore{log: testlog.New(t), path: path}
 		if err := store.persistLocked(&e); err != nil {
 			t.Fatal(err)
 		}
@@ -53,7 +54,7 @@ func TestAuditStore(t *testing.T) {
 		t.Parallel()
 
 		path := filepath.Join(t.TempDir(), "mcp_audit.jsonl")
-		store := &auditStore{log: testLogger(), path: path}
+		store := &auditStore{log: testlog.New(t), path: path}
 		store.record(t.Context(), &auditv1.Event{Operation: "tools/call", Name: "tasks_list", Decision: "allow", Status: "ok"})
 
 		events := readAuditEvents(t, path)
@@ -81,7 +82,7 @@ func TestAuditStore(t *testing.T) {
 		t.Parallel()
 
 		path := filepath.Join(t.TempDir(), "mcp_audit.jsonl")
-		store := &auditStore{log: testLogger(), path: path}
+		store := &auditStore{log: testlog.New(t), path: path}
 		store.record(t.Context(), &auditv1.Event{Operation: "tools/call", Name: "task_create", Args: auditArgsSummary(json.RawMessage(`{"prompt":"TOKEN=secret"}`)), Decision: "missing required MCP scope: caic:tasks.create", Status: "blocked"})
 
 		events := readAuditEvents(t, path)
@@ -103,7 +104,7 @@ func TestAuditStore(t *testing.T) {
 		if err := os.Mkdir(path, 0o700); err != nil {
 			t.Fatalf("Mkdir: %v", err)
 		}
-		store := &auditStore{log: testLogger(), path: path}
+		store := &auditStore{log: testlog.New(t), path: path}
 		user := &auth.User{ID: "usr_1", Username: "alice"}
 		store.record(auth.NewContext(t.Context(), user), &auditv1.Event{Operation: "resources/read", Name: "caic://tasks", Decision: "allow", Status: "ok"})
 
@@ -138,7 +139,7 @@ func TestAuditStore(t *testing.T) {
 	t.Run("valid task principal is attributed", func(t *testing.T) {
 		t.Parallel()
 
-		store := &auditStore{log: testLogger()}
+		store := &auditStore{log: testlog.New(t)}
 		id := ksid.NewID()
 		ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{TaskID: id, Remote: true})
 		store.record(ctx, &auditv1.Event{Operation: "tools/call", Name: "task_create", Decision: "allow"})

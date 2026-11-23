@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"iter"
-	"log/slog"
 	"reflect"
 	"slices"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+	"github.com/caic-xyz/caic/internal/testlog"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
@@ -45,7 +45,7 @@ func TestRefreshHarnessModels(t *testing.T) {
 			"plain":      &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}},
 		})
 
-		refreshHarnessModels(t.Context(), slog.New(slog.DiscardHandler), cacheDir, router, taskMgr, env, false)
+		refreshHarnessModels(t.Context(), testlog.New(t), cacheDir, router, taskMgr, env, false)
 
 		if runtimeBackend.launches != 1 || runtimeBackend.connects != 1 || runtimeBackend.purges != 1 {
 			t.Fatalf("runtime calls = launch %d connect %d purge %d, want 1 each", runtimeBackend.launches, runtimeBackend.connects, runtimeBackend.purges)
@@ -87,7 +87,7 @@ func TestRefreshHarnessModels(t *testing.T) {
 		}
 		taskMgr := newModelRefreshTestManager(t, router, map[harness.Name]agent.Backend{fetchHarness: fetcher})
 
-		refreshHarnessModels(t.Context(), slog.New(slog.DiscardHandler), cacheDir, router, taskMgr, env, false)
+		refreshHarnessModels(t.Context(), testlog.New(t), cacheDir, router, taskMgr, env, false)
 
 		cached, fresh := agent.OpenHarnessCache(cacheDir+"/harnesses.json").ModelInventory(fetchHarness, agent.APIKeyHash(env[string(fetchHarness)]))
 		if !fresh || len(cached.Models) != 1 || !slices.Equal(cached.Models[0].EffortOptions, []string{"low", "high"}) {
@@ -109,7 +109,7 @@ func TestRefreshHarnessModels(t *testing.T) {
 			fetchHarness: fetcher,
 		})
 
-		refreshHarnessModels(t.Context(), slog.New(slog.DiscardHandler), cacheDir, router, taskMgr, nil, false)
+		refreshHarnessModels(t.Context(), testlog.New(t), cacheDir, router, taskMgr, nil, false)
 
 		if runtimeBackend.launches != 0 {
 			t.Fatalf("launches = %d, want 0 for fresh cache", runtimeBackend.launches)
@@ -131,7 +131,7 @@ func TestRefreshHarnessModels(t *testing.T) {
 		fetcher := &modelFetchBackend{FakeBackend: &agenttest.FakeBackend{}, harness: fetchHarness, inventory: agent.ModelInventory{Models: []agent.Model{{ID: "new-model"}}}}
 		taskMgr := newModelRefreshTestManager(t, router, map[harness.Name]agent.Backend{fetchHarness: fetcher})
 
-		refreshHarnessModels(t.Context(), slog.New(slog.DiscardHandler), cacheDir, router, taskMgr, nil, true)
+		refreshHarnessModels(t.Context(), testlog.New(t), cacheDir, router, taskMgr, nil, true)
 
 		if runtimeBackend.launches != 1 {
 			t.Fatalf("launches = %d, want 1 for forced refresh", runtimeBackend.launches)
@@ -156,7 +156,7 @@ func TestRefreshHarnessModels(t *testing.T) {
 			secondHarness: secondFetcher,
 		})
 		refresher := &HarnessModels{
-			Log:         slog.New(slog.DiscardHandler),
+			Log:         testlog.New(t),
 			CacheDir:    cacheDir,
 			Router:      router,
 			TaskManager: taskMgr,
@@ -200,7 +200,7 @@ func TestRefreshHarnessModels(t *testing.T) {
 			fetchHarness: fetcher,
 		})
 
-		refreshHarnessModels(t.Context(), slog.New(slog.DiscardHandler), cacheDir, router, taskMgr, nil, false)
+		refreshHarnessModels(t.Context(), testlog.New(t), cacheDir, router, taskMgr, nil, false)
 
 		if !slices.Equal(runtimeBackend.purgedIDs, []runtime.ID{"test-runtime:stale-refresh"}) {
 			t.Fatalf("purged IDs = %v, want stale-refresh", runtimeBackend.purgedIDs)
@@ -214,8 +214,8 @@ func TestRefreshHarnessModels(t *testing.T) {
 func newModelRefreshTestManager(t testing.TB, router *runtime.Router, backends map[harness.Name]agent.Backend) *taskmgr.Manager {
 	m, err := taskmgr.New(taskmgr.Config{
 		ServerCtx:           t.Context(),
-		Log:                 slog.New(slog.DiscardHandler),
-		LogStore:            taskhistory.NewStore(testLogger(), taskslog.NewStore(t.TempDir()), agentbackends.Default("", nil)),
+		Log:                 testlog.New(t),
+		LogStore:            taskhistory.NewStore(testlog.New(t), taskslog.NewStore(t.TempDir()), agentbackends.Default("", nil)),
 		Runtimes:            router,
 		Backends:            backends,
 		Checkouts:           repo.NewRegistry(),
@@ -403,7 +403,7 @@ func TestHarnessModels(t *testing.T) {
 					}
 					router := newModelRefreshRouter(t, rt, &modelRefreshInventory{})
 					manager := newModelRefreshTestManager(t, router, map[harness.Name]agent.Backend{harness.Dsh: backend})
-					refresher := &HarnessModels{Log: slog.New(slog.DiscardHandler), CacheDir: cacheDir, Router: router, TaskManager: manager}
+					refresher := &HarnessModels{Log: testlog.New(t), CacheDir: cacheDir, Router: router, TaskManager: manager}
 					err := refresher.Refresh(t.Context(), harness.Dsh)
 					if stage == "empty" {
 						if err == nil || !strings.Contains(err.Error(), "returned no models") {

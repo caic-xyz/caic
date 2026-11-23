@@ -21,6 +21,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/logtest"
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+	"github.com/caic-xyz/caic/internal/testlog"
 )
 
 func TestCheckSafety(t *testing.T) {
@@ -429,7 +430,7 @@ func BenchmarkCheckSafety(b *testing.B) {
 			}
 			runGit("add", ".")
 			runGit("commit", "-m", "fixture")
-			log := slog.New(slog.DiscardHandler)
+			log := testlog.New(b)
 			runtime.GC()
 			var initial runtime.MemStats
 			runtime.ReadMemStats(&initial)

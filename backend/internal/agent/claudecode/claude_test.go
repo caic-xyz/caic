@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -21,6 +20,7 @@ import (
 	"time"
 
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+	"github.com/caic-xyz/caic/internal/testlog"
 
 	"github.com/maruel/genai/providers/claudecode"
 	"github.com/maruel/ksid"
@@ -606,7 +606,7 @@ func TestControlConn(t *testing.T) {
 		stdout, output := io.Pipe()
 		messages := make(chan agent.TimedMessage, 16)
 		owner := claudeProtocolRecords(t, t.Context(), &agenttest.RecordHandler{Messages: messages})
-		c := &controlConn{Conn: agent.NewConn(t.Context(), slog.New(slog.DiscardHandler), stdin, owner, nil)}
+		c := &controlConn{Conn: agent.NewConn(t.Context(), testlog.New(t), stdin, owner, nil)}
 		var workers sync.WaitGroup
 		t.Cleanup(func() { c.Cancel(); _ = output.Close(); _ = stdin.Reader.Close(); workers.Wait() })
 		sent := make(chan error, 1)
@@ -668,7 +668,7 @@ func TestControlConn(t *testing.T) {
 		stdin := agenttest.NewStdinPipe()
 		stdout, output := io.Pipe()
 		owner := claudeProtocolRecords(t, ctx, &agenttest.RecordHandler{})
-		c := &controlConn{Conn: agent.NewConn(ctx, slog.New(slog.DiscardHandler), stdin, owner, executor.Wrap(registry))}
+		c := &controlConn{Conn: agent.NewConn(ctx, testlog.New(t), stdin, owner, executor.Wrap(registry))}
 		var workers sync.WaitGroup
 		t.Cleanup(func() {
 			cancel()
@@ -733,7 +733,7 @@ func TestControlConn(t *testing.T) {
 				observer := &dispatchObserver{started: dispatchStarted}
 				observer.Messages = messages
 				owner := claudeProtocolRecords(t, ctx, observer)
-				c := &controlConn{Conn: agent.NewConn(ctx, slog.New(slog.DiscardHandler), stdin, owner, nil)}
+				c := &controlConn{Conn: agent.NewConn(ctx, testlog.New(t), stdin, owner, nil)}
 				var workers sync.WaitGroup
 				t.Cleanup(func() { cancel(); c.Cancel(); _ = output.Close(); _ = stdin.Reader.Close(); workers.Wait() })
 				sent := make(chan error, 1)
@@ -923,7 +923,7 @@ func TestControlConn(t *testing.T) {
 				stdout, output := io.Pipe()
 				handler := &agenttest.RecordHandler{}
 				owner := claudeProtocolRecords(t, t.Context(), handler)
-				c := &controlConn{Conn: agent.NewConn(t.Context(), slog.New(slog.DiscardHandler), stdin, owner, nil)}
+				c := &controlConn{Conn: agent.NewConn(t.Context(), testlog.New(t), stdin, owner, nil)}
 				var workers sync.WaitGroup
 				t.Cleanup(func() { c.Cancel(); _ = output.Close(); _ = stdin.Reader.Close(); workers.Wait() })
 				read := make(chan error, 1)
@@ -979,7 +979,7 @@ func TestControlConn(t *testing.T) {
 		release := make(chan struct{})
 		released := false
 		writer := &agenttest.GatedWriter{Started: make(chan struct{}), Release: release}
-		log := slog.New(slog.DiscardHandler)
+		log := testlog.New(t)
 		owner := claudeProtocolRecords(t, t.Context(), &agenttest.RecordHandler{})
 		c := &controlConn{Conn: agent.NewConn(t.Context(), log, writer, owner, nil)}
 		stdout, output := io.Pipe()
@@ -1487,7 +1487,7 @@ func BenchmarkRelayIngestion(b *testing.B) {
 		b.Run(fmt.Sprintf("ToolResult%d", size), func(b *testing.B) {
 			line := fmt.Appendf(nil, `{"t":"agent","ts":1.000,"msg":{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":%q}]},"parent_tool_use_id":null,"session_id":"test-session","uuid":"test-uuid"}}`+"\n", strings.Repeat("x", size))
 			owner := claudeProtocolRecords(b, b.Context(), &relayBenchmarkHandler{})
-			logger := slog.New(slog.DiscardHandler)
+			logger := testlog.New(b)
 			b.SetBytes(int64(len(line)))
 			b.ReportAllocs()
 			b.ResetTimer()

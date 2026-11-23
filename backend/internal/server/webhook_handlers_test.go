@@ -29,6 +29,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
+	"github.com/caic-xyz/caic/internal/testlog"
 	"github.com/caic-xyz/caic/metrics"
 )
 
@@ -491,10 +492,10 @@ func minimalRouter(t *testing.T) *testRouter {
 	checkoutRegistry := repo.NewRegistry()
 	taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: ctx, Runtimes: runtimeRouter, Checkouts: checkoutRegistry})
 	repoStatus := ci.NewRepoStatusStore()
-	fm := forgemgr.New(testLogger(), "", "", nil, forgemgr.NoOAuthTokenSource())
+	fm := forgemgr.New(testlog.New(t), "", "", nil, forgemgr.NoOAuthTokenSource())
 	prefs := newTestPrefs(t)
-	ciService := ci.NewService(testLogger(), cache, nil, &testCIBackend{checkouts: checkoutRegistry, repoStatus: repoStatus, taskMgr: taskMgr, forgeMgr: fm, prefs: prefs})
-	s, err := New(ctx, testLogger(), Dependencies{
+	ciService := ci.NewService(testlog.New(t), cache, nil, &testCIBackend{checkouts: checkoutRegistry, repoStatus: repoStatus, taskMgr: taskMgr, forgeMgr: fm, prefs: prefs})
+	s, err := New(ctx, testlog.New(t), Dependencies{
 		Checkouts:   checkoutRegistry,
 		RepoStatus:  repoStatus,
 		Runtimes:    runtimeRouter,
@@ -504,7 +505,7 @@ func minimalRouter(t *testing.T) *testRouter {
 		ForgeMgr:    fm,
 		CIService:   ciService,
 		Warnings:    NewWarningStore(taskMgr),
-		CacheSizes:  NewCacheSizeStore(testLogger()),
+		CacheSizes:  NewCacheSizeStore(testlog.New(t)),
 		Metrics:     metrics.NewStore(metrics.Resource{ServiceName: "caic"}),
 		UsageRollup: newTestUsageRollup(t),
 	})

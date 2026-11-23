@@ -4,7 +4,6 @@ package smoketest
 
 import (
 	"context"
-	"log/slog"
 	"os"
 	"testing"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/gittest"
+	"github.com/caic-xyz/caic/internal/testlog"
 )
 
 func TestFakeBackend(t *testing.T) {
@@ -51,7 +51,7 @@ func TestFakeBackend(t *testing.T) {
 						}
 					})
 					s, err := b.Start(t.Context(), &agent.Options{
-						Logger:  slog.New(slog.DiscardHandler),
+						Logger:  testlog.New(t),
 						Records: records,
 						Model:   model,
 						Effort:  tc.effort,
@@ -102,7 +102,7 @@ func TestFakeBackend(t *testing.T) {
 					}
 				})
 				s, err := b.Start(ctx, &agent.Options{
-					Logger:        slog.New(slog.DiscardHandler),
+					Logger:        testlog.New(t),
 					Records:       records,
 					InitialPrompt: agent.Prompt{Text: "Implement rate limiting for API endpoints"},
 				})

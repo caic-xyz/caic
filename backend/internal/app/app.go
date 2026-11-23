@@ -243,7 +243,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 
 	var voiceBridge *voicertc.Bridge
 	if cfg.Voice.Gateway.Mode == server.VoiceGatewayModeEmbedded {
-		voiceCfg := cfg.Voice.Gateway.Config.Available(ctx)
+		voiceCfg := cfg.Voice.Gateway.Config.Available(ctx, log.With("cmp", "voice"))
 		if err := voiceCfg.Validate(); err != nil {
 			return nil, fmt.Errorf("available voice pipelines: %w", err)
 		}

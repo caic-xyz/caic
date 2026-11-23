@@ -17,6 +17,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/caic-xyz/caic/internal/testlog"
 )
 
 func TestCIHandlers(t *testing.T) {
@@ -165,7 +166,7 @@ func TestCIHandlers(t *testing.T) {
 			t.Parallel()
 
 			s := newTestRouter(t, nil)
-			forgeManager := forgemgr.New(testLogger(), "test-token", "", nil, forgemgr.NoOAuthTokenSource())
+			forgeManager := forgemgr.New(testlog.New(t), "test-token", "", nil, forgemgr.NoOAuthTokenSource())
 			s.forgeMgr = forgeManager
 			s.ciHandlers.forgeMgr = forgeManager
 			checkout := newRouterTestCheckout(t.TempDir())

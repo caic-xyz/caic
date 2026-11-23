@@ -23,6 +23,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/caic-xyz/caic/internal/testlog"
 	"github.com/gomodedev/gomode/autoupdate"
 )
 
@@ -190,7 +191,7 @@ func TestServerHandlers(t *testing.T) {
 		}
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.OpenCode: openCode, harness.Codex: codex})
 		s.serverHandlers.harnessModels = &HarnessModels{
-			Log:         testLogger(),
+			Log:         testlog.New(t),
 			CacheDir:    t.TempDir(),
 			Router:      s.serverHandlers.runtimes,
 			TaskManager: s.taskMgr,
@@ -225,7 +226,7 @@ func TestServerHandlers(t *testing.T) {
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Dsh: backend})
 		cacheDir := t.TempDir()
 		agent.OpenHarnessCache(cacheDir+"/harnesses.json").SetModelInventory(harness.Dsh, cached, "")
-		s.serverHandlers.harnessModels = &HarnessModels{Log: testLogger(), CacheDir: cacheDir, Router: s.serverHandlers.runtimes, TaskManager: s.taskMgr}
+		s.serverHandlers.harnessModels = &HarnessModels{Log: testlog.New(t), CacheDir: cacheDir, Router: s.serverHandlers.runtimes, TaskManager: s.taskMgr}
 		w := httptest.NewRecorder()
 		r := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/server/harnesses/dsh/refresh", strings.NewReader("{}"))
 		s.serverHandlers.routes().ServeHTTP(w, r)
@@ -452,7 +453,7 @@ func TestServerUpdates(t *testing.T) {
 		h := s.serverHandlers
 		h.forgeMgr = forgemgr.New(h.log, "fixture-token", "", nil, forgemgr.NoOAuthTokenSource())
 		u, err := autoupdate.New(autoupdate.Config{
-			Repository: "caic-xyz/caic", CurrentVersion: autoupdate.Version(), Binary: "caic",
+			Repository: "caic-xyz/caic", CurrentVersion: autoupdate.Version(), Binary: "caic", Log: testlog.New(t),
 			ArchiveName: func(string) string { return "caic.tar.gz" },
 			Client: &http.Client{Transport: updateTransport{request: func(*http.Request) (*http.Response, error) {
 				return nil, errors.New("release API unavailable")
@@ -481,7 +482,7 @@ func TestServerUpdates(t *testing.T) {
 		h.version = "0.0.0"
 		var requests atomic.Int32
 		u, err := autoupdate.New(autoupdate.Config{
-			Repository: "caic-xyz/caic", CurrentVersion: autoupdate.Version(), Binary: "caic",
+			Repository: "caic-xyz/caic", CurrentVersion: autoupdate.Version(), Binary: "caic", Log: testlog.New(t),
 			ArchiveName: func(string) string { return "caic.tar.gz" },
 			Client: &http.Client{Transport: updateTransport{request: func(r *http.Request) (*http.Response, error) {
 				requests.Add(1)

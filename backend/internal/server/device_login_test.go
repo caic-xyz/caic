@@ -26,6 +26,7 @@ import (
 	"github.com/gomodedev/gomode/oauth/oauthclient"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
+	"github.com/caic-xyz/caic/internal/testlog"
 )
 
 //nolint:paralleltest // Virtual polling must isolate KSID's process-wide clock.
@@ -55,7 +56,7 @@ func TestDeviceLogin(t *testing.T) {
 		s.authHandlers.githubOAuth = oauthclient.NewGitHubConfig("id", "secret", func(*http.Request) string { return "https://caic.example.com/auth/github/callback" })
 		s.authHandlers.githubAllowedUsers = []string{"approver"}
 		path := filepath.Join(dir, "audit.jsonl")
-		s.deviceLogin = devicelogin.New(&deviceLoginHost{auth: s.authHandlers, audit: &auditStore{log: testLogger(), path: path}})
+		s.deviceLogin = devicelogin.New(testlog.New(t), &deviceLoginHost{auth: s.authHandlers, audit: &auditStore{log: testlog.New(t), path: path}})
 		s.voiceGateway.Mode = VoiceGatewayModeExternal
 		s.voiceGateway.Issuer = "https://caic.example.com"
 		s.voiceGateway.InstanceID = "caic-test"
@@ -135,8 +136,8 @@ func TestDeviceLogin(t *testing.T) {
 				s, _, user, path, credential := setup(t)
 				ctx, cancel := context.WithCancel(t.Context())
 				t.Cleanup(cancel)
-				host := &deviceCompletionHost{Host: &deviceLoginHost{auth: s.authHandlers, audit: &auditStore{log: testLogger(), path: path}}, failure: failure, cancel: cancel, ip: netip.MustParseAddr("192.0.2.4")}
-				core := devicelogin.New(host)
+				host := &deviceCompletionHost{Host: &deviceLoginHost{auth: s.authHandlers, audit: &auditStore{log: testlog.New(t), path: path}}, failure: failure, cancel: cancel, ip: netip.MustParseAddr("192.0.2.4")}
+				core := devicelogin.New(testlog.New(t), host)
 				s.deviceLogin = core
 				mux, err := s.buildHandler()
 				if err != nil {
@@ -493,7 +494,7 @@ func TestDeviceLogin(t *testing.T) {
 	})
 	t.Run("IP origin protection retained", func(t *testing.T) {
 		s, _, _, _, _ := setup(t)
-		checker, err := geoip.NewChecker(t.Context(), testLogger(), "127.0.0.0/8", "", "")
+		checker, err := geoip.NewChecker(t.Context(), testlog.New(t), "127.0.0.0/8", "", "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -507,7 +508,7 @@ func TestDeviceLogin(t *testing.T) {
 		}
 	})
 	t.Run("persistent audit path required", func(t *testing.T) {
-		a := &auditStore{log: testLogger()}
+		a := &auditStore{log: testlog.New(t)}
 		if err := a.recordDeviceLogin(t.Context(), &devicelogin.AuditEvent{Subject: "user", Approved: true}); err == nil {
 			t.Fatal("memory-only audit accepted")
 		}

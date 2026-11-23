@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -22,6 +21,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	"github.com/caic-xyz/caic/internal/testlog"
 )
 
 func TestBackend(t *testing.T) {
@@ -30,7 +30,7 @@ func TestBackend(t *testing.T) {
 		wire, records := protocolRecords(t, t.Context(), sink, &agenttest.RecordHandler{})
 		wire.threadID = "thread-1"
 		stdin := agenttest.NewStdinPipe()
-		conn := agent.NewConn(t.Context(), slog.New(slog.DiscardHandler), stdin, records, nil)
+		conn := agent.NewConn(t.Context(), testlog.New(t), stdin, records, nil)
 		lines := make(chan string, 2)
 		var workers sync.WaitGroup
 		workers.Go(func() {
@@ -149,7 +149,7 @@ exit 0
 		t.Setenv("CAIC_CODEX_ARGV", path)
 		_, records := protocolRecords(t, t.Context(), &agenttest.LogSink{}, &agenttest.RecordHandler{})
 		_, err := New("", nil).Start(t.Context(), &agent.Options{
-			Logger:  slog.New(slog.DiscardHandler),
+			Logger:  testlog.New(t),
 			Target:  runtime.ConnectionTarget{SSHHost: "task"},
 			Dir:     "/workspace",
 			Records: records,

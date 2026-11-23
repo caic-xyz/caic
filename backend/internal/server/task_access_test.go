@@ -5,7 +5,6 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,6 +17,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
+	"github.com/caic-xyz/caic/internal/testlog"
 	"github.com/gomodedev/gomode/mcp"
 )
 
@@ -157,7 +157,7 @@ func TestTaskAccessTransportMatrix(t *testing.T) {
 		t.Parallel()
 		streamCtx, cancel := context.WithCancel(ctx)
 		cancel()
-		streamCtx = context.WithValue(streamCtx, httpLoggerKey{}, slog.New(slog.DiscardHandler))
+		streamCtx = context.WithValue(streamCtx, httpLoggerKey{}, testlog.New(t))
 		req := httptest.NewRequestWithContext(streamCtx, http.MethodGet, "/tasks/events", nil)
 		w := httptest.NewRecorder()
 		testTaskHandlers(s).routes().ServeHTTP(w, req)

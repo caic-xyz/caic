@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -22,6 +21,7 @@ import (
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+	"github.com/caic-xyz/caic/internal/testlog"
 	"github.com/gomodedev/gomode/mcp"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -68,7 +68,7 @@ func TestLocalUsage(t *testing.T) {
 				if err := os.WriteFile(filepath.Join(dir, live.ID.String()+".jsonl"), append(append(header, '\n'), append(encoded, '\n')...), 0o600); err != nil {
 					t.Fatal(err)
 				}
-				logs := taskhistory.NewStore(slog.New(slog.DiscardHandler), taskslog.NewStore(dir), backends.Default("", nil))
+				logs := taskhistory.NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil))
 				for _, phase := range []string{"live", "terminal", "cold", "cached"} {
 					t.Run(phase, func(t *testing.T) { //nolint:paralleltest // Ordered cold/cache reloads exercise one retained task.
 						s := newTestRouter(t, nil)

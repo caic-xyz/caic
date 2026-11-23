@@ -15,6 +15,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/caic-xyz/caic/internal/testlog"
 )
 
 type imageWarmerFake struct {
@@ -60,7 +61,7 @@ func TestImageRefresh(t *testing.T) {
 		close(podman.release)
 	})
 	r := &ImageRefresh{
-		Log: testLogger(), Prefs: prefs,
+		Log: testlog.New(t), Prefs: prefs,
 		Clients: map[string]ImageWarmer{"docker": docker, "podman": podman},
 	}
 	status, err := r.Start(t.Context(), "alice", "docker")
@@ -119,7 +120,7 @@ func TestImageRefresh(t *testing.T) {
 		docker := &imageWarmerFake{opts: make(chan md.WarmupOpts, 1), release: make(chan error, 1)}
 		podman := &imageWarmerFake{opts: make(chan md.WarmupOpts, 1), release: make(chan error, 1)}
 		scheduler := &ImageRefresh{
-			Log: testLogger(), Prefs: prefs,
+			Log: testlog.New(t), Prefs: prefs,
 			Clients: map[string]ImageWarmer{"docker": docker, "podman": podman},
 		}
 		group, runCtx := errgroup.WithContext(ctx)
@@ -157,7 +158,7 @@ func TestImageRefreshShutdown(t *testing.T) {
 		t.Fatal(err)
 	}
 	warmer := &imageWarmerFake{opts: make(chan md.WarmupOpts, 1), release: make(chan error)}
-	r := &ImageRefresh{Log: testLogger(), Prefs: prefs, Clients: map[string]ImageWarmer{"docker": warmer}}
+	r := &ImageRefresh{Log: testlog.New(t), Prefs: prefs, Clients: map[string]ImageWarmer{"docker": warmer}}
 	ctx, cancel := context.WithCancel(t.Context())
 	group, ctx := errgroup.WithContext(ctx)
 	group.Go(func() error { return r.Run(ctx) })

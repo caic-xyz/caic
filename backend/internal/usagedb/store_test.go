@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"maps"
 	"math"
 	"os"
@@ -22,20 +21,17 @@ import (
 	"strconv"
 
 	usagedbv1 "github.com/caic-xyz/caic/backend/internal/usagedb/data/v1"
+	"github.com/caic-xyz/caic/internal/testlog"
 	"github.com/maruel/ksid"
 )
 
 func newTestStore(t *testing.T, dir string) *Store {
-	s, err := New(t.Context(), Config{Log: testLogger(), Dir: dir})
+	s, err := New(t.Context(), Config{Log: testlog.New(t), Dir: dir})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
 	return s
-}
-
-func testLogger() *slog.Logger {
-	return slog.New(slog.DiscardHandler)
 }
 
 func testMeta(id ksid.ID) TaskMeta {
@@ -436,7 +432,7 @@ func TestStore(t *testing.T) {
 			}
 
 			// The recovered dedupe state must suppress an unchanged status.
-			s2, err := New(t.Context(), Config{Log: testLogger(), Dir: dir})
+			s2, err := New(t.Context(), Config{Log: testlog.New(t), Dir: dir})
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
@@ -538,7 +534,7 @@ func TestStore(t *testing.T) {
 				t.Fatalf("Close: %v", err)
 			}
 
-			s2, err := New(t.Context(), Config{Log: testLogger(), Dir: dir})
+			s2, err := New(t.Context(), Config{Log: testlog.New(t), Dir: dir})
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
@@ -908,7 +904,7 @@ func TestNew(t *testing.T) {
 		}
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
-		s, err := New(ctx, Config{Log: testLogger(), Dir: dir})
+		s, err := New(ctx, Config{Log: testlog.New(t), Dir: dir})
 		if s != nil || !errors.Is(err, context.Canceled) {
 			t.Fatalf("New canceled = %v, %v", s, err)
 		}
@@ -959,7 +955,7 @@ func BenchmarkObserveTurnFlush(b *testing.B) {
 	const day = "2030-02-05" // Future day prevents maintenance from sealing the active file.
 	at := time.Date(2030, time.February, 5, 10, 0, 0, 0, time.UTC)
 	dir := b.TempDir()
-	s, err := New(b.Context(), Config{Log: testLogger(), Dir: dir})
+	s, err := New(b.Context(), Config{Log: testlog.New(b), Dir: dir})
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -1054,7 +1050,7 @@ func BenchmarkBackfillMissingCosts(b *testing.B) {
 		if err := os.WriteFile(filepath.Join(dir, day+".jsonl"), fixture.Bytes(), 0o600); err != nil {
 			b.Fatal(err)
 		}
-		s, err := New(b.Context(), Config{Log: testLogger(), Dir: dir})
+		s, err := New(b.Context(), Config{Log: testlog.New(b), Dir: dir})
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -1095,7 +1091,7 @@ func BenchmarkBackfillMissingCostsLiveHeap(b *testing.B) {
 				if err := f.Close(); err != nil {
 					b.Fatal(err)
 				}
-				s, err := New(b.Context(), Config{Log: testLogger(), Dir: dir})
+				s, err := New(b.Context(), Config{Log: testlog.New(b), Dir: dir})
 				if err != nil {
 					b.Fatal(err)
 				}

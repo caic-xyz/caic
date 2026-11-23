@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
+	"github.com/caic-xyz/caic/internal/testlog"
 
 	"github.com/caic-xyz/caic/backend/internal/tokens"
 
@@ -128,7 +129,7 @@ func TestHeaderCache(t *testing.T) {
 				t.Parallel()
 				path := writePhysicalTestLog(t, false,
 					`{"t":"caic_meta","version":3,"harness":"dsh","prompt":"test"}`, tc.result)
-				cold, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
+				cold, err := loadLogHeader(testlog.New(t), path, true, backends.Default("", nil))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -159,7 +160,7 @@ func TestHeaderCache(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				path := writePhysicalTestLog(t, false, `{"t":"caic_meta","version":3,"harness":"claude","prompt":"proof"}`, `{"t":"agent","ts":1.000,"msg":`+tc.native+`}`, tc.trailer)
-				cold, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
+				cold, err := loadLogHeader(testlog.New(t), path, true, backends.Default("", nil))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -195,7 +196,7 @@ func TestHeaderCache(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, source := range []string{"rebuild", "cache"} {
-			loaded, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
+			loaded, err := loadLogHeader(testlog.New(t), path, true, backends.Default("", nil))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -354,7 +355,7 @@ func TestHeaderCache(t *testing.T) {
 					if _, ok := readHeaderCache(path); ok {
 						t.Fatal("cache accepted invalid header")
 					}
-					got, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
+					got, err := loadLogHeader(testlog.New(t), path, true, backends.Default("", nil))
 					if err != nil || got.Prompt != "rebuild" {
 						t.Fatalf("rebuild = %+v, %v", got, err)
 					}

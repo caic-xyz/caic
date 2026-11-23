@@ -33,6 +33,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun/taskruntest"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/caic-xyz/caic/internal/testlog"
 )
 
 func TestTaskInfoCompareWarnings(t *testing.T) {
@@ -514,9 +515,9 @@ func newGatedInputSession(t *testing.T, tk *taskrun.Task, wireFactory func() age
 	r := &taskrun.AgentRuntime{
 		OwnerPolicy:      policy,
 		Backends:         agent.Backends{tk.Harness: backend},
-		LogStore:         taskhistory.NewStore(testLogger(), taskslog.NewStore(t.TempDir()), backends.Default("", nil)),
+		LogStore:         taskhistory.NewStore(testlog.New(t), taskslog.NewStore(t.TempDir()), backends.Default("", nil)),
 		LogPath:          &taskslog.Path{},
-		Log:              testLogger(),
+		Log:              testlog.New(t),
 		NotifyTaskChange: func() {},
 	}
 	tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "fixture"), runtime.ConnectionTarget{SSHHost: "fixture"}, "", "", 0)

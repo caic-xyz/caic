@@ -269,13 +269,14 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (_ *Router, retE
 		ipgeoChecker:     d.IPGeoChecker,
 		trustedProxies:   slices.Clone(d.TrustedProxies),
 	}
-	s.deviceLogin = devicelogin.New(&deviceLoginHost{auth: s.authHandlers, audit: audit})
+	s.deviceLogin = devicelogin.New(s.log.With("cmp", "devicelogin"), &deviceLoginHost{auth: s.authHandlers, audit: audit})
 	svc.log = s.log.With("handler", "tasks")
 
 	// OAuth server — only when auth and an immutable issuer are configured.
 	if d.AuthStore != nil && d.OAuthIssuer != "" {
 		var err error
 		s.oauthServer, err = oauthserver.NewServer(oauthserver.ServerConfig{
+			Log:                     s.log.With("cmp", "oauth"),
 			KeyPEM:                  d.OAuthPrivateKeyPEM,
 			KeyID:                   d.OAuthKeyID,
 			Issuer:                  d.OAuthIssuer,
@@ -336,6 +337,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (_ *Router, retE
 	}
 	s.TaskMCPScoper = registry
 	s.mcpHandlers.protocol = &mcp.Handler{
+		Log:        s.log.With("cmp", "mcp"),
 		Registry:   registry,
 		Sessions:   mcp.NewSessionStore(mcpSessionOwner),
 		ServerInfo: mcp.Implementation{Name: "caic", Title: "caic", Version: d.Version},
@@ -436,7 +438,7 @@ func (r *Router) buildAPIHandler() http.Handler {
 	// The embedded gateway answers only when caic owns a bridge. An external or
 	// disabled gateway has no routes here.
 	if r.voiceBridge != nil {
-		gateway := voicegateway.NewEmbeddedHandler(func() voicegateway.MediaBridge { return r.voiceBridge }, r.voiceBridge)
+		gateway := voicegateway.NewEmbeddedHandler(r.log.With("cmp", "voicegateway"), func() voicegateway.MediaBridge { return r.voiceBridge }, r.voiceBridge)
 		for _, version := range voiceapi.ProtocolVersions() {
 			mountPrefix(apiMux, "", "/api/voicegateway/"+version.String(), gateway)
 		}

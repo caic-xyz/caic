@@ -16,6 +16,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
 	usagedbv1 "github.com/caic-xyz/caic/backend/internal/usagedb/data/v1"
+	"github.com/caic-xyz/caic/internal/testlog"
 	"github.com/maruel/ksid"
 )
 
@@ -417,7 +418,7 @@ func TestTaskRollupResume(t *testing.T) {
 }
 
 func newRollupStore(t *testing.T, dir string) *usagedb.Store {
-	s, err := usagedb.New(t.Context(), usagedb.Config{Log: testLogger(), Dir: dir})
+	s, err := usagedb.New(t.Context(), usagedb.Config{Log: testlog.New(t), Dir: dir})
 	if err != nil {
 		t.Fatalf("usagedb.New: %v", err)
 	}

@@ -31,6 +31,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun/taskruntest"
+	"github.com/caic-xyz/caic/internal/testlog"
 	"github.com/gomodedev/gomode/sse"
 	"github.com/maruel/ksid"
 )
@@ -73,7 +74,7 @@ func TestWriteError(t *testing.T) {
 }
 
 func testHTTPContext(t *testing.T) context.Context {
-	return context.WithValue(t.Context(), httpLoggerKey{}, slog.New(slog.DiscardHandler))
+	return context.WithValue(t.Context(), httpLoggerKey{}, testlog.New(t))
 }
 
 type deadlineResponseWriter struct {
@@ -707,7 +708,7 @@ func BenchmarkReadAndDecodeBody(b *testing.B) {
 	for _, size := range []int{1024, 1 << 20, maxJSONRequestBytes - 1024} {
 		b.Run(fmt.Sprintf("Bytes%d", size), func(b *testing.B) {
 			body := requestBodyFixture(size)
-			ctx := context.WithValue(b.Context(), httpLoggerKey{}, slog.New(slog.DiscardHandler))
+			ctx := context.WithValue(b.Context(), httpLoggerKey{}, testlog.New(b))
 			b.ReportAllocs()
 			b.SetBytes(int64(len(body)))
 			b.ResetTimer()

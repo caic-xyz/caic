@@ -12,6 +12,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/caic-xyz/caic/internal/testlog"
 )
 
 func TestNativeMetadataParity(t *testing.T) {
@@ -83,7 +84,7 @@ func TestNativeMetadataParity(t *testing.T) {
 							t.Fatal(err)
 						}
 						resolver := backends.Default("", nil)
-						store := NewStore(testLogger(), taskslog.NewStore(filepath.Dir(path)), resolver)
+						store := NewStore(testlog.New(t), taskslog.NewStore(filepath.Dir(path)), resolver)
 						for attempt := range 2 {
 							var inventory []*LoadedTask
 							var err error
@@ -105,7 +106,7 @@ func TestNativeMetadataParity(t *testing.T) {
 							if _, ok := readHeaderCache(path); !ok {
 								t.Fatal("terminal projection was not cached")
 							}
-							source, err := NewStore(testLogger(), taskslog.NewStore(filepath.Dir(path)), resolver).LoadSource(path)
+							source, err := NewStore(testlog.New(t), taskslog.NewStore(filepath.Dir(path)), resolver).LoadSource(path)
 							if err != nil {
 								t.Fatal(err)
 							}

@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"math"
 	"os"
 	"os/exec"
@@ -25,6 +24,7 @@ import (
 	"unicode/utf8"
 
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+	"github.com/caic-xyz/caic/internal/testlog"
 
 	"github.com/caic-xyz/caic/backend/internal/tokens"
 	"github.com/klauspost/compress/zstd"
@@ -60,7 +60,7 @@ func (taskInputWriter) Close() error                  { return nil }
 // mustTaskRun installs the same configured recording owner used before startup.
 func mustTaskRun(t *testing.T, tk *Task) (*AgentRuntime, *Run) {
 	bs := backends.Default("", nil)
-	r := &AgentRuntime{Backends: bs, LogStore: taskhistory.NewStore(testLogger(), taskslog.NewStore(t.TempDir()), bs), LogPath: &taskslog.Path{}, Log: testLogger(), NotifyTaskChange: func() {}}
+	r := &AgentRuntime{Backends: bs, LogStore: taskhistory.NewStore(testlog.New(t), taskslog.NewStore(t.TempDir()), bs), LogPath: &taskslog.Path{}, Log: testlog.New(t), NotifyTaskChange: func() {}}
 	run, err := r.beginRun(t.Context(), tk, false, false)
 	if err != nil {
 		t.Fatal(err)
@@ -85,8 +85,6 @@ func taskNative(ctx context.Context, records *agent.Records, native string) erro
 func addTaskMessage(t *Task, m agent.Message) {
 	t.addParsedMessage(agent.TimedMessage{Message: m})
 }
-
-func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 type titleSequenceProvider struct {
 	genai.Provider
@@ -145,7 +143,7 @@ func BenchmarkTask(b *testing.B) {
 				tk.SeedTimelineParts(nil, agenttest.TimedMessages(history), nil)
 				p := &titleBenchmarkProvider{}
 				tk.Provider = p
-				log := testLogger()
+				log := testlog.New(b)
 				b.ReportAllocs()
 				b.ResetTimer()
 				for b.Loop() {
@@ -441,10 +439,10 @@ func TestTask(t *testing.T) {
 			tk.Provider = p
 			var work sync.WaitGroup
 			work.Go(func() {
-				tk.GenerateTitle(t.Context(), testLogger(), func() {})
+				tk.GenerateTitle(t.Context(), testlog.New(t), func() {})
 			})
 			<-p.started
-			tk.GenerateTitle(t.Context(), testLogger(), func() {})
+			tk.GenerateTitle(t.Context(), testlog.New(t), func() {})
 			close(p.release)
 			work.Wait()
 			if got := tk.Title(); got != "Newer title" {
@@ -467,7 +465,7 @@ func TestTask(t *testing.T) {
 			tk.SetTitle("Current title")
 			p := &titleSequenceProvider{replies: []string{"Recent subject"}}
 			tk.Provider = p
-			tk.GenerateTitle(t.Context(), testLogger(), func() {})
+			tk.GenerateTitle(t.Context(), testlog.New(t), func() {})
 			input := p.requests[0][0].String()
 			for _, obsolete := range []string{"obsolete original subject", "prompt-01", "prompt-02", "answer-01", "answer-02", "child activity"} {
 				if strings.Contains(input, obsolete) {
@@ -493,7 +491,7 @@ func TestTask(t *testing.T) {
 			tk.SeedTimelineParts(nil, agenttest.TimedMessages(history), nil)
 			p := &titleSequenceProvider{replies: []string{"Short title"}}
 			tk.Provider = p
-			tk.GenerateTitle(t.Context(), testLogger(), func() {})
+			tk.GenerateTitle(t.Context(), testlog.New(t), func() {})
 			input := p.requests[0][0].String()
 			if len(input) > 50000 || !utf8.ValidString(input) {
 				t.Fatalf("input bytes = %d, valid UTF-8 = %v", len(input), utf8.ValidString(input))
@@ -508,7 +506,7 @@ func TestTask(t *testing.T) {
 					tk.SetTitle("Previous title")
 					p := &titleSequenceProvider{replies: replies}
 					tk.Provider = p
-					tk.GenerateTitle(t.Context(), testLogger(), func() {})
+					tk.GenerateTitle(t.Context(), testlog.New(t), func() {})
 					if got := tk.Title(); got != "Previous title" {
 						t.Fatalf("Title = %q after provider error", got)
 					}
@@ -537,7 +535,7 @@ func TestTask(t *testing.T) {
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 				p := &titleSequenceProvider{replies: tc.replies}
 				tk.Provider = p
-				tk.GenerateTitle(t.Context(), testLogger(), func() {})
+				tk.GenerateTitle(t.Context(), testlog.New(t), func() {})
 				if got := tk.Title(); got != tc.want || !utf8.ValidString(got) {
 					t.Fatalf("Title = %q, want %q", got, tc.want)
 				}
@@ -756,7 +754,7 @@ func TestTask(t *testing.T) {
 			t.Run(fmt.Sprintf("compressed=%t", compressed), func(t *testing.T) {
 				t.Parallel()
 				dir := t.TempDir()
-				store := taskhistory.NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil))
+				store := taskhistory.NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil))
 				id := ksid.NewID()
 				name := id.String() + "-metadata.jsonl"
 				if compressed {
@@ -1349,7 +1347,7 @@ func TestTask(t *testing.T) {
 					if err := cmd.Start(); err != nil {
 						t.Fatal(err)
 					}
-					s := agent.NewSession(ctx, cmd, agent.NewConn(ctx, testLogger(), writer, run.records, nil), stdout, testLogger())
+					s := agent.NewSession(ctx, cmd, agent.NewConn(ctx, testlog.New(t), writer, run.records, nil), stdout, testlog.New(t))
 					t.Cleanup(func() { cancel(); _ = s.Wait() })
 					tk.AttachSession(&SessionHandle{Session: s, Run: run})
 					if err := tk.SendInput(ctx, agent.Prompt{Text: "follow up"}); !errors.Is(err, io.ErrUnexpectedEOF) {
@@ -1384,7 +1382,7 @@ func TestTask(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			s := agent.NewSession(ctx, cmd, agent.NewConn(ctx, testLogger(), writer, run.records, nil), stdout, testLogger())
+			s := agent.NewSession(ctx, cmd, agent.NewConn(ctx, testlog.New(t), writer, run.records, nil), stdout, testlog.New(t))
 			t.Cleanup(func() { cancel(); _ = s.Wait() })
 			tk.AttachSession(&SessionHandle{Session: s, Run: run})
 			if err := tk.SendInput(ctx, agent.Prompt{Text: "follow up"}); !errors.Is(err, io.ErrUnexpectedEOF) {
@@ -1418,7 +1416,7 @@ func TestTask(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			s := agent.NewSession(ctx, cmd, agent.NewConn(ctx, testLogger(), writer, run.records, nil), stdout, testLogger())
+			s := agent.NewSession(ctx, cmd, agent.NewConn(ctx, testlog.New(t), writer, run.records, nil), stdout, testlog.New(t))
 			t.Cleanup(func() { cancel(); _ = s.Wait() })
 			tk.AttachSession(&SessionHandle{Session: s, Run: run})
 			if err := tk.SendInput(ctx, agent.Prompt{Text: "follow up"}); err != nil {
@@ -1456,7 +1454,7 @@ func TestTask(t *testing.T) {
 				t.Fatal(err)
 			}
 			writer := taskInputWriter(func([]byte) (int, error) { return 0, sendErr })
-			s := agent.NewSession(ctx, cmd, agent.NewConn(ctx, testLogger(), writer, run.records, nil), stdout, testLogger())
+			s := agent.NewSession(ctx, cmd, agent.NewConn(ctx, testlog.New(t), writer, run.records, nil), stdout, testlog.New(t))
 			t.Cleanup(func() { cancel(); _ = s.Wait() })
 			tk.AttachSession(&SessionHandle{Session: s, Run: run})
 			if err := tk.SendInput(ctx, agent.Prompt{Text: "follow up"}); !errors.Is(err, sendErr) {
@@ -1527,7 +1525,7 @@ func TestTask(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, run := mustTaskRun(t, tk)
-			s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), testLogger(), stdin, run.records, nil), stdout, testLogger())
+			s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), testlog.New(t), stdin, run.records, nil), stdout, testlog.New(t))
 			tk.AttachSession(&SessionHandle{Session: s, Run: run})
 			t.Cleanup(func() { cmdCancel(); _ = s.Wait() })
 
@@ -1635,7 +1633,7 @@ func TestTask(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, run := mustTaskRun(t, tk)
-			s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), testLogger(), stdin, run.records, nil), stdout, testLogger())
+			s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), testlog.New(t), stdin, run.records, nil), stdout, testlog.New(t))
 			tk.AttachSession(&SessionHandle{Session: s, Run: run})
 			t.Cleanup(func() { cmdCancel(); _ = s.Wait() })
 
@@ -1695,7 +1693,7 @@ func TestTask(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, run := mustTaskRun(t, tk)
-			s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), testLogger(), stdin, run.records, nil), stdout, testLogger())
+			s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), testlog.New(t), stdin, run.records, nil), stdout, testlog.New(t))
 			<-s.Done()
 			tk.AttachSession(&SessionHandle{Session: s, Run: run})
 			err = tk.SendInput(t.Context(), agent.Prompt{Text: "hello"})
@@ -1731,7 +1729,7 @@ func TestTask(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, run := mustTaskRun(t, tk)
-		s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), testLogger(), stdin, run.records, nil), stdout, testLogger())
+		s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), testlog.New(t), stdin, run.records, nil), stdout, testlog.New(t))
 		h := &SessionHandle{Session: s, Run: run}
 		tk.AttachSession(h)
 
@@ -4341,7 +4339,7 @@ func TestTask(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, run := mustTaskRun(t, tk)
-			s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), testLogger(), stdin, run.records, nil), stdout, testLogger())
+			s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), testlog.New(t), stdin, run.records, nil), stdout, testlog.New(t))
 			<-s.Done()
 			tk.AttachSession(&SessionHandle{Session: s, Run: run})
 			err := tk.SendCompact(t.Context(), "compact now")
@@ -4482,7 +4480,7 @@ func TestSessionHandle(t *testing.T) {
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}
-		s := agent.NewSession(ctx, cmd, agent.NewConn(ctx, testLogger(), stdin, run.records, nil), stdout, testLogger())
+		s := agent.NewSession(ctx, cmd, agent.NewConn(ctx, testlog.New(t), stdin, run.records, nil), stdout, testlog.New(t))
 		h := &SessionHandle{Session: s, Run: run}
 		if err := h.Drain(); err != nil {
 			t.Fatal(err)

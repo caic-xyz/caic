@@ -5,7 +5,6 @@ package ci
 import (
 	"errors"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,6 +14,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
+	"github.com/caic-xyz/caic/internal/testlog"
 	"github.com/maruel/genai"
 )
 
@@ -46,7 +46,7 @@ func TestFailureSummaryBounded(t *testing.T) {
 			for i := range checks {
 				checks[i] = forge.Check{Name: "tests", Owner: "owner", Repo: "repo", RunID: 1, JobID: int64(i + 1), Conclusion: forge.CheckRunConclusionFailure, Labels: []string{"linux"}}
 			}
-			summary := FailureSummary(t.Context(), slog.New(slog.DiscardHandler), client, p, forgecache.Result{Checks: checks})
+			summary := FailureSummary(t.Context(), testlog.New(t), client, p, forgecache.Result{Checks: checks})
 			got := summary.String()
 			wrapped := summary.ForPR("https://github.com/owner/repo/pull/123", 123, strings.Repeat("valid-long-branch-segment/", 100)+"fix")
 			if len(wrapped) > 256<<10 {

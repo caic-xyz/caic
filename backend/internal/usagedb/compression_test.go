@@ -13,6 +13,7 @@ import (
 	"strconv"
 
 	usagedbv1 "github.com/caic-xyz/caic/backend/internal/usagedb/data/v1"
+	"github.com/caic-xyz/caic/internal/testlog"
 	"github.com/klauspost/compress/zstd"
 	"github.com/maruel/ksid"
 )
@@ -235,7 +236,7 @@ func BenchmarkCompressOldDays(b *testing.B) {
 		if err := os.WriteFile(filepath.Join(dir, day+".jsonl"), fixture.Bytes(), 0o600); err != nil {
 			b.Fatal(err)
 		}
-		s, err := New(b.Context(), Config{Log: testLogger(), Dir: dir})
+		s, err := New(b.Context(), Config{Log: testlog.New(b), Dir: dir})
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -285,7 +286,7 @@ func BenchmarkUsageDayRecovery(b *testing.B) {
 			b.ReportAllocs()
 			b.StartTimer()
 			for range b.N {
-				s, err := New(b.Context(), Config{Log: testLogger(), Dir: dir})
+				s, err := New(b.Context(), Config{Log: testlog.New(b), Dir: dir})
 				if err != nil {
 					b.Fatal(err)
 				}

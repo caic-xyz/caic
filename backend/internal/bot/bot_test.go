@@ -4,11 +4,11 @@ package bot
 
 import (
 	"context"
-	"log/slog"
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/internal/testlog"
 	"github.com/maruel/ksid"
 )
 
@@ -35,7 +35,7 @@ func TestBot(t *testing.T) {
 	t.Run("Close", func(t *testing.T) {
 		t.Parallel()
 		client := &blockingClient{started: make(chan struct{}), done: make(chan struct{})}
-		b := New(t.Context(), slog.New(slog.DiscardHandler), client)
+		b := New(t.Context(), testlog.New(t), client)
 		b.startWatcher(ksid.NewID(), nil, "", "", 1)
 		<-client.started
 		b.Close()

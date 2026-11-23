@@ -38,6 +38,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
+	"github.com/caic-xyz/caic/internal/testlog"
 	"github.com/caic-xyz/caic/metrics"
 )
 
@@ -483,7 +484,7 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 		t.Fatalf("upsert user: %v", err)
 	}
 
-	checker, err := geoip.NewChecker(t.Context(), testLogger(), "0.0.0.0/0,::/0", "", "")
+	checker, err := geoip.NewChecker(t.Context(), testlog.New(t), "0.0.0.0/0,::/0", "", "")
 	if err != nil {
 		t.Fatalf("geoip.NewChecker: %v", err)
 	}
@@ -493,7 +494,7 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 	taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Checkouts: checkoutRegistry, OwnerPolicy: store})
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
-	forgeManager := forgemgr.New(testLogger(), "", "", nil, forgemgr.NoOAuthTokenSource())
+	forgeManager := forgemgr.New(testlog.New(t), "", "", nil, forgemgr.NoOAuthTokenSource())
 
 	auditPath := ""
 	if len(auditLogPath) > 0 {
@@ -501,7 +502,7 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 	}
 
 	refreshTokenPath := t.TempDir() + "/mcp_oauth_refresh_tokens.json"
-	s, err := New(t.Context(), testLogger(), Dependencies{
+	s, err := New(t.Context(), testlog.New(t), Dependencies{
 		Checkouts:                  checkoutRegistry,
 		RepoStatus:                 repoStatus,
 		Runtimes:                   runtimeRouter,
@@ -510,7 +511,7 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 		IPGeoChecker:               checker,
 		ForgeMgr:                   forgeManager,
 		Warnings:                   NewWarningStore(taskMgr),
-		CacheSizes:                 NewCacheSizeStore(testLogger()),
+		CacheSizes:                 NewCacheSizeStore(testlog.New(t)),
 		Metrics:                    metrics.NewStore(metrics.Resource{ServiceName: "caic"}),
 		UsageRollup:                newTestUsageRollup(t),
 		AuthStore:                  store,

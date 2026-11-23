@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -28,6 +27,7 @@ import (
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun/taskruntest"
+	"github.com/caic-xyz/caic/internal/testlog"
 )
 
 func TestHistoryProcessRestart(t *testing.T) {
@@ -48,7 +48,7 @@ func TestHistoryProcessRestart(t *testing.T) {
 		}
 		routes := s.taskHandlers.routes()
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			routes.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), httpLoggerKey{}, slog.New(slog.DiscardHandler))))
+			routes.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), httpLoggerKey{}, testlog.New(t))))
 		})
 		server := &http.Server{Handler: handler, ReadHeaderTimeout: time.Second}
 		if err := server.Serve(listener); err != nil {

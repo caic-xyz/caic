@@ -21,6 +21,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun/taskruntest"
+	"github.com/caic-xyz/caic/internal/testlog"
 
 	"github.com/caic-xyz/caic/backend/internal/task"
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
@@ -238,7 +239,7 @@ func TestLifecycle(t *testing.T) {
 		t.Run("append_is_immutable_durable_and_rejects_stale_edits", func(t *testing.T) {
 			t.Parallel()
 			store := taskslog.NewStore(t.TempDir())
-			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: taskhistory.NewStore(testLogger(), store, backends.Default("", nil))})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: taskhistory.NewStore(testlog.New(t), store, backends.Default("", nil))})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
 			taskruntest.SetState(tk, task.StateRunning)
 			e := m.NewEntry(tk, nil)
@@ -364,7 +365,7 @@ func TestLifecycle(t *testing.T) {
 		t.Run("write_failure_preserves_queue", func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
-			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: taskhistory.NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil))})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: taskhistory.NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil))})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
 			taskruntest.SetState(tk, task.StateRunning)
 			e := m.NewEntry(tk, nil)

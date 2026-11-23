@@ -3,7 +3,6 @@
 package app
 
 import (
-	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +14,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
+	"github.com/caic-xyz/caic/internal/testlog"
 	"github.com/caic-xyz/caic/metrics"
 )
 
@@ -29,7 +29,7 @@ func TestCollectRepoWatchDirs(t *testing.T) {
 			".hidden",
 		})
 
-		dirs := collectRepoWatchDirs(t.Context(), slog.New(slog.DiscardHandler).With("cmp", "test"), root, 3)
+		dirs := collectRepoWatchDirs(t.Context(), testlog.New(t).With("cmp", "test"), root, 3)
 
 		want := []string{
 			root,
@@ -61,7 +61,7 @@ func TestCollectRepoWatchDirs(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		dirs := collectRepoWatchDirs(t.Context(), slog.New(slog.DiscardHandler), root, 5)
+		dirs := collectRepoWatchDirs(t.Context(), testlog.New(t), root, 5)
 		want := []string{root, filepath.Join(root, "group"), filepath.Join(root, "group", "plain"), filepath.Join(root, "group", "plain", "child")}
 		slices.Sort(dirs)
 		slices.Sort(want)
@@ -74,7 +74,7 @@ func TestCollectRepoWatchDirs(t *testing.T) {
 		t.Parallel()
 		root := t.TempDir()
 		makeDirs(t, root, []string{".git", "nested/.git", "plain/child"})
-		got := collectRepoWatchDirs(t.Context(), slog.New(slog.DiscardHandler), root, 5)
+		got := collectRepoWatchDirs(t.Context(), testlog.New(t), root, 5)
 		if !slices.Equal(got, []string{root}) {
 			t.Fatalf("collectRepoWatchDirs = %v, want only %s", got, root)
 		}
@@ -85,7 +85,7 @@ func TestCollectRepoWatchDirs(t *testing.T) {
 		root := t.TempDir()
 		makeDirs(t, root, []string{"a/b/c/d"})
 
-		dirs := collectRepoWatchDirs(t.Context(), slog.New(slog.DiscardHandler).With("cmp", "test"), root, 2)
+		dirs := collectRepoWatchDirs(t.Context(), testlog.New(t).With("cmp", "test"), root, 2)
 
 		want := []string{
 			root,
@@ -119,7 +119,7 @@ func TestRepoWatcher(t *testing.T) {
 			}
 		}
 		initRepo(nested)
-		log := slog.New(slog.DiscardHandler)
+		log := testlog.New(t)
 		registry := repo.NewRegistry()
 		router, err := runtime.NewRouter([]runtime.System{&runtimetest.FakeSystem{}}, metrics.Nop{})
 		if err != nil {
@@ -162,7 +162,7 @@ func TestRepoWatcher(t *testing.T) {
 				if !rootIsRepo {
 					outer = filepath.Join(root, "group", "outer")
 				}
-				log := slog.New(slog.DiscardHandler)
+				log := testlog.New(t)
 				registry := repo.NewRegistry()
 				for _, dir := range []string{outer, filepath.Join(outer, "nested"), filepath.Join(outer, "src", "nested"), t.TempDir()} {
 					cmd := exec.CommandContext(t.Context(), "git", "init", dir) //nolint:gosec // Initializes a Git fixture in a private test directory.

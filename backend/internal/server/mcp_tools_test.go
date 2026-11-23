@@ -2456,7 +2456,7 @@ func TestMCPTools(t *testing.T) {
 			s := newTestRouter(t, map[harness.Name]agent.Backend{
 				harness.Claude: &agenttest.FakeBackend{WireFactory: claudecode.New().NewWire},
 			})
-			if err := loadPurgedTasksForTest(s, logDir); err != nil {
+			if err := loadPurgedTasksForTest(t, s, logDir); err != nil {
 				t.Fatal(err)
 			}
 			entry, ok := s.taskMgr.GetEntry(restoredID)
@@ -2504,7 +2504,7 @@ func TestMCPTools(t *testing.T) {
 			s := newTestRouter(t, map[harness.Name]agent.Backend{
 				harness.Claude: &agenttest.FakeBackend{WireFactory: claudecode.New().NewWire},
 			})
-			if err := loadPurgedTasksForTest(s, logDir); err != nil {
+			if err := loadPurgedTasksForTest(t, s, logDir); err != nil {
 				t.Fatal(err)
 			}
 			// A completed task's recorded result answers the query, so removing the

@@ -16,6 +16,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
+	"github.com/caic-xyz/caic/internal/testlog"
 )
 
 func TestWarningStore(t *testing.T) {
@@ -233,7 +234,7 @@ func TestCIPollWarnings(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		svc := ci.NewService(testLogger(), cache, nil, b)
+		svc := ci.NewService(testlog.New(t), cache, nil, b)
 		svc.PollCIForActiveRepos(t.Context())
 		first := w.Since("", 0)
 		if len(first) != 1 || len(first[0].Details) != 2 || first[0].Details[0].Repo != "a" || first[0].Details[1].Error != "checks request failed" {
@@ -286,7 +287,7 @@ func TestCIPollWarnings(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		svc := ci.NewService(testLogger(), cache, nil, b)
+		svc := ci.NewService(testlog.New(t), cache, nil, b)
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		t.Cleanup(cancel)
 		var workers sync.WaitGroup
@@ -315,7 +316,7 @@ func TestCIPollWarnings(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		svc := ci.NewService(testLogger(), cache, nil, b)
+		svc := ci.NewService(testlog.New(t), cache, nil, b)
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		t.Cleanup(cancel)
 		var wg sync.WaitGroup

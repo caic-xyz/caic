@@ -24,6 +24,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task"
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun/taskruntest"
+	"github.com/caic-xyz/caic/internal/testlog"
 	"github.com/gomodedev/gomode/mcp"
 )
 
@@ -304,7 +305,7 @@ func TestMCPResources(t *testing.T) {
 	t.Run("resource overflow audit", func(t *testing.T) {
 		t.Parallel()
 
-		store := &auditStore{log: testLogger()}
+		store := &auditStore{log: testlog.New(t)}
 		registry := &mcpResources{audit: store}
 		_, err := registry.resourceJSON(t.Context(), "caic://large", strings.Repeat("a", mcpResourceJSONMaxBytes))
 		if err == nil {

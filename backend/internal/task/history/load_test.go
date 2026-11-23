@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"iter"
-	"log/slog"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
@@ -33,9 +32,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 	"github.com/caic-xyz/caic/backend/internal/tokens"
+	"github.com/caic-xyz/caic/internal/testlog"
 )
-
-func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 func setClaudeParser(tasks []*LoadedTask) {
 	for _, lt := range tasks {
@@ -178,14 +176,14 @@ func TestLoadLogHeader(t *testing.T) {
 			`{"t":"result","state":"purged"}`)
 		resolver := backends.Default("", nil)
 		for range 2 {
-			loaded, err := loadLogHeader(testLogger(), path, true, resolver)
+			loaded, err := loadLogHeader(testlog.New(t), path, true, resolver)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if r := loaded.LastTrailer; r == nil || r.Duration != 2*time.Second || r.NumTurns != 1 {
 				t.Fatalf("inventory metrics = %+v", r)
 			}
-			if err := loadMessagesForTest(loaded, resolver); err != nil {
+			if err := loadMessagesForTest(t, loaded, resolver); err != nil {
 				t.Fatal(err)
 			}
 			var full task.TurnMetrics
@@ -260,14 +258,14 @@ func TestLoadLogHeader(t *testing.T) {
 							`{"t":"result","state":"purged"}`)
 						resolver := backends.Default("", nil)
 						for range 2 {
-							loaded, err := loadLogHeader(testLogger(), path, true, resolver)
+							loaded, err := loadLogHeader(testlog.New(t), path, true, resolver)
 							if err != nil {
 								t.Fatal(err)
 							}
 							if r := loaded.LastTrailer; r == nil || r.Duration != act.duration || r.NumTurns != 1 {
 								t.Fatalf("inventory metrics = %+v; want 1 turn, %v", r, act.duration)
 							}
-							if err := loadMessagesForTest(loaded, resolver); err != nil {
+							if err := loadMessagesForTest(t, loaded, resolver); err != nil {
 								t.Fatal(err)
 							}
 							var live task.TurnMetrics
@@ -299,14 +297,14 @@ func TestLoadLogHeader(t *testing.T) {
 			`{"t":"result","state":"purged"}`)
 		resolver := backends.Default("", nil)
 		for range 2 {
-			loaded, err := loadLogHeader(testLogger(), path, true, resolver)
+			loaded, err := loadLogHeader(testlog.New(t), path, true, resolver)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if r := loaded.LastTrailer; r == nil || r.Duration != 2*time.Second || r.NumTurns != 1 {
 				t.Fatalf("inventory metrics = %+v", r)
 			}
-			if err := loadMessagesForTest(loaded, resolver); err != nil {
+			if err := loadMessagesForTest(t, loaded, resolver); err != nil {
 				t.Fatal(err)
 			}
 			var live task.TurnMetrics
@@ -330,14 +328,14 @@ func TestLoadLogHeader(t *testing.T) {
 		)
 		resolver := backends.Default("", nil)
 		for range 2 {
-			loaded, err := loadLogHeader(testLogger(), path, true, resolver)
+			loaded, err := loadLogHeader(testlog.New(t), path, true, resolver)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if r := loaded.LastTrailer; r == nil || r.Duration != 9*time.Second || r.NumTurns != 5 {
 				t.Fatalf("inventory metrics = %+v", r)
 			}
-			if err := loadMessagesForTest(loaded, resolver); err != nil {
+			if err := loadMessagesForTest(t, loaded, resolver); err != nil {
 				t.Fatal(err)
 			}
 			var live task.TurnMetrics
@@ -362,7 +360,7 @@ func TestLoadLogHeader(t *testing.T) {
 			`{"t":"agent","ts":302.000,"msg":{"type":"result","subtype":"success","total_cost_usd":3}}`,
 			`{"t":"result","state":"failed","error":"agent exited: exit status 255"}`,
 		)
-		loaded, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
+		loaded, err := loadLogHeader(testlog.New(t), path, true, backends.Default("", nil))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -382,7 +380,7 @@ func TestLoadLogHeader(t *testing.T) {
 		}
 		resolver := backends.Default("", nil)
 		for range 2 {
-			loaded, err := loadLogHeader(testLogger(), path, true, resolver)
+			loaded, err := loadLogHeader(testlog.New(t), path, true, resolver)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -395,7 +393,7 @@ func TestLoadLogHeader(t *testing.T) {
 			if _, ok := readHeaderCache(path); !ok {
 				t.Fatal("missing cache")
 			}
-			if err := loadMessagesForTest(loaded, resolver); err != nil {
+			if err := loadMessagesForTest(t, loaded, resolver); err != nil {
 				t.Fatal(err)
 			}
 			if r := loaded.LastTrailer; r.NumTurns != 2 || r.Duration != 2079*time.Millisecond {
@@ -421,14 +419,14 @@ func TestLoadLogHeader(t *testing.T) {
 					`{"t":"agent","ts":102.000,"msg":{"type":"result","subtype":"success","total_cost_usd":1`+tc.metrics+`}}`,
 					`{"t":"result","state":"purged"}`,
 				)
-				loaded, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
+				loaded, err := loadLogHeader(testlog.New(t), path, true, backends.Default("", nil))
 				if err != nil {
 					t.Fatal(err)
 				}
 				if r := loaded.LastTrailer; r == nil || r.CostUSD != 1 || r.NumTurns != tc.turns || r.Duration != tc.duration {
 					t.Fatalf("metrics = %+v; want cost 1, %d turns, %v", r, tc.turns, tc.duration)
 				}
-				if err := loadMessagesForTest(loaded, backends.Default("", nil)); err != nil {
+				if err := loadMessagesForTest(t, loaded, backends.Default("", nil)); err != nil {
 					t.Fatal(err)
 				}
 				if r := loaded.LastTrailer; r.CostUSD != 1 || r.NumTurns != tc.turns || r.Duration != tc.duration {
@@ -448,7 +446,7 @@ func TestLoadLogHeader(t *testing.T) {
 			`{"t":"result","state":"purged"}`,
 		)
 		for range 2 {
-			loaded, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
+			loaded, err := loadLogHeader(testlog.New(t), path, true, backends.Default("", nil))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -490,7 +488,7 @@ func TestLoadLogHeader(t *testing.T) {
 				path := writePhysicalTestLog(t, compressed, lines...)
 				var first []byte
 				for pass := range 2 {
-					loaded, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
+					loaded, err := loadLogHeader(testlog.New(t), path, true, backends.Default("", nil))
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -506,7 +504,7 @@ func TestLoadLogHeader(t *testing.T) {
 					if _, ok := readHeaderCache(path); !ok {
 						t.Fatal("terminal inventory did not populate a usable cache")
 					}
-					if err := loadMessagesForTest(loaded, agent.Backends{harness.Claude: claudecode.New()}); err != nil {
+					if err := loadMessagesForTest(t, loaded, agent.Backends{harness.Claude: claudecode.New()}); err != nil {
 						t.Fatal(err)
 					}
 					if after := inventoryJSON(t, loaded); !bytes.Equal(before, after) {
@@ -560,7 +558,7 @@ func TestLoadLogHeader(t *testing.T) {
 						}
 						var expected []byte
 						for pass := range 2 { // Second load reopens the terminal header cache.
-							loaded, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
+							loaded, err := loadLogHeader(testlog.New(t), path, true, backends.Default("", nil))
 							if err != nil {
 								t.Fatal(err)
 							}
@@ -597,7 +595,7 @@ func TestLoadLogHeader(t *testing.T) {
 									t.Fatal("terminal inventory did not populate a usable header cache")
 								}
 							}
-							if err := loadMessagesForTest(loaded, agent.Backends{harness.Claude: claudecode.New()}); err != nil {
+							if err := loadMessagesForTest(t, loaded, agent.Backends{harness.Claude: claudecode.New()}); err != nil {
 								t.Fatal(err)
 							}
 							if after := inventoryJSON(t, loaded); !bytes.Equal(after, before) {
@@ -654,7 +652,7 @@ func TestLoadLogHeader(t *testing.T) {
 								t.Fatalf("semantic auto-compact threshold = %d, want %d", semantic.AutoCompactTokenLimit, limit)
 							}
 							for range 2 {
-								loaded, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
+								loaded, err := loadLogHeader(testlog.New(t), path, true, backends.Default("", nil))
 								if err != nil {
 									t.Fatal(err)
 								}
@@ -662,7 +660,7 @@ func TestLoadLogHeader(t *testing.T) {
 									t.Fatalf("restored auto-compact threshold = %d, want %d", loaded.AutoCompactTokenLimit, limit)
 								}
 								before := inventoryJSON(t, loaded)
-								if err := loadMessagesForTest(loaded, resolver); err != nil {
+								if err := loadMessagesForTest(t, loaded, resolver); err != nil {
 									t.Fatal(err)
 								}
 								if !bytes.Equal(inventoryJSON(t, loaded), before) {
@@ -679,7 +677,7 @@ func TestLoadLogHeader(t *testing.T) {
 	t.Run("RoundTripServesCache", func(t *testing.T) {
 		t.Parallel()
 		path := writeMetaLog(t, t.TempDir(), "task1")
-		first, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
+		first, err := loadLogHeader(testlog.New(t), path, true, backends.Default("", nil))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -720,7 +718,7 @@ func TestLoadLogHeader(t *testing.T) {
 		if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
 			t.Fatal(err)
 		}
-		cached, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
+		cached, err := loadLogHeader(testlog.New(t), path, true, backends.Default("", nil))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -754,7 +752,7 @@ func TestLoadLogHeader(t *testing.T) {
 			string(snapshot),
 			string(trailer),
 		)
-		loaded, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
+		loaded, err := loadLogHeader(testlog.New(t), path, true, backends.Default("", nil))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -771,7 +769,7 @@ func TestLoadLogHeader(t *testing.T) {
 			mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 3, Prompt: "task1", Harness: "claude"}),
 			mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "running"}),
 		)
-		if _, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil)); err != nil {
+		if _, err := loadLogHeader(testlog.New(t), path, true, backends.Default("", nil)); err != nil {
 			t.Fatal(err)
 		}
 		f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // path is test-controlled.
@@ -785,7 +783,7 @@ func TestLoadLogHeader(t *testing.T) {
 		if err := f.Close(); err != nil {
 			t.Fatal(err)
 		}
-		loaded, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
+		loaded, err := loadLogHeader(testlog.New(t), path, true, backends.Default("", nil))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -812,7 +810,7 @@ func TestLoadLogHeader(t *testing.T) {
 				if err := os.WriteFile(logHeaderCachePath(path), tc.body, 0o600); err != nil {
 					t.Fatal(err)
 				}
-				loaded, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
+				loaded, err := loadLogHeader(testlog.New(t), path, true, backends.Default("", nil))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -820,7 +818,7 @@ func TestLoadLogHeader(t *testing.T) {
 					t.Fatal("forged header cache content was served")
 				}
 				// The bad header cache entry must have been replaced by a valid one.
-				again, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
+				again, err := loadLogHeader(testlog.New(t), path, true, backends.Default("", nil))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -839,7 +837,7 @@ func TestLoadLogHeader(t *testing.T) {
 			mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 3, Prompt: "task1", Harness: "claude"}),
 			mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "failed", Error: "boom"}),
 		)
-		if _, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil)); err != nil {
+		if _, err := loadLogHeader(testlog.New(t), path, true, backends.Default("", nil)); err != nil {
 			t.Fatal(err)
 		}
 		cached, ok := readHeaderCache(path)
@@ -858,7 +856,7 @@ func TestLoadLogHeader(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "task-b.header.json"), []byte(`{"version":3,"task":{"task_id":"forged"}}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
+		tasks, err := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -871,14 +869,14 @@ func TestLoadLogHeader(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		path := writeMetaLog(t, dir, "task1")
-		if _, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil)); err != nil {
+		if _, err := loadLogHeader(testlog.New(t), path, true, backends.Default("", nil)); err != nil {
 			t.Fatal(err)
 		}
 		entry := logHeaderCachePath(path)
 		if _, err := os.Stat(entry); err != nil {
 			t.Fatalf("expected header cache after scan: %v", err)
 		}
-		store := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil))
+		store := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil))
 		compressed, err := store.Journal.Compress(path, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -894,7 +892,7 @@ func TestLoadLogHeader(t *testing.T) {
 		}
 		// Compression changed the log size, so the stale header cache entry is
 		// rejected and a full scan rewrites it with the same projection.
-		loaded, err := loadLogHeader(testLogger(), compressed, true, backends.Default("", nil))
+		loaded, err := loadLogHeader(testlog.New(t), compressed, true, backends.Default("", nil))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -912,7 +910,7 @@ func TestLoadLogHeader(t *testing.T) {
 			mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 3, Prompt: "live", Harness: "claude"}),
 			claudeAssistant(t, map[string]any{"type": "text", "text": "working"}),
 		)
-		if _, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil)); err != nil {
+		if _, err := loadLogHeader(testlog.New(t), path, true, backends.Default("", nil)); err != nil {
 			t.Fatal(err)
 		}
 		// A live (non-terminal) log must not get a header cache: it is not the
@@ -954,7 +952,7 @@ func TestV3DirectionalNativeLoad(t *testing.T) {
 		`{"t":"input","ts":1.000,"msg":`+input+`}`,
 		`{"t":"agent","ts":2.000,"msg":`+output+`}`,
 	)
-	tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
+	tasks, err := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -963,7 +961,7 @@ func TestV3DirectionalNativeLoad(t *testing.T) {
 	}
 	var native [][]byte
 	var directions []string
-	if err := loadMessagesForTest(tasks[0], newTestParserResolver(func(h harness.Name) (agent.WireFormat, error) {
+	if err := loadMessagesForTest(t, tasks[0], newTestParserResolver(func(h harness.Name) (agent.WireFormat, error) {
 		if h != harness.Claude {
 			return nil, fmt.Errorf("harness = %q, want %q", h, harness.Claude)
 		}
@@ -1002,7 +1000,7 @@ func TestLoadedTask(t *testing.T) {
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "waiting"})
 		writeLogFile(t, dir, "t.jsonl", meta, a1, pr, a2, trailer)
 
-		tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
+		tasks, err := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1037,7 +1035,7 @@ func TestLoadedTask(t *testing.T) {
 		second := claudeAssistant(t, map[string]any{"type": "text", "text": "second"})
 		writeLogFile(t, dir, "t.jsonl", meta, first, second)
 
-		tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
+		tasks, err := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1074,7 +1072,7 @@ func TestLoadedTask(t *testing.T) {
 			nativeLogLine(`{"type":"assistant","message":{"content":[]}}`),
 		)
 
-		tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
+		tasks, err := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1105,7 +1103,7 @@ func TestLoadedTask(t *testing.T) {
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "failed"})
 		writeLogFile(t, dir, "t.jsonl", meta, setupLog, trailer)
 
-		tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
+		tasks, err := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1154,7 +1152,7 @@ func TestLoadedTask(t *testing.T) {
 		}
 		writeLogFile(t, dir, "t.jsonl", lines...)
 
-		tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
+		tasks, err := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1216,7 +1214,7 @@ func TestLoadedTask(t *testing.T) {
 				t.Parallel()
 				dir := t.TempDir()
 				writeLogFile(t, dir, "t.jsonl", append([]string{meta}, tc.records...)...)
-				tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
+				tasks, err := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -1236,7 +1234,7 @@ func TestLoadedTask(t *testing.T) {
 			`{"t":"log","line":"provisioning"}`,
 			`{"t":"context_cleared"}`,
 		)
-		tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
+		tasks, err := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1276,7 +1274,7 @@ func TestLoadedTask(t *testing.T) {
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "waiting"})
 		writeCompressedLogFile(t, dir, "t.jsonl.zst", seqOf(meta, a1, a2, trailer))
 
-		st := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil))
+		st := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil))
 		st.cutoff, st.maxSettledPerRepo = time.Time{}, 0
 		tasks, err := st.LoadSettled()
 		if err != nil {
@@ -1382,11 +1380,11 @@ func TestLoadedTask(t *testing.T) {
 			`{"t":"caic_meta","version":3,"prompt":"task","harness":"claude"}`,
 			`{"t":"agent","ts":1788122692.466,"msg":{"type":"assistant"}}`,
 		)
-		loaded, err := NewStore(testLogger(), taskslog.NewStore(filepath.Dir(path)), backends.Default("", nil)).LoadSource(path)
+		loaded, err := NewStore(testlog.New(t), taskslog.NewStore(filepath.Dir(path)), backends.Default("", nil)).LoadSource(path)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := loadMessagesForTest(loaded, newTestParserResolver(func(harness.Name) (agent.WireFormat, error) {
+		if err := loadMessagesForTest(t, loaded, newTestParserResolver(func(harness.Name) (agent.WireFormat, error) {
 			return &agenttest.Wire{Output: func([]byte) ([]agent.Message, error) { return []agent.Message{message}, nil }}, nil
 		})); err != nil {
 			t.Fatal(err)
@@ -1408,7 +1406,7 @@ func TestLoadedTask(t *testing.T) {
 		native := `{"t":"agent","ts":1.000,"msg":{"kind":"empty"}}`
 		path := writePhysicalTestLog(t, false, meta, native, native)
 		loaded := &LoadedTask{path: path}
-		err := loadMessagesForTest(loaded, newTestParserResolver(func(harness.Name) (agent.WireFormat, error) {
+		err := loadMessagesForTest(t, loaded, newTestParserResolver(func(harness.Name) (agent.WireFormat, error) {
 			return &agenttest.Wire{Output: func([]byte) ([]agent.Message, error) { return nil, nil }}, nil
 		}))
 
@@ -1675,8 +1673,8 @@ func BenchmarkTaskAdoptionPrimitives(b *testing.B) {
 	b.StopTimer()
 	fixture := newAdoptionBenchmarkFixture(b)
 	resolver := backends.Default("", nil)
-	store := NewStore(testLogger(), taskslog.NewStore(fixture.dir), resolver)
-	bl := testLogger()
+	store := NewStore(testlog.New(b), taskslog.NewStore(fixture.dir), resolver)
+	bl := testlog.New(b)
 	operations := []adoptionBenchmarkOperation{
 		{
 			name: "LoadLogHeader",
@@ -1984,7 +1982,7 @@ func BenchmarkSettledScanAgeFilter(b *testing.B) {
 				b.StopTimer()
 				clearHeaderCaches(b, dir)
 				b.StartTimer()
-				st := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil))
+				st := NewStore(testlog.New(b), taskslog.NewStore(dir), backends.Default("", nil))
 				st.cutoff, st.maxSettledPerRepo = tc.cutoff, 0
 				if _, err := st.LoadSettled(); err != nil {
 					b.Fatal(err)
@@ -2066,7 +2064,7 @@ func BenchmarkSettledLoadCap(b *testing.B) {
 				b.StopTimer()
 				clearHeaderCaches(b, dir)
 				b.StartTimer()
-				st := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil))
+				st := NewStore(testlog.New(b), taskslog.NewStore(dir), backends.Default("", nil))
 				st.cutoff, st.maxSettledPerRepo = cutoff, tc.limitPerRepo
 				if _, err := st.LoadSettled(); err != nil {
 					b.Fatal(err)

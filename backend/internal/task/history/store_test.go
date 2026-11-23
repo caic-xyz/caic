@@ -19,6 +19,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/caic-xyz/caic/internal/testlog"
 
 	"github.com/caic-xyz/caic/backend/internal/tokens"
 
@@ -116,7 +117,7 @@ func TestStore(t *testing.T) {
 			t.Parallel()
 			native := `{"t":"agent","ts":1.000,"msg":{"kind":"empty"}}`
 			path := writePhysicalTestLog(t, false, meta, native, native)
-			records, generation, err := NewStore(testLogger(), taskslog.NewStore(filepath.Dir(path)), backends.Default("", nil)).LoadRelayBoundaries(path)
+			records, generation, err := NewStore(testlog.New(t), taskslog.NewStore(filepath.Dir(path)), backends.Default("", nil)).LoadRelayBoundaries(path)
 			if err != nil || generation != "" || len(records) != 2 {
 				t.Fatalf("boundaries = %+v, generation = %q, error = %v", records, generation, err)
 			}
@@ -137,7 +138,7 @@ func TestStore(t *testing.T) {
 					input := `{"t":"input","ts":2.000,"msg":{"client":"request"}}`
 					host := mustJSON(t, &agent.MetaSessionMessage{MessageType: "caic_session", SessionID: "host"})
 					path := writePhysicalTestLog(t, compressed, meta, old, native, current, native, input, host, native)
-					records, generation, err := NewStore(testLogger(), taskslog.NewStore(filepath.Dir(path)), backends.Default("", nil)).LoadRelayBoundaries(path)
+					records, generation, err := NewStore(testlog.New(t), taskslog.NewStore(filepath.Dir(path)), backends.Default("", nil)).LoadRelayBoundaries(path)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -167,7 +168,7 @@ func TestStore(t *testing.T) {
 				t.Run(line, func(t *testing.T) {
 					t.Parallel()
 					path := writePhysicalTestLog(t, true, meta, line)
-					if records, generation, err := NewStore(testLogger(), taskslog.NewStore(filepath.Dir(path)), backends.Default("", nil)).LoadRelayBoundaries(path); err == nil || records != nil || generation != "" {
+					if records, generation, err := NewStore(testlog.New(t), taskslog.NewStore(filepath.Dir(path)), backends.Default("", nil)).LoadRelayBoundaries(path); err == nil || records != nil || generation != "" {
 						t.Fatalf("boundaries = %+v, generation = %q, err = %v", records, generation, err)
 					}
 				})
@@ -179,14 +180,14 @@ func TestStore(t *testing.T) {
 		t.Parallel()
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
-			s := NewStore(testLogger(), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
+			s := NewStore(testlog.New(t), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
 			id := ksid.NewID().String()
 			h := &agent.MetaMessage{Prompt: "prepared", Harness: string(harness.Claude), StartedAt: time.Now().UTC()}
 			p, err := s.Initialize(id+"-repo-caic-0.jsonl", h)
 			if err != nil {
 				t.Fatal(err)
 			}
-			lt, err := NewStore(testLogger(), taskslog.NewStore(filepath.Dir(p.Path)), backends.Default("", nil)).LoadSource(p.Path)
+			lt, err := NewStore(testlog.New(t), taskslog.NewStore(filepath.Dir(p.Path)), backends.Default("", nil)).LoadSource(p.Path)
 			if err != nil || lt.TaskID != id {
 				t.Fatalf("initialized log=%+v %v", lt, err)
 			}
@@ -199,7 +200,7 @@ func TestStore(t *testing.T) {
 		})
 		t.Run("error", func(t *testing.T) {
 			t.Parallel()
-			s := NewStore(testLogger(), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
+			s := NewStore(testlog.New(t), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
 			h := &agent.MetaMessage{Prompt: "prepared", Harness: string(harness.Claude)}
 			for _, name := range []string{"../outside.jsonl", ""} {
 				if _, err := s.Initialize(name, h); err == nil {
@@ -226,7 +227,7 @@ func TestStore(t *testing.T) {
 		})
 		t.Run("replacement_survives_rollback", func(t *testing.T) {
 			t.Parallel()
-			s := NewStore(testLogger(), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
+			s := NewStore(testlog.New(t), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
 			p, err := s.Initialize("prepared.jsonl", &agent.MetaMessage{Prompt: "prepared", Harness: string(harness.Claude)})
 			if err != nil {
 				t.Fatal(err)
@@ -248,7 +249,7 @@ func TestStore(t *testing.T) {
 
 	t.Run("OpenRemovesFailedNewHeader", func(t *testing.T) {
 		t.Parallel()
-		s := NewStore(testLogger(), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
+		s := NewStore(testlog.New(t), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
 		h := &agent.MetaMessage{Prompt: "prepared", Harness: string(harness.Claude), StartedAt: time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)}
 		if _, _, err := s.Open("failed.jsonl", h); err == nil {
 			t.Fatal("Open accepted unserializable metadata")
@@ -270,7 +271,7 @@ func TestStore(t *testing.T) {
 				if err := os.WriteFile(filepath.Join(dir, "input-queue.json"), []byte(fixture.raw), 0o600); err != nil {
 					t.Fatal(err)
 				}
-				store := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil))
+				store := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil))
 				if _, err := store.Journal.LoadInputQueue(); err == nil {
 					t.Fatal("corrupt queue accepted")
 				}
@@ -279,7 +280,7 @@ func TestStore(t *testing.T) {
 	})
 	t.Run("CompressClosesWriterBeforeCompression", func(t *testing.T) {
 		t.Parallel()
-		store := NewStore(testLogger(), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
+		store := NewStore(testlog.New(t), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
 		tk := &testTask{InitialPrompt: agent.Prompt{Text: "test"}, Harness: harness.Codex}
 		log, err := openTaskLog(store, tk)
 		if err != nil {
@@ -311,7 +312,7 @@ func TestStore(t *testing.T) {
 	})
 	t.Run("OpenWritesMetadata", func(t *testing.T) {
 		t.Parallel()
-		store := NewStore(testLogger(), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
+		store := NewStore(testlog.New(t), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
 		tk := &testTask{
 			ID:            ksid.NewID(),
 			InitialPrompt: agent.Prompt{Text: "test prompt"},
@@ -352,7 +353,7 @@ func TestStore(t *testing.T) {
 	})
 	t.Run("OpenRejectsNonBaseFilename", func(t *testing.T) {
 		t.Parallel()
-		store := NewStore(testLogger(), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
+		store := NewStore(testlog.New(t), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
 		header := agent.MetaMessage{MessageType: "caic_meta", Harness: string(harness.Codex)}
 		for _, name := range []string{"", ".", "..", "/etc/passwd", "sub/task.jsonl", "../task.jsonl"} {
 			if _, _, err := store.Open(name, &header); err == nil {
@@ -362,7 +363,7 @@ func TestStore(t *testing.T) {
 	})
 	t.Run("ReopenRejectsNonBaseFilename", func(t *testing.T) {
 		t.Parallel()
-		store := NewStore(testLogger(), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
+		store := NewStore(testlog.New(t), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
 		header := agent.MetaMessage{MessageType: "caic_meta", Harness: string(harness.Codex)}
 		for _, name := range []string{"", ".", "..", "/etc/passwd", "sub/task.jsonl", "../task.jsonl"} {
 			if _, _, err := store.Reopen(name, &header); err == nil {
@@ -372,7 +373,7 @@ func TestStore(t *testing.T) {
 	})
 	t.Run("OpenPreservesExistingLogAuthority", func(t *testing.T) {
 		t.Parallel()
-		store := NewStore(testLogger(), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
+		store := NewStore(testlog.New(t), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
 		tk := &testTask{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Harness: harness.Codex}
 		first, err := openTaskLog(store, tk)
 		if err != nil {
@@ -395,7 +396,7 @@ func TestStore(t *testing.T) {
 	})
 	t.Run("OpenCreatesCanonicalV3Log", func(t *testing.T) {
 		t.Parallel()
-		store := NewStore(testLogger(), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
+		store := NewStore(testlog.New(t), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
 		tk := &testTask{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Harness: harness.Codex}
 		log, err := openTaskLog(store, tk)
 		if err != nil {
@@ -418,7 +419,7 @@ func TestStore(t *testing.T) {
 	t.Run("ReopenRejectsHarnessMismatch", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
-		store := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil))
+		store := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil))
 		tk := &testTask{
 			ID:            ksid.NewID(),
 			InitialPrompt: agent.Prompt{Text: "test"},
@@ -451,7 +452,7 @@ func TestStore(t *testing.T) {
 		if err := os.WriteFile(path, []byte(header), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		w, err := reopenTaskLog(NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)), tk, path)
+		w, err := reopenTaskLog(NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)), tk, path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -465,7 +466,7 @@ func TestStore(t *testing.T) {
 		for _, name := range []string{"corrupt", "harness_mismatch"} {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
-				store := NewStore(testLogger(), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
+				store := NewStore(testlog.New(t), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
 				tk := &testTask{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Harness: harness.Codex}
 				log, err := openTaskLog(store, tk)
 				if err != nil {
@@ -500,7 +501,7 @@ func TestStore(t *testing.T) {
 
 	t.Run("CompressElidesSupersededClaudeDeltas", func(t *testing.T) {
 		t.Parallel()
-		store := NewStore(testLogger(), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
+		store := NewStore(testlog.New(t), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
 		tk := &testTask{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Harness: harness.Claude}
 		log, err := openTaskLog(store, tk)
 		if err != nil {
@@ -623,7 +624,7 @@ func TestStore(t *testing.T) {
 			if err := os.Chtimes(path, updated, updated); err != nil {
 				t.Fatal(err)
 			}
-			if err := (NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil))).SettleTerminal(nil); err != nil {
+			if err := (NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil))).SettleTerminal(nil); err != nil {
 				t.Fatal(err)
 			}
 			compressed := (path + ".zst")
@@ -644,7 +645,7 @@ func TestStore(t *testing.T) {
 			if cached.LastTrailer == nil || cached.LastTrailer.State != task.StatePurged {
 				t.Fatalf("cached result = %#v, want purged", cached.LastTrailer)
 			}
-			st := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil))
+			st := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil))
 			st.cutoff, st.maxSettledPerRepo = time.Time{}, 0
 			reloaded, err := st.LoadSettled()
 			if err != nil {
@@ -674,14 +675,14 @@ func TestStore(t *testing.T) {
 			}
 			authMeta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: int(agent.LogVersionV3), Harness: string(harness.Claude), Prompt: "authoritative source"})
 			writeLogFile(t, dir, filepath.Base(path), authMeta, trailer)
-			paths, err := logPaths(testLogger(), dir, nil, false, time.Time{})
+			paths, err := logPaths(testlog.New(t), dir, nil, false, time.Time{})
 			if err != nil {
 				t.Fatal(err)
 			}
 			if len(paths) != 1 || paths[0] != path {
 				t.Fatalf("log paths = %q, want plain source %q", paths, path)
 			}
-			if err := (NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil))).SettleTerminal(nil); err != nil {
+			if err := (NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil))).SettleTerminal(nil); err != nil {
 				t.Fatal(err)
 			}
 			r, err := taskslog.OpenReader((path + ".zst"))
@@ -715,7 +716,7 @@ func TestStore(t *testing.T) {
 			meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: int(agent.LogVersionV3), Harness: string(harness.Claude), Prompt: "task"})
 			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "stopped"})
 			writeLogFile(t, dir, filepath.Base(path), meta, trailer)
-			if err := (NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil))).SettleTerminal(nil); err != nil {
+			if err := (NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil))).SettleTerminal(nil); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := os.Stat(path); err != nil {
@@ -738,7 +739,7 @@ func TestStore(t *testing.T) {
 				t.Fatal(err)
 			}
 			exclude := map[string]struct{}{filepath.Clean(path): {}}
-			if err := (NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil))).SettleTerminal(exclude); err != nil {
+			if err := (NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil))).SettleTerminal(exclude); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := os.Stat(path); err != nil {
@@ -751,7 +752,7 @@ func TestStore(t *testing.T) {
 		t.Run("ConcurrentSettleSameLog", func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
-			st := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil))
+			st := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil))
 			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 			for i := range 20 {
 				name := fmt.Sprintf("race%d.jsonl", i)
@@ -820,7 +821,7 @@ func TestStore(t *testing.T) {
 				CaicMCP:          true,
 			}))
 
-			tasks, err := NewStore(testLogger(), taskslog.NewStore(filepath.Dir(path)), backends.Default("", nil)).LoadUnsettled()
+			tasks, err := NewStore(testlog.New(t), taskslog.NewStore(filepath.Dir(path)), backends.Default("", nil)).LoadUnsettled()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -849,7 +850,7 @@ func TestStore(t *testing.T) {
 				ForkedFromTaskID: "3BL0EKDTO000",
 			}))
 
-			tasks, err := NewStore(testLogger(), taskslog.NewStore(filepath.Dir(path)), backends.Default("", nil)).LoadUnsettled()
+			tasks, err := NewStore(testlog.New(t), taskslog.NewStore(filepath.Dir(path)), backends.Default("", nil)).LoadUnsettled()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -872,7 +873,7 @@ func TestStore(t *testing.T) {
 				Harness:     string(harness.Claude),
 			})
 			writeLogFile(t, dir, filepath.Base(path), meta)
-			tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
+			tasks, err := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -884,7 +885,7 @@ func TestStore(t *testing.T) {
 			if closeErr := file.Close(); writeErr != nil || closeErr != nil {
 				t.Fatalf("append task log = %v, %v", writeErr, closeErr)
 			}
-			if err := loadMessagesForTest(tasks[0], newTestParserResolver(func(harness.Name) (agent.WireFormat, error) {
+			if err := loadMessagesForTest(t, tasks[0], newTestParserResolver(func(harness.Name) (agent.WireFormat, error) {
 				return claudecode.New().NewWire(), nil
 			})); err != nil {
 				t.Fatal(err)
@@ -922,7 +923,7 @@ func TestStore(t *testing.T) {
 						writeLogFile(t, dir, name, lines...)
 					}
 					path := filepath.Join(dir, name)
-					if _, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil)); err != nil {
+					if _, err := loadLogHeader(testlog.New(t), path, true, backends.Default("", nil)); err != nil {
 						t.Fatalf("loadLogHeader: %v", err)
 					}
 					if _, err := loadSemanticTask(path, newTestParserResolver(func(harness.Name) (agent.WireFormat, error) {
@@ -949,7 +950,7 @@ func TestStore(t *testing.T) {
 							writeLogFile(t, dir, name, lines...)
 						}
 						path := filepath.Join(dir, name)
-						if _, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil)); err == nil || !strings.Contains(err.Error(), mismatch.errorText) {
+						if _, err := loadLogHeader(testlog.New(t), path, true, backends.Default("", nil)); err == nil || !strings.Contains(err.Error(), mismatch.errorText) {
 							t.Fatalf("loadLogHeader error = %v, want %s", err, mismatch.errorText)
 						}
 						if _, err := loadSemanticTask(path, newTestParserResolver(func(harness.Name) (agent.WireFormat, error) {
@@ -974,7 +975,7 @@ func TestStore(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
+			tasks, err := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1003,7 +1004,7 @@ func TestStore(t *testing.T) {
 						`{"t":"agent","ts":6.000,"msg":{"type":"result","total_cost_usd":0.25,"duration_ms":1000,"num_turns":1,"usage":{}}}`,
 						`{"t":"result","state":"purged"}`,
 					)
-					loaded, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
+					loaded, err := loadLogHeader(testlog.New(t), path, true, backends.Default("", nil))
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -1031,7 +1032,7 @@ func TestStore(t *testing.T) {
 				t.Run(fmt.Sprintf("compressed=%t", compressed), func(t *testing.T) {
 					t.Parallel()
 					path := writePhysicalTestLog(t, compressed, lines...)
-					loaded, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
+					loaded, err := loadLogHeader(testlog.New(t), path, true, backends.Default("", nil))
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -1051,7 +1052,7 @@ func TestStore(t *testing.T) {
 						t.Fatalf("inventory eagerly retained messages=%#v", loaded.Timeline)
 					}
 					calls := 0
-					if err := loadMessagesForTest(loaded, newTestParserResolver(func(harness.Name) (agent.WireFormat, error) {
+					if err := loadMessagesForTest(t, loaded, newTestParserResolver(func(harness.Name) (agent.WireFormat, error) {
 						return &agenttest.Wire{Output: func(raw []byte) ([]agent.Message, error) {
 							calls++
 							if string(raw) != `{"type":"assistant","text":"conversation"}` {
@@ -1076,7 +1077,7 @@ func TestStore(t *testing.T) {
 						t.Fatalf("conversation=%#v", loaded.Timeline[2].Message)
 					}
 					if compressed {
-						cached, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
+						cached, err := loadLogHeader(testlog.New(t), path, true, backends.Default("", nil))
 						if err != nil {
 							t.Fatal(err)
 						}
@@ -1105,7 +1106,7 @@ func TestStore(t *testing.T) {
 					t.Run(fmt.Sprintf("%s/compressed=%t", tc.name, compressed), func(t *testing.T) {
 						t.Parallel()
 						path := writePhysicalTestLog(t, compressed, header, tc.line)
-						if _, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil)); err == nil {
+						if _, err := loadLogHeader(testlog.New(t), path, true, backends.Default("", nil)); err == nil {
 							t.Fatal("malformed control accepted")
 						}
 					})
@@ -1126,10 +1127,10 @@ func TestStore(t *testing.T) {
 				t.Run(format, func(t *testing.T) {
 					t.Parallel()
 					path := writePhysicalTestLog(t, compressed, meta, `{"t":"agent","ts":1700000000.123,"msg":{"type":"assistant"} trailing}`)
-					if _, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil)); err == nil || !strings.Contains(err.Error(), "invalid or noncanonical msg envelope") {
+					if _, err := loadLogHeader(testlog.New(t), path, true, backends.Default("", nil)); err == nil || !strings.Contains(err.Error(), "invalid or noncanonical msg envelope") {
 						t.Fatalf("loadLogHeader error = %v, want malformed native message rejection", err)
 					}
-					tasks, err := NewStore(testLogger(), taskslog.NewStore(filepath.Dir(path)), backends.Default("", nil)).LoadUnsettled()
+					tasks, err := NewStore(testlog.New(t), taskslog.NewStore(filepath.Dir(path)), backends.Default("", nil)).LoadUnsettled()
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -1156,7 +1157,7 @@ func TestStore(t *testing.T) {
 			})
 			writeLogFile(t, dir, "a.jsonl", meta)
 
-			tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
+			tasks, err := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1183,7 +1184,7 @@ func TestStore(t *testing.T) {
 			emptyDiff := mustJSON(t, agent.DiffStatMessage{MessageType: "caic_diff_stat", Ts: 2})
 			writeLogFile(t, dir, "a.jsonl", meta, withDiff, emptyDiff)
 
-			tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
+			tasks, err := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1201,7 +1202,7 @@ func TestStore(t *testing.T) {
 			emptyDiff := mustJSON(t, agent.DiffStatMessage{MessageType: "caic_diff_stat", Ts: 1})
 			writeLogFile(t, dir, "a.jsonl", meta, emptyDiff)
 
-			tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
+			tasks, err := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1219,7 +1220,7 @@ func TestStore(t *testing.T) {
 			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged", ReasoningOutputTokens: 123})
 			writeLogFile(t, dir, "a.jsonl", meta, trailer)
 
-			tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
+			tasks, err := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1242,7 +1243,7 @@ func TestStore(t *testing.T) {
 			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 			writeCompressedLogFile(t, dir, "a.jsonl.zst", seqOf(meta, asst, prMsg, trailer))
 
-			st := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil))
+			st := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil))
 			st.cutoff, st.maxSettledPerRepo = time.Time{}, 0
 			tasks, err := st.LoadSettled()
 			if err != nil {
@@ -1275,7 +1276,7 @@ func TestStore(t *testing.T) {
 			writeCompressedLogFile(t, dir, "a.jsonl.zst", seqOf(compressedMeta, trailer))
 			writeLogFile(t, dir, "a.jsonl", plainMeta, trailer)
 
-			tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
+			tasks, err := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1288,7 +1289,7 @@ func TestStore(t *testing.T) {
 		})
 		t.Run("NotExist", func(t *testing.T) {
 			t.Parallel()
-			tasks, err := NewStore(testLogger(), taskslog.NewStore(filepath.Join(t.TempDir(), "nope")), backends.Default("", nil)).LoadUnsettled()
+			tasks, err := NewStore(testlog.New(t), taskslog.NewStore(filepath.Join(t.TempDir(), "nope")), backends.Default("", nil)).LoadUnsettled()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1301,7 +1302,7 @@ func TestStore(t *testing.T) {
 			dir := t.TempDir()
 			writeLogFile(t, dir, "bad.jsonl", `{"type":"not_meta"}`)
 
-			tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
+			tasks, err := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1322,7 +1323,7 @@ func TestStore(t *testing.T) {
 			asst2 := claudeAssistant(t, map[string]any{"type": "text", "text": "world"})
 			writeLogFile(t, dir, "b.jsonl", meta2, init2, asst2)
 
-			tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
+			tasks, err := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1369,7 +1370,7 @@ func TestStore(t *testing.T) {
 			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 			writeLogFile(t, dir, "feat.jsonl", meta, trailer)
 
-			tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
+			tasks, err := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1409,7 +1410,7 @@ func TestStore(t *testing.T) {
 			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 			writeLogFile(t, dir, "plain.jsonl", meta, trailer)
 
-			tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
+			tasks, err := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1435,7 +1436,7 @@ func TestStore(t *testing.T) {
 			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 			writeLogFile(t, dir, "partial.jsonl", meta, trailer)
 
-			tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
+			tasks, err := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1466,7 +1467,7 @@ func TestStore(t *testing.T) {
 			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "stopped"})
 			writeLogFile(t, dir, "session.jsonl", meta, session, trailer)
 
-			tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
+			tasks, err := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1495,7 +1496,7 @@ func TestStore(t *testing.T) {
 			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "stopped"})
 			writeLogFile(t, dir, "pi.jsonl", meta, session, trailer)
 
-			tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
+			tasks, err := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1524,7 +1525,7 @@ func TestStore(t *testing.T) {
 				t.Run(format+" missing header", func(t *testing.T) {
 					t.Parallel()
 					path := writePhysicalTestLog(t, compressed, session)
-					if _, err := loadLogHeader(testLogger(), path, false, newTestParserResolver(func(harness.Name) (agent.WireFormat, error) {
+					if _, err := loadLogHeader(testlog.New(t), path, false, newTestParserResolver(func(harness.Name) (agent.WireFormat, error) {
 						return &agenttest.Wire{Output: func([]byte) ([]agent.Message, error) { return nil, nil }}, nil
 					})); err == nil || !strings.Contains(err.Error(), "invalid first log header") {
 						t.Fatalf("error = %v, want invalid first header", err)
@@ -1533,7 +1534,7 @@ func TestStore(t *testing.T) {
 				t.Run(format+" mixed authority after metadata", func(t *testing.T) {
 					t.Parallel()
 					path := writePhysicalTestLog(t, compressed, meta, session, mismatch)
-					if _, err := loadLogHeader(testLogger(), path, false, newTestParserResolver(func(harness.Name) (agent.WireFormat, error) {
+					if _, err := loadLogHeader(testlog.New(t), path, false, newTestParserResolver(func(harness.Name) (agent.WireFormat, error) {
 						return &agenttest.Wire{Output: func([]byte) ([]agent.Message, error) { return nil, nil }}, nil
 					})); err == nil || !strings.Contains(err.Error(), "unsupported log version") {
 						t.Fatalf("error = %v, want wrong t discriminator", err)
@@ -1542,7 +1543,7 @@ func TestStore(t *testing.T) {
 				t.Run(format+" leading empty lines", func(t *testing.T) {
 					t.Parallel()
 					path := writePhysicalTestLog(t, compressed, "", "  ", meta, session)
-					lt, err := loadLogHeader(testLogger(), path, false, newTestParserResolver(func(harness.Name) (agent.WireFormat, error) {
+					lt, err := loadLogHeader(testlog.New(t), path, false, newTestParserResolver(func(harness.Name) (agent.WireFormat, error) {
 						return &agenttest.Wire{Output: func([]byte) ([]agent.Message, error) { return nil, nil }}, nil
 					}))
 
@@ -1574,7 +1575,7 @@ func TestStore(t *testing.T) {
 			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 			writeLogFile(t, dir, "task.jsonl", meta, planWrite, cleared, meta2, asst2, trailer)
 
-			tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
+			tasks, err := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1605,7 +1606,7 @@ func TestStore(t *testing.T) {
 			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 			writeLogFile(t, dir, "1-r-caic-1.jsonl", meta, prMsg, trailer)
 
-			tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
+			tasks, err := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1632,7 +1633,7 @@ func TestStore(t *testing.T) {
 			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 			writeLogFile(t, dir, "2-r-caic-2.jsonl", meta, asst, prMsg, trailer)
 
-			tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
+			tasks, err := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1671,7 +1672,7 @@ func TestStore(t *testing.T) {
 			lines = append(lines, trailer)
 			writeLogFile(t, dir, "3-r-caic-3.jsonl", lines...)
 
-			tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
+			tasks, err := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1718,7 +1719,7 @@ func TestStore(t *testing.T) {
 				writeLogFile(t, dir, fmt.Sprintf("task-%03d.jsonl", i), line)
 			}
 
-			loaded, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
+			loaded, err := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1739,7 +1740,7 @@ func TestStore(t *testing.T) {
 			meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 3, Prompt: "settle", Repos: []v3.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: string(harness.Claude)})
 			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 			writeCompressedLogFile(t, dir, "s.jsonl.zst", seqOf(meta, trailer))
-			st := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil))
+			st := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil))
 			st.cutoff, st.maxSettledPerRepo = time.Time{}, 0
 			tasks, err := st.LoadSettled()
 			if err != nil {
@@ -1772,7 +1773,7 @@ func TestStore(t *testing.T) {
 					}
 				}
 			}
-			st := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil))
+			st := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil))
 			tasks, err := st.LoadSettled()
 			if err != nil {
 				t.Fatal(err)
@@ -1821,7 +1822,7 @@ func TestStore(t *testing.T) {
 				t.Fatal(err)
 			}
 			cutoff := time.Now().Add(-14 * 24 * time.Hour)
-			st := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil))
+			st := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil))
 			st.cutoff, st.maxSettledPerRepo = cutoff, 0
 			tasks, err := st.LoadSettled()
 			if err != nil {
@@ -1843,7 +1844,7 @@ func TestStore(t *testing.T) {
 			// source is authoritative, so the compressed scan skips the twin.
 			writeLogFile(t, dir, "a.jsonl", meta, trailer)
 			writeCompressedLogFile(t, dir, "a.jsonl.zst", seqOf(meta, trailer))
-			st := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil))
+			st := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil))
 			st.cutoff, st.maxSettledPerRepo = time.Time{}, 0
 			tasks, err := st.LoadSettled()
 			if err != nil {
@@ -1865,7 +1866,7 @@ func TestStore(t *testing.T) {
 			writeLogFile(t, dir, "live1-repo-branch.jsonl", wantedMeta)
 			writeLogFile(t, dir, "live10-repo-branch.jsonl", unrelatedMeta)
 
-			tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadForTaskIDs([]string{"live1"})
+			tasks, err := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)).LoadForTaskIDs([]string{"live1"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1881,7 +1882,7 @@ func TestStore(t *testing.T) {
 			dir := t.TempDir()
 			meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 3, Harness: "pi", Prompt: "retained"})
 			writeCompressedLogFile(t, dir, "retained-repo-branch.jsonl.zst", seqOf(meta))
-			tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadForTaskIDs([]string{"retained"})
+			tasks, err := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)).LoadForTaskIDs([]string{"retained"})
 			if err != nil || len(tasks) != 1 {
 				t.Fatalf("archived retained task: tasks=%v err=%v", tasks, err)
 			}
@@ -1891,7 +1892,7 @@ func TestStore(t *testing.T) {
 		})
 		t.Run("Missing", func(t *testing.T) {
 			t.Parallel()
-			if _, err := NewStore(testLogger(), taskslog.NewStore(t.TempDir()), backends.Default("", nil)).LoadForTaskIDs([]string{"missing"}); err == nil || !strings.Contains(err.Error(), "missing task logs") {
+			if _, err := NewStore(testlog.New(t), taskslog.NewStore(t.TempDir()), backends.Default("", nil)).LoadForTaskIDs([]string{"missing"}); err == nil || !strings.Contains(err.Error(), "missing task logs") {
 				t.Fatalf("LoadLogsForTaskIDs error = %v, want missing-log error", err)
 			}
 		})
@@ -1899,7 +1900,7 @@ func TestStore(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
 			writeLogFile(t, dir, "broken-repo-branch.jsonl", `{"type":"assistant"}`)
-			_, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadForTaskIDs([]string{"broken"})
+			_, err := NewStore(testlog.New(t), taskslog.NewStore(dir), backends.Default("", nil)).LoadForTaskIDs([]string{"broken"})
 			if err == nil || !strings.Contains(err.Error(), "load task log") {
 				t.Fatalf("LoadForTaskIDs error = %v, want invalid-log error", err)
 			}

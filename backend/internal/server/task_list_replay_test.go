@@ -5,7 +5,6 @@ package server
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -18,6 +17,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun/taskruntest"
+	"github.com/caic-xyz/caic/internal/testlog"
 )
 
 // TestTaskListEventsReplayTransitions verifies that a task whose state advances
@@ -113,7 +113,7 @@ func BenchmarkTaskListStreamInitialBatch(b *testing.B) {
 				insertTestTask(s, id, mustNewTask(b, id, agent.Prompt{Text: "benchmark task"}, harness.Claude))
 			}
 			s.taskMgr.CompleteRestoration(nil)
-			ctx, cancel := context.WithCancel(context.WithValue(b.Context(), httpLoggerKey{}, slog.New(slog.DiscardHandler)))
+			ctx, cancel := context.WithCancel(context.WithValue(b.Context(), httpLoggerKey{}, testlog.New(b)))
 			cancel()
 			req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/tasks/events", nil)
 			handler := testTaskHandlers(s)

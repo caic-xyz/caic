@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -20,6 +19,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
+	"github.com/caic-xyz/caic/internal/testlog"
 	"github.com/maruel/genai"
 )
 
@@ -134,7 +134,7 @@ func BenchmarkFailureSummary(b *testing.B) {
 				if mode == "provider_failure" {
 					p = &ciProvider{err: errors.New("provider unavailable")}
 				}
-				log := slog.New(slog.DiscardHandler)
+				log := testlog.New(b)
 				b.ReportAllocs()
 				b.SetBytes(4 * size)
 				b.ResetTimer()
@@ -160,7 +160,7 @@ func BenchmarkFailureSummaryRetainedHeap(b *testing.B) {
 			if mode == "provider_failure" {
 				p = &ciProvider{err: errors.New("provider unavailable")}
 			}
-			log := slog.New(slog.DiscardHandler)
+			log := testlog.New(b)
 			for range b.N {
 				runtime.GC()
 				var before, after runtime.MemStats
@@ -188,7 +188,7 @@ func BenchmarkFailurePromptRepairRetainedHeap(b *testing.B) {
 			if mode == "oversized_provider" {
 				p = &ciProvider{text: "useful summary\n", repeat: 1 << 20}
 			}
-			log := slog.New(slog.DiscardHandler)
+			log := testlog.New(b)
 			for range b.N {
 				runtime.GC()
 				var before, after runtime.MemStats
