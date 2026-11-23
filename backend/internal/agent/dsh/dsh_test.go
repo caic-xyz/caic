@@ -353,7 +353,7 @@ func TestSubagentTool(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixture := bytes.Split(bytes.TrimSpace(data), []byte{'\n'})
-	const id = "77c5125c-db9e-4bb0-8bfe-97ac042d25c5"
+	const id = "dsh:subagent:77c5125c-db9e-4bb0-8bfe-97ac042d25c5"
 	spawn := agent.NativeSubagent{
 		ToolUseID: "call_00_WcW8QyRo4dqT8fFtimbd4993", Scope: agent.NativeSubagentScopeAgent, ID: id,
 		Label: "Silly duck task", Prompt: "act as a rubber duck", Status: agent.NativeSubagentStatusRunning,

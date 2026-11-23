@@ -136,7 +136,7 @@ func (p *toolParser) Parse(tool *acp.ToolCallUpdateUpdate, messages []agent.Mess
 				s := agent.NativeSubagent{
 					ToolUseID: tool.ToolCallID,
 					Scope:     agent.NativeSubagentScopeAgent,
-					ID:        id,
+					ID:        "dsh:subagent:" + id,
 					Label:     pending.label,
 					Prompt:    pending.prompt,
 					Status:    agent.NativeSubagentStatusRunning,

@@ -9,14 +9,14 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 )
 
-// TestNativeSubagentSillyEvidence replays a delegation minimized from the
-// recorded ACP trace. dsh reports the child only by its spawn output, so the
-// prompt response settles the card; the fixture records the prompt request
-// that response answers.
-func TestNativeSubagentSillyEvidence(t *testing.T) {
+// TestNativeSubagentJokeEvidence replays the standardized delegation, minimized
+// from the recorded ACP trace. dsh reports the child only by its spawn output,
+// so the prompt response settles the card; the fixture records the prompt
+// request that response answers.
+func TestNativeSubagentJokeEvidence(t *testing.T) {
 	t.Parallel()
 	newWire := func() agent.WireFormat { return New("", nil).NewWire() }
-	evidence := agenttest.LoadNativeSubagentEvidence(t, "testdata/evidence/native-subagent-silly-v3.jsonl", newWire)
+	evidence := agenttest.LoadNativeSubagentEvidence(t, "testdata/evidence/native-subagent-joke-v3.jsonl", newWire)
 	for _, test := range []struct {
 		name         string
 		observations []agent.NativeSubagent
@@ -34,7 +34,7 @@ func TestNativeSubagentSillyEvidence(t *testing.T) {
 				t.Fatalf("cards = %#v active = %d, want one settled card", cards, active)
 			}
 			card := cards[0]
-			if card.ID != "test-child-session" || card.ToolUseID != "test-spawn-call" || card.Label != "Silly duck task" {
+			if card.ID != "dsh:subagent:agent-1" || card.ToolUseID != "test-spawn-call" || card.Label != "Tell README.md joke" {
 				t.Fatalf("card = %#v, want the spawned child identity and description", card)
 			}
 			if card.Status != agent.NativeSubagentStatusCompleted {

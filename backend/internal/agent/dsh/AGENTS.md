@@ -45,9 +45,12 @@ prompt response settles the prompt's cards: `end_turn` completes them,
 `cancelled` interrupts them, and other stop reasons or errors retire them as
 unknown. The child's result is not an ACP record, so it cannot be attached to
 the card. The parent model sees that result, but the journal does not.
-`testdata/subagent.jsonl` trims and anonymizes records of a
-local dsh task (not a `record-trace` recording).
-`testdata/evidence/native-subagent-silly-v3.jsonl` minimizes it to the
+The card ID is `dsh:subagent:` followed by the spawned ID. `testdata/subagent.jsonl`
+trims and anonymizes records of a local dsh task (not a `record-trace`
+recording). `testdata/native-subagent-joke.jsonl` records the standardized
+delegation with dsh 0.2.2-rc.5, which then waits with `wait_agent`; that tool
+returns only `{"timedOut":false}`, not the child's result.
+`testdata/evidence/native-subagent-joke-v3.jsonl` minimizes it to the
 `session/prompt` request, the spawn, and the prompt response. The request lets
 the wire correlate the response; the smoke replay sends it as the task's prompt.
 

@@ -44,15 +44,15 @@ const (
 )
 
 // smokeReplayRecordings lists every retained recording the smoke test delivers:
-// the standardized delegation for each harness except dsh, whose recording
-// predates it, plus Pi's workflow orchestration, which is the only recording
-// that pins the batch scope. The agy and dsh recordings settle on their prompt
-// response, so they carry the native prompt request it answers.
+// the standardized delegation for each harness, plus Pi's workflow
+// orchestration, which is the only recording that pins the batch scope. The agy
+// and dsh recordings settle on their prompt response, so they carry the native
+// prompt request it answers.
 var smokeReplayRecordings = []smokeReplayRecording{
 	{harness.Antigravity, "native-subagent-joke-v3.jsonl"},
 	{harness.Claude, "native-subagent-joke-v3.jsonl"},
 	{harness.Codex, "native-subagent-joke-v3.jsonl"},
-	{harness.Dsh, "native-subagent-silly-v3.jsonl"},
+	{harness.Dsh, "native-subagent-joke-v3.jsonl"},
 	{harness.OpenCode, "native-subagent-joke-v3.jsonl"},
 	{harness.Pi, "native-subagent-joke-v3.jsonl"},
 	{harness.Pi, "native-subagent-workflow-v3.jsonl"},
@@ -149,9 +149,7 @@ func runSmokeReplay(t *testing.T, fixture *smokeServer, h harness.Name, tc *smok
 		t.Fatalf("task %s: pre-restart cards = %#v active = %d, want %d running recorded agents", taskID, beforeCards, beforeActive, len(tc.contract.Cards))
 	}
 	for i := range beforeCards {
-		// An ID without a "harness:kind:" scheme is its own identity.
-		identity := tc.contract.Cards[i].Identity
-		if beforeCards[i].Status != agent.NativeSubagentStatusRunning || beforeCards[i].ID != identity && !strings.HasPrefix(beforeCards[i].ID, identity+":") {
+		if beforeCards[i].Status != agent.NativeSubagentStatusRunning || !strings.HasPrefix(beforeCards[i].ID, tc.contract.Cards[i].Identity+":") {
 			t.Fatalf("task %s: pre-restart card %d = %#v, want the fixture identity %q still running", taskID, i, beforeCards[i], tc.contract.Cards[i].Identity)
 		}
 	}
