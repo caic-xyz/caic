@@ -1,7 +1,7 @@
 // Tooltip: hover on desktop, tap-to-toggle on mobile.
 // Uses a Portal so the popup is never clipped by overflow: hidden ancestors.
 
-import { createSignal, createEffect, Show, onCleanup, type JSX } from "solid-js";
+import { createSignal, createEffect, createUniqueId, Show, onCleanup, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 
 import styles from "./Tooltip.module.css";
@@ -19,6 +19,7 @@ const GAP = 6; // px between element and popup
 
 export default function Tooltip(props: Props) {
   const [show, setShow] = createSignal(false);
+  const popupId = createUniqueId();
   let wrapperRef: HTMLSpanElement | undefined;
   let popupRef: HTMLSpanElement | undefined;
   let touch = false;
@@ -45,17 +46,15 @@ export default function Tooltip(props: Props) {
 
   // Position the popup in fixed coordinates relative to the wrapper.
   createEffect(() => {
-    if (!show() || !popupRef || !wrapperRef) return;
+    if (!show() || !props.text || !popupRef || !wrapperRef) return;
     const wr = wrapperRef.getBoundingClientRect();
     const pr = popupRef.getBoundingClientRect();
     const margin = 4;
 
-    // Vertical: prefer above, fall back to below.
-    if (wr.top - GAP - pr.height < 0) {
-      popupRef.style.top = `${wr.bottom + GAP}px`;
-    } else {
-      popupRef.style.top = `${wr.top - GAP - pr.height}px`;
-    }
+    // Prefer above, then below, and keep tall content in the viewport.
+    const above = wr.top - GAP - pr.height;
+    const top = above >= margin ? above : wr.bottom + GAP;
+    popupRef.style.top = `${Math.max(margin, Math.min(top, window.innerHeight - pr.height - margin))}px`;
 
     // Horizontal: center on wrapper, clamp to viewport.
     let left = wr.left + wr.width / 2 - pr.width / 2;
@@ -79,6 +78,7 @@ export default function Tooltip(props: Props) {
         class={wrapperClass()}
         role="button"
         tabIndex={0}
+        aria-describedby={show() ? popupId : undefined}
         // Touch generates compatibility mouse and focus events before click.
         // Only click toggles visibility for that sequence.
         onPointerOver={(e) => {
@@ -120,7 +120,7 @@ export default function Tooltip(props: Props) {
         {props.children}
         <Show when={show()}>
           <Portal>
-            <span ref={popupRef} class={styles.popup}>
+            <span ref={popupRef} id={popupId} role="tooltip" class={styles.popup}>
               {props.text ?? ""}
             </span>
           </Portal>

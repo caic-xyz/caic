@@ -1,9 +1,15 @@
-// Formats a task's background-work counts and lists the running items that history metadata reports.
+// Formats background-work summaries and derives the running items shown in task details.
 
-import type { HistoryActivity, HistoryBackgroundCommand, HistoryMetadata, TaskBackground } from "@sdk/types.gen";
+import type {
+  HistoryActivity,
+  HistoryBackgroundCommand,
+  HistoryMetadata,
+  TaskBackground,
+  TaskBackgroundItem,
+} from "@sdk/types.gen";
 import { toolIdentity } from "./grouping";
 
-export type BackgroundKind = "command" | "agent" | "watch";
+export type BackgroundKind = TaskBackgroundItem["kind"];
 
 export interface BackgroundItem {
   kind: BackgroundKind;
@@ -62,6 +68,30 @@ export function backgroundCounts(background: TaskBackground | undefined): Backgr
 // backgroundLabel names the counts, such as "Background: 2 agents · 1 watch".
 export function backgroundLabel(counts: readonly BackgroundCount[]): string {
   return `Background: ${counts.map((c) => count(c.count, c.kind)).join(" · ")}`;
+}
+
+export function backgroundItemTitle(kindName: string, label: string): string {
+  return label && label !== kindName ? `${kindName}: ${label}` : kindName;
+}
+
+export function backgroundTooltip(
+  counts: readonly BackgroundCount[],
+  items: readonly TaskBackgroundItem[] | undefined,
+): string {
+  const lines = [backgroundLabel(counts)];
+  for (const kind of kindOrder) {
+    for (const item of items ?? []) {
+      if (item.kind !== kind) continue;
+      const name =
+        kind === "agent" ? agentKindName({ kind: item.agentKind, scope: item.agentScope }) : genericKindNames[kind];
+      lines.push(backgroundItemTitle(name, item.label));
+    }
+  }
+  if (items) {
+    const remaining = counts.reduce((total, entry) => total + entry.count, 0) - items.length;
+    if (remaining > 0) lines.push(`${remaining} more`);
+  }
+  return lines.join("\n");
 }
 
 // commandSettled reports whether a settled task makes a running command record

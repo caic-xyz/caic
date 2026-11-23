@@ -1,4 +1,4 @@
-// Compact sidebar task card with container resource levels, background-work counts beside context usage, and per-repository Git markers.
+// Compact sidebar task card with container resource levels, background-work counts and tooltip, and per-repository Git markers.
 
 import { For, Show, createEffect, createMemo, createSignal, onMount, onCleanup } from "solid-js";
 import type { Accessor } from "solid-js";
@@ -22,6 +22,7 @@ import type {
   TaskRateLimit,
   TaskRepo,
   TaskBackground,
+  TaskBackgroundItem,
   TaskState,
   SyncTarget,
 } from "@sdk/types.gen";
@@ -36,7 +37,7 @@ import Tooltip from "./Tooltip";
 import TailscaleIcon from "./tailscale.svg?solid";
 import TokenIcon from "./github.svg?solid";
 import styles from "./TaskCard.module.css";
-import { backgroundCounts, backgroundLabel } from "../backgroundActivity";
+import { backgroundCounts, backgroundLabel, backgroundTooltip } from "../backgroundActivity";
 import { formatElapsed, formatTokens, tokenColor, stateColor, staleStateColor, isCacheStale } from "../formatting";
 import { harnessLabel } from "../harnessLabels";
 import { formatQuotaCountdown } from "../quota";
@@ -86,6 +87,7 @@ export interface TaskCardProps {
   ciStatus?: CIStatus;
   /** Running background work, which explains a running task after its result. */
   background?: TaskBackground;
+  backgroundItems?: TaskBackgroundItem[];
   ciChecks?: ForgeCheck[];
   autoFixPR?: boolean;
   rateLimit?: TaskRateLimit;
@@ -613,7 +615,7 @@ export default function TaskCard(props: TaskCardProps) {
               </Show>
               <Show when={background().length > 0}>
                 {" · "}
-                <Tooltip text={backgroundLabel(background())} stopActivationPropagation>
+                <Tooltip text={backgroundTooltip(background(), props.backgroundItems)} stopActivationPropagation>
                   <span
                     class={styles.background}
                     data-testid="task-card-background"

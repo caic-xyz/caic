@@ -483,6 +483,16 @@ SyncTarget selects where to push changes.
 | `branch` | Push to the task's own branch (default). |
 | `default` | Push existing commits to the repo's default branch. |
 
+### TaskBackgroundItemKind
+
+TaskBackgroundItemKind identifies the kind of running background work.
+
+| Value | Description |
+|-------|-------------|
+| `agent` |  |
+| `command` |  |
+| `watch` |  |
+
 ### TaskState
 
 TaskState is the lifecycle state of a task.
@@ -1217,6 +1227,17 @@ watches and other commands do not.
 | `watches` | `int` | Commands that only relay events, such as Claude Code's Monitor tool. | yes |
 | `agents` | `int` | Background native subagents. | yes |
 
+### TaskBackgroundItem
+
+TaskBackgroundItem describes one running command, agent, or watch.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `kind` | `TaskBackgroundItemKind` |  | yes |
+| `label` | `string` | Preview of the harness label, or the item ID when unnamed. | yes |
+| `agentKind` | `string` |  |  |
+| `agentScope` | `EventNativeSubagentScope` |  |  |
+
 ### Task
 
 Task is the JSON representation sent to the frontend.
@@ -1279,6 +1300,7 @@ Task is the JSON representation sent to the frontend.
 | `resourceUsage` | `EventStats` | Latest runtime sample; absent before sampling. Not persisted. |  |
 | `rateLimit` | `TaskRateLimit` | Current quota block resolved by the backend. |  |
 | `background` | `TaskBackground` | Running background work; absent when none runs. |  |
+| `backgroundItems` | `TaskBackgroundItem[]` | Short preview of running work; Background has the full counts. |  |
 | `gitHubToken` | `boolean` | Per-task feature flags. |  |
 
 ### BotFixPRReq

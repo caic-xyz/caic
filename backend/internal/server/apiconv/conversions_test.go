@@ -5,6 +5,7 @@ package apiconv
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,6 +24,36 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/maruel/ksid"
 )
+
+func TestTaskBackgroundItems(t *testing.T) {
+	t.Parallel()
+	t.Run("shortens multiline and long labels", func(t *testing.T) {
+		t.Parallel()
+		got := taskBackgroundItems([]taskrun.BackgroundItem{
+			{Kind: taskrun.BackgroundKindCommand, Label: "cat <<EOF\r\n" + strings.Repeat("private output\n", 100)},
+			{Kind: taskrun.BackgroundKindAgent, Label: strings.Repeat("🌱", 40), AgentKind: "Explore"},
+		})
+		want := []v1.TaskBackgroundItem{
+			{Kind: v1.TaskBackgroundItemKindAgent, Label: strings.Repeat("🌱", 23) + "…", AgentKind: "Explore"},
+			{Kind: v1.TaskBackgroundItemKindCommand, Label: "cat <<EOF…"},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("background preview = %+v, want %+v", got, want)
+		}
+	})
+	t.Run("keeps agents in a crowded preview", func(t *testing.T) {
+		t.Parallel()
+		items := make([]taskrun.BackgroundItem, 8)
+		for i := range items[:7] {
+			items[i] = taskrun.BackgroundItem{Kind: taskrun.BackgroundKindCommand, Label: "Run checks"}
+		}
+		items[7] = taskrun.BackgroundItem{Kind: taskrun.BackgroundKindAgent, ID: "agent-1"}
+		got := taskBackgroundItems(items)
+		if len(got) != 6 || got[0].Kind != v1.TaskBackgroundItemKindAgent || got[0].Label != "agent-1" {
+			t.Fatalf("background preview = %+v, want six items including the agent ID first", got)
+		}
+	})
+}
 
 func mustNewTask(t testing.TB, id ksid.ID, prompt agent.Prompt) *taskrun.Task {
 	tk, err := taskrun.NewTask(id, prompt, harness.Claude, "", "", "", "", "")

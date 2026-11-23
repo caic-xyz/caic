@@ -432,6 +432,17 @@ export type SyncTarget =
 export const SyncTargetBranch = "branch";
 export const SyncTargetDefault = "default";
 
+export type TaskBackgroundItemKind =
+  | "agent"
+  | "command"
+  | "watch";
+/**
+ * Supported values.
+ */
+export const TaskBackgroundItemKindAgent = "agent";
+export const TaskBackgroundItemKindCommand = "command";
+export const TaskBackgroundItemKindWatch = "watch";
+
 export type TaskState =
   | "pending"
   | "branching"
@@ -1146,6 +1157,15 @@ export interface TaskBackground {
   agents: number /* int */;
 }
 
+/** TaskBackgroundItem describes one running command, agent, or watch. */
+export interface TaskBackgroundItem {
+  kind: TaskBackgroundItemKind;
+  /** Preview of the harness label, or the item ID when unnamed. */
+  label: string;
+  agentKind?: string;
+  agentScope?: EventNativeSubagentScope;
+}
+
 /** Task is the JSON representation sent to the frontend. */
 export interface Task {
   pendingInput: PendingInput | null;
@@ -1225,6 +1245,8 @@ export interface Task {
   rateLimit?: TaskRateLimit;
   /** Running background work; absent when none runs. */
   background?: TaskBackground;
+  /** Short preview of running work; Background has the full counts. */
+  backgroundItems?: TaskBackgroundItem[];
   /** Per-task feature flags. */
   gitHubToken?: boolean;
 }

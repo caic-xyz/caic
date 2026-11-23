@@ -1275,6 +1275,39 @@ object SyncTargetSerializer : KSerializer<SyncTarget> {
     }
 }
 
+@Serializable(with = TaskBackgroundItemKindSerializer::class)
+sealed interface TaskBackgroundItemKind {
+    val value: String
+    @Serializable
+    data object Agent : TaskBackgroundItemKind {
+        override val value = "agent"
+    }
+    @Serializable
+    data object Command : TaskBackgroundItemKind {
+        override val value = "command"
+    }
+    @Serializable
+    data object Watch : TaskBackgroundItemKind {
+        override val value = "watch"
+    }
+    @Serializable
+    data class Other(override val value: String) : TaskBackgroundItemKind
+}
+
+object TaskBackgroundItemKindSerializer : KSerializer<TaskBackgroundItemKind> {
+    override val descriptor = PrimitiveSerialDescriptor("TaskBackgroundItemKind", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: TaskBackgroundItemKind) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): TaskBackgroundItemKind {
+        val v = decoder.decodeString()
+        return when (v) {
+            "agent" -> TaskBackgroundItemKind.Agent
+            "command" -> TaskBackgroundItemKind.Command
+            "watch" -> TaskBackgroundItemKind.Watch
+            else -> TaskBackgroundItemKind.Other(v)
+        }
+    }
+}
+
 @Serializable(with = TaskStateSerializer::class)
 sealed interface TaskState {
     val value: String
@@ -2136,6 +2169,16 @@ data class TaskBackground(
     val agents: Int,
 )
 
+/** TaskBackgroundItem describes one running command, agent, or watch. */
+@Serializable
+data class TaskBackgroundItem(
+    val kind: TaskBackgroundItemKind,
+    /** Preview of the harness label, or the item ID when unnamed. */
+    val label: String,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val agentKind: String? = null,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val agentScope: EventNativeSubagentScope? = null,
+)
+
 /** Task is the JSON representation sent to the frontend. */
 @Serializable
 data class Task(
@@ -2216,6 +2259,8 @@ data class Task(
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val rateLimit: TaskRateLimit? = null,
     /** Running background work; absent when none runs. */
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val background: TaskBackground? = null,
+    /** Short preview of running work; Background has the full counts. */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val backgroundItems: List<TaskBackgroundItem>? = null,
     /** Per-task feature flags. */
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val gitHubToken: Boolean? = null,
 )

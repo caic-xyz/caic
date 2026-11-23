@@ -2,7 +2,7 @@
 
 import { createMemo, For, Show } from "solid-js";
 
-import { genericKindNames, type BackgroundItem } from "../backgroundActivity";
+import { backgroundItemTitle, genericKindNames, type BackgroundItem } from "../backgroundActivity";
 import { createLiveDuration } from "../liveDuration";
 import { formatTimingDuration } from "../timing";
 import BackgroundKindIcon from "./BackgroundKindIcon";
@@ -47,7 +47,7 @@ function Chip(props: { item: BackgroundItem; onReveal: (item: BackgroundItem) =>
         class={styles.chip}
         data-testid="background-chip"
         data-kind={props.item.kind}
-        title={label() ? `${props.item.kindName}: ${label()}` : props.item.kindName}
+        title={backgroundItemTitle(props.item.kindName, props.item.label)}
         onClick={() => props.onReveal(props.item)}
         // Keyboard focus can land on a chip that the narrow single row clips;
         // wrapped chips are already in view, so this is then a no-op.

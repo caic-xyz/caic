@@ -736,6 +736,7 @@ type Snapshot struct {
 	RateLimit          RateLimit
 	TurnError          string // Latest root turn failure; empty after a successful or new turn.
 	Background         BackgroundCounts
+	BackgroundItems    []BackgroundItem
 }
 
 // BackgroundCounts counts running background work by kind. Agents and the
@@ -759,8 +760,11 @@ const (
 
 // BackgroundItem is one running background card.
 type BackgroundItem struct {
-	Kind  BackgroundKind
-	Label string
+	Kind       BackgroundKind
+	ID         string
+	Label      string
+	AgentKind  string
+	AgentScope agent.NativeSubagentScope
 	// StartedAt is the first running observation of the card's current run,
 	// as in the task history; zero when that observation carried no time.
 	StartedAt time.Time
@@ -844,27 +848,11 @@ func (t *Task) SnapshotWithStateHistory(after uint64) (Snapshot, uint64, []State
 func (t *Task) BackgroundActivity() BackgroundActivity {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	a := BackgroundActivity{Counts: t.backgroundCountsLocked(), WakingCommands: t.backgroundCommands.Active(), TurnEnded: t.turnEnded}
-	var items []BackgroundItem
-	for _, c := range t.backgroundCommands.Commands() {
-		if c.Status != agent.BackgroundCommandStatusRunning {
-			continue
-		}
-		kind := BackgroundKindCommand
-		if c.Watch {
-			kind = BackgroundKindWatch
-		}
-		items = append(items, BackgroundItem{Kind: kind, Label: c.Label, StartedAt: t.backgroundStarts[c.ID].at})
+	counts := t.backgroundCountsLocked()
+	return BackgroundActivity{
+		Counts: counts, Items: t.backgroundItemsLocked(counts),
+		WakingCommands: t.backgroundCommands.Active(), TurnEnded: t.turnEnded,
 	}
-	subagents := t.nativeSubagents.Subagents()
-	for i := range subagents {
-		if s := &subagents[i]; s.Background && s.Status == agent.NativeSubagentStatusRunning {
-			items = append(items, BackgroundItem{Kind: BackgroundKindAgent, Label: s.Label, StartedAt: t.backgroundStarts[s.ID].at})
-		}
-	}
-	slices.SortStableFunc(items, func(a, b BackgroundItem) int { return a.StartedAt.Compare(b.StartedAt) })
-	a.Items = items
-	return a
 }
 
 // Messages returns a copy of all received agent messages.
@@ -1597,6 +1585,7 @@ func (t *Task) snapshotLocked() Snapshot {
 	if t.statsLen > 0 {
 		sample = new(t.statsRing[(t.statsHead+t.statsLen-1)%StatsRingSize])
 	}
+	counts := t.backgroundCountsLocked()
 	return Snapshot{
 		SessionMetadata:    t.sessionMetadata,
 		State:              t.stateLocked(),
@@ -1647,7 +1636,8 @@ func (t *Task) snapshotLocked() Snapshot {
 		CIChecks:           append([]forge.Check(nil), t.ciChecks...),
 		RateLimit:          t.rateLimit,
 		TurnError:          t.exitStatus.TurnError,
-		Background:         t.backgroundCountsLocked(),
+		Background:         counts,
+		BackgroundItems:    t.backgroundItemsLocked(counts),
 	}
 }
 
@@ -1659,23 +1649,57 @@ func (t *Task) backgroundCountsLocked() BackgroundCounts {
 	}
 }
 
+func (t *Task) backgroundItemsLocked(counts BackgroundCounts) []BackgroundItem {
+	n := counts.Commands + counts.Watches + counts.Agents
+	if n == 0 {
+		return nil
+	}
+	items := make([]BackgroundItem, 0, n)
+	for c := range t.backgroundCommands.All {
+		if c.Status != agent.BackgroundCommandStatusRunning {
+			continue
+		}
+		kind := BackgroundKindCommand
+		if c.Watch {
+			kind = BackgroundKindWatch
+		}
+		items = append(items, BackgroundItem{Kind: kind, ID: c.ID, Label: c.Label, StartedAt: t.backgroundStarts[c.ID].at})
+	}
+	for s := range t.nativeSubagents.All {
+		if s.Background && s.Status == agent.NativeSubagentStatusRunning {
+			items = append(items, BackgroundItem{
+				Kind: BackgroundKindAgent, ID: s.ID, Label: s.Label, StartedAt: t.backgroundStarts[s.ID].at,
+				AgentKind: s.Kind, AgentScope: s.Scope,
+			})
+		}
+	}
+	slices.SortStableFunc(items, func(a, b BackgroundItem) int { return a.StartedAt.Compare(b.StartedAt) })
+	return items
+}
+
 // foldBackgroundLocked folds a background lifecycle message into the card
 // timelines and records the first running observation of each card's run.
-// Other messages are ignored.
-func (t *Task) foldBackgroundLocked(m agent.Message, at time.Time) {
+// It reports changes to display labels and names for work already running.
+func (t *Task) foldBackgroundLocked(m agent.Message, at time.Time) bool {
 	switch m := m.(type) {
 	case *agent.NativeSubagentMessage:
+		before, _ := t.nativeSubagents.Subagent(m.Subagent.ID)
 		t.nativeSubagents.Apply(&m.Subagent)
 		s, _ := t.nativeSubagents.Subagent(m.Subagent.ID)
 		t.observeBackgroundStartLocked(s.ID, s.RunID, s.Status == agent.NativeSubagentStatusRunning, at)
+		return s.Background && s.Status == agent.NativeSubagentStatusRunning &&
+			(s.Label != before.Label || s.Kind != before.Kind || s.Scope != before.Scope)
 	case *agent.BackgroundCommandMessage:
+		before, _ := t.backgroundCommands.Command(m.Command.ID)
 		t.backgroundCommands.Apply(&m.Command)
 		c, _ := t.backgroundCommands.Command(m.Command.ID)
 		t.observeBackgroundStartLocked(c.ID, "", c.Status == agent.BackgroundCommandStatusRunning, at)
+		return c.Status == agent.BackgroundCommandStatusRunning && c.Label != before.Label
 	case *agent.BackgroundRetiredMessage:
 		t.nativeSubagents.Retire(m.ID)
 		t.backgroundCommands.Retire(m.ID)
 	}
+	return false
 }
 
 // observeBackgroundStartLocked applies the task history's StartedAt rule: a
@@ -2018,14 +2042,13 @@ func (t *Task) foldMessageLocked(m agent.Message, at, producerAt time.Time, repl
 	switch m.(type) {
 	case *agent.NativeSubagentMessage, *agent.BackgroundCommandMessage, *agent.BackgroundRetiredMessage, *agent.ExitMessage:
 		before := t.backgroundCountsLocked()
-		t.foldBackgroundLocked(m, at)
+		detailsChanged := t.foldBackgroundLocked(m, at)
 		// The root harness process hosts its native subagents, so its exit ends
 		// their observable lifecycle and they no longer keep the task running.
 		if _, ok := m.(*agent.ExitMessage); ok && !child {
 			t.hostExitedLocked()
 		}
-		// Counts change the card summary without a state change.
-		summaryChanged = summaryChanged || t.backgroundCountsLocked() != before
+		summaryChanged = summaryChanged || detailsChanged || t.backgroundCountsLocked() != before
 		if cur := t.stateLocked(); (cur == task.StateWaiting || cur == task.StateRunning) && t.turnEnded {
 			if next := t.settledTurnStateLocked(); next != cur {
 				t.setActivityLocked(next, stateAt)

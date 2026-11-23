@@ -3406,11 +3406,16 @@ func TestTask(t *testing.T) {
 				if changed := tk.addParsedMessage(agent.TimedMessage{ProducerTime: start, Message: watch}); !changed {
 					t.Fatal("a new watch did not report a summary change")
 				}
-				cmd := &agent.BackgroundCommandMessage{Command: agent.BackgroundCommand{ID: "c", Label: "Run tests", Status: agent.BackgroundCommandStatusRunning, WakesAgent: true}}
+				cmd := &agent.BackgroundCommandMessage{Command: agent.BackgroundCommand{ID: "c", Status: agent.BackgroundCommandStatusRunning, WakesAgent: true}}
 				if changed := tk.addParsedMessage(agent.TimedMessage{ProducerTime: start.Add(time.Second), Message: cmd}); !changed {
 					t.Fatal("a new command did not report a summary change")
 				}
-				if changed := tk.addParsedMessage(agent.TimedMessage{ProducerTime: start.Add(2 * time.Second), Message: cmd}); changed {
+				named := *cmd
+				named.Command.Label = "Run tests"
+				if changed := tk.addParsedMessage(agent.TimedMessage{ProducerTime: start.Add(2 * time.Second), Message: &named}); !changed {
+					t.Fatal("a newly reported command label did not report a summary change")
+				}
+				if changed := tk.addParsedMessage(agent.TimedMessage{ProducerTime: start.Add(3 * time.Second), Message: &named}); changed {
 					t.Fatal("a repeated observation reported a summary change")
 				}
 				snap := tk.Snapshot()
@@ -3418,8 +3423,11 @@ func TestTask(t *testing.T) {
 					t.Fatalf("snapshot = %v %+v, want running with 1 command and 1 watch", snap.State, snap.Background)
 				}
 				want := []BackgroundItem{
-					{Kind: BackgroundKindWatch, Label: "results", StartedAt: start},
-					{Kind: BackgroundKindCommand, Label: "Run tests", StartedAt: start.Add(time.Second)},
+					{Kind: BackgroundKindWatch, ID: "w", Label: "results", StartedAt: start},
+					{Kind: BackgroundKindCommand, ID: "c", Label: "Run tests", StartedAt: start.Add(time.Second)},
+				}
+				if !slices.Equal(snap.BackgroundItems, want) {
+					t.Fatalf("snapshot items = %+v, want %+v", snap.BackgroundItems, want)
 				}
 				if got := tk.BackgroundActivity(); !slices.Equal(got.Items, want) || got.Counts != snap.Background || got.TurnEnded {
 					t.Fatalf("activity = %+v, want %+v during the turn", got, want)

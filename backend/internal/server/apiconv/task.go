@@ -4,7 +4,9 @@ package apiconv
 
 import (
 	"fmt"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
@@ -158,6 +160,7 @@ func Task(in *TaskInput) (v1.Task, error) {
 	}
 	out.TurnError = snap.TurnError
 	out.Background = v1.TaskBackground{Commands: snap.Background.Commands, Watches: snap.Background.Watches, Agents: snap.Background.Agents}
+	out.BackgroundItems = taskBackgroundItems(snap.BackgroundItems)
 	out.RepoStates = RepoStates(snap.RepoStates, in.Repos)
 	out.ForgeOwner = snap.ForgeOwner
 	out.ForgeRepo = snap.ForgeRepo
@@ -233,4 +236,51 @@ func PopulateTaskMetadata(out *v1.Task, t *taskrun.Task, snap *taskrun.Snapshot,
 		}
 	}
 	return nil
+}
+
+// taskBackgroundItems builds a short preview, giving agents priority when
+// several commands or watches would otherwise fill the tooltip.
+func taskBackgroundItems(items []taskrun.BackgroundItem) []v1.TaskBackgroundItem {
+	if len(items) == 0 {
+		return nil
+	}
+	const limit = 6
+	out := make([]v1.TaskBackgroundItem, 0, min(limit, len(items)))
+	for _, kind := range [...]taskrun.BackgroundKind{taskrun.BackgroundKindAgent, taskrun.BackgroundKindCommand, taskrun.BackgroundKindWatch} {
+		for _, item := range items {
+			if item.Kind != kind {
+				continue
+			}
+			label := item.Label
+			if label == "" {
+				label = item.ID
+			}
+			out = append(out, v1.TaskBackgroundItem{
+				Kind: v1.TaskBackgroundItemKind(item.Kind), Label: backgroundPreviewLine(label, 96),
+				AgentKind: backgroundPreviewLine(item.AgentKind, 32), AgentScope: v1.EventNativeSubagentScope(item.AgentScope),
+			})
+			if len(out) == cap(out) {
+				return out
+			}
+		}
+	}
+	return out
+}
+
+// backgroundPreviewLine keeps the first line within limit bytes, including an
+// ellipsis when a multiline or long label is shortened.
+func backgroundPreviewLine(s string, limit int) string {
+	end := min(len(s), limit)
+	if i := strings.IndexAny(s[:end], "\r\n\u0085\u2028\u2029"); i >= 0 {
+		end = i
+	}
+	if end == len(s) {
+		return s
+	}
+	const suffix = "…"
+	end = min(end, limit-len(suffix))
+	for end > 0 && !utf8.RuneStart(s[end]) {
+		end--
+	}
+	return s[:end] + suffix
 }

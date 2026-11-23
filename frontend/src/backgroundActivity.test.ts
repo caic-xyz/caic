@@ -1,9 +1,15 @@
-// Tests background-count wording and the running items listed from history metadata.
+// Tests background-work counts, summary tooltip labels, and detail items derived from history.
 
 import { describe, it } from "node:test";
 import { expect } from "@tests/expect";
 import type { HistoryActivity, HistoryBackgroundCommand, ISOTimestamp } from "@sdk/types.gen";
-import { activeBackgroundItems, backgroundCounts, backgroundLabel, commandSettled } from "./backgroundActivity";
+import {
+  activeBackgroundItems,
+  backgroundCounts,
+  backgroundLabel,
+  backgroundTooltip,
+  commandSettled,
+} from "./backgroundActivity";
 import { toolIdentity } from "./grouping";
 
 describe("backgroundCounts", () => {
@@ -27,6 +33,34 @@ describe("backgroundLabel", () => {
     );
     expect(backgroundLabel(backgroundCounts({ commands: 2, watches: 3, agents: 2 }))).toBe(
       "Background: 2 commands · 2 agents · 3 watches",
+    );
+  });
+});
+
+describe("backgroundTooltip", () => {
+  it("shows preview items by kind and reports how many were omitted", () => {
+    const counts = backgroundCounts({ commands: 2, agents: 3, watches: 1 });
+    const text = backgroundTooltip(counts, [
+      { kind: "watch", label: "results" },
+      { kind: "agent", agentKind: "Explore", label: "Explore" },
+      { kind: "agent", agentScope: "batch", label: "Review changes" },
+      { kind: "agent", label: "Check logs" },
+      { kind: "command", label: "Run tests" },
+    ]);
+    expect(text.split("\n")).toEqual([
+      "Background: 2 commands · 3 agents · 1 watch",
+      "Command: Run tests",
+      "Explore",
+      "Batch: Review changes",
+      "Agent: Check logs",
+      "Watch: results",
+      "1 more",
+    ]);
+  });
+
+  it("uses the counts alone when the server has no preview", () => {
+    expect(backgroundTooltip(backgroundCounts({ commands: 0, agents: 1, watches: 0 }), undefined)).toBe(
+      "Background: 1 agent",
     );
   });
 });

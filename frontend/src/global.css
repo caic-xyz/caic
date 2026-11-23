@@ -5,6 +5,7 @@
   accent-color: var(--color-primary);
   color-scheme: light dark;
 
+  --font-interface: system-ui;
   --size-document-preview-height: calc(100dvh - 6rem);
 
   /* Filled primary controls and their foreground. */

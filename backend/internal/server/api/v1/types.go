@@ -450,6 +450,8 @@ type Task struct {
 	ResourceUsage   *EventStats     `json:"resourceUsage,omitempty"` // Latest runtime sample; absent before sampling. Not persisted.
 	RateLimit       TaskRateLimit   `json:"rateLimit,omitzero"`      // Current quota block resolved by the backend.
 	Background      TaskBackground  `json:"background,omitzero"`     // Running background work; absent when none runs.
+
+	BackgroundItems []TaskBackgroundItem `json:"backgroundItems,omitempty"` // Short preview of running work; Background has the full counts.
 	// Per-task feature flags.
 	GitHubToken bool `json:"gitHubToken,omitempty"`
 }
@@ -468,6 +470,24 @@ type TaskBackground struct {
 	Commands int `json:"commands"` // Detached commands that are not watches, waking the agent or not.
 	Watches  int `json:"watches"`  // Commands that only relay events, such as Claude Code's Monitor tool.
 	Agents   int `json:"agents"`   // Background native subagents.
+}
+
+// TaskBackgroundItemKind identifies the kind of running background work.
+type TaskBackgroundItemKind string
+
+// Kinds of background work listed in task summaries.
+const (
+	TaskBackgroundItemKindAgent   TaskBackgroundItemKind = "agent"
+	TaskBackgroundItemKindCommand TaskBackgroundItemKind = "command"
+	TaskBackgroundItemKindWatch   TaskBackgroundItemKind = "watch"
+)
+
+// TaskBackgroundItem describes one running command, agent, or watch.
+type TaskBackgroundItem struct {
+	Kind       TaskBackgroundItemKind   `json:"kind"`
+	Label      string                   `json:"label"` // Preview of the harness label, or the item ID when unnamed.
+	AgentKind  string                   `json:"agentKind,omitempty"`
+	AgentScope EventNativeSubagentScope `json:"agentScope,omitempty"`
 }
 
 // TaskRateLimit is the current quota block resolved by the backend for one task.

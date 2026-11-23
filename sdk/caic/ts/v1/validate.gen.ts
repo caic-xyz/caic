@@ -4,7 +4,7 @@
 // Each validator checks structural correctness at runtime and throws
 // TypeError on mismatch. Unknown kinds pass through for forward compat.
 
-import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventBackgroundRetired, EventChangeStat, EventCommitSnapshot, EventCost, EventCostSource, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventMessageSource, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventSkillLoad, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSyncActivity, EventSyncActivityPhase, EventSyncActivityStatus, EventSystem, EventSystemSubtype, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, HistoryActivity, HistoryBackgroundCommand, HistoryBootstrap, HistoryCheckpoint, HistoryEvent, HistoryManifest, HistoryMetadata, HistoryPosition, HistoryReset, HistoryRoute, HistoryRunningTurn, HistorySection, HistorySlice, HistoryStats, HistoryToolTiming, HistoryTurn, ISOTimestamp, InputImage, LocalUsage, LocalWindow, PendingInput, Prompt, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, ServerHealth, StreamHeartbeat, Task, TaskBackground, TaskHistoryStreamError, TaskListEvent, TaskListRestorationStatus, TaskPlan, TaskRateLimit, TaskRepo, TaskStartupFailure, TaskState, TodoItem, ToolOutputContentType, UnassessedQuotaWindow, UsageResp, Warning, WarningCategory, WarningDetail } from "./types.gen";
+import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventBackgroundRetired, EventChangeStat, EventCommitSnapshot, EventCost, EventCostSource, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventMessageSource, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventSkillLoad, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSyncActivity, EventSyncActivityPhase, EventSyncActivityStatus, EventSystem, EventSystemSubtype, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, HistoryActivity, HistoryBackgroundCommand, HistoryBootstrap, HistoryCheckpoint, HistoryEvent, HistoryManifest, HistoryMetadata, HistoryPosition, HistoryReset, HistoryRoute, HistoryRunningTurn, HistorySection, HistorySlice, HistoryStats, HistoryToolTiming, HistoryTurn, ISOTimestamp, InputImage, LocalUsage, LocalWindow, PendingInput, Prompt, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, ServerHealth, StreamHeartbeat, Task, TaskBackground, TaskBackgroundItem, TaskBackgroundItemKind, TaskHistoryStreamError, TaskListEvent, TaskListRestorationStatus, TaskPlan, TaskRateLimit, TaskRepo, TaskStartupFailure, TaskState, TodoItem, ToolOutputContentType, UnassessedQuotaWindow, UsageResp, Warning, WarningCategory, WarningDetail } from "./types.gen";
 
 // ---- helpers ----
 
@@ -266,6 +266,18 @@ export function validateTaskBackground(raw: ValidatorInput): TaskBackground {
   };
 }
 
+export function validateTaskBackgroundItem(raw: ValidatorInput): TaskBackgroundItem {
+  const obj = asObject(raw, "TaskBackgroundItem");
+  if (!Object.prototype.hasOwnProperty.call(obj, "kind")) throw new TypeError("missing required field: TaskBackgroundItem.kind");
+  if (!Object.prototype.hasOwnProperty.call(obj, "label")) throw new TypeError("missing required field: TaskBackgroundItem.label");
+  return {
+    kind: (asString(obj["kind"], "TaskBackgroundItem.kind") as TaskBackgroundItemKind),
+    label: asString(obj["label"], "TaskBackgroundItem.label"),
+    ...(Object.prototype.hasOwnProperty.call(obj, "agentKind") ? { agentKind: asString(obj["agentKind"], "TaskBackgroundItem.agentKind") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "agentScope") ? { agentScope: (asString(obj["agentScope"], "TaskBackgroundItem.agentScope") as EventNativeSubagentScope) } : {}),
+  };
+}
+
 export function validateTask(raw: ValidatorInput): Task {
   const obj = asObject(raw, "Task");
   if (!Object.prototype.hasOwnProperty.call(obj, "pendingInput")) throw new TypeError("missing required field: Task.pendingInput");
@@ -347,6 +359,7 @@ export function validateTask(raw: ValidatorInput): Task {
     ...(Object.prototype.hasOwnProperty.call(obj, "resourceUsage") ? { resourceUsage: validateEventStats(obj["resourceUsage"]) } : {}),
     ...(Object.prototype.hasOwnProperty.call(obj, "rateLimit") ? { rateLimit: validateTaskRateLimit(obj["rateLimit"]) } : {}),
     ...(Object.prototype.hasOwnProperty.call(obj, "background") ? { background: validateTaskBackground(obj["background"]) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "backgroundItems") ? { backgroundItems: validateArray(obj["backgroundItems"], "Task.backgroundItems", (v) => validateTaskBackgroundItem(v)) } : {}),
     ...(Object.prototype.hasOwnProperty.call(obj, "gitHubToken") ? { gitHubToken: asBoolean(obj["gitHubToken"], "Task.gitHubToken") } : {}),
   };
 }

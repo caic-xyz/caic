@@ -2,6 +2,8 @@
 
 package agent
 
+import "slices"
+
 // NativeSubagentTimeline folds native-subagent observations into one stable
 // card per harness identity.
 type NativeSubagentTimeline struct {
@@ -108,11 +110,16 @@ func (t *NativeSubagentTimeline) Subagent(id string) (NativeSubagent, bool) {
 // Subagents returns the replayed cards in first-observed order. The returned
 // slice is independent of the timeline's internal ordering.
 func (t *NativeSubagentTimeline) Subagents() []NativeSubagent {
-	out := make([]NativeSubagent, 0, len(t.order))
+	return slices.AppendSeq(make([]NativeSubagent, 0, len(t.order)), t.All)
+}
+
+// All yields the cards in first-observed order.
+func (t *NativeSubagentTimeline) All(yield func(NativeSubagent) bool) {
 	for _, id := range t.order {
-		out = append(out, t.byID[id])
+		if !yield(t.byID[id]) {
+			return
+		}
 	}
-	return out
 }
 
 // Active returns the number of cards whose latest observed status is running.
@@ -289,11 +296,16 @@ func (t *BackgroundCommandTimeline) Command(id string) (BackgroundCommand, bool)
 // Commands returns the replayed cards in first-observed order. The returned
 // slice is independent of the timeline's internal ordering.
 func (t *BackgroundCommandTimeline) Commands() []BackgroundCommand {
-	out := make([]BackgroundCommand, 0, len(t.order))
+	return slices.AppendSeq(make([]BackgroundCommand, 0, len(t.order)), t.All)
+}
+
+// All yields the commands in first-observed order.
+func (t *BackgroundCommandTimeline) All(yield func(BackgroundCommand) bool) {
 	for _, id := range t.order {
-		out = append(out, t.byID[id])
+		if !yield(t.byID[id]) {
+			return
+		}
 	}
-	return out
 }
 
 // Observe folds a parser observation and emits only changed lifecycle facts.

@@ -356,6 +356,7 @@ export default function TaskList(props: TaskListProps) {
         forgePR={t().forgePR}
         ciStatus={t().ciStatus}
         background={t().background}
+        backgroundItems={t().backgroundItems}
         ciChecks={t().ciChecks}
         autoFixPR={props.autoFixPR()}
         rateLimit={t().rateLimit}

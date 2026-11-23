@@ -718,6 +718,28 @@ public struct SyncTarget: Codable, Equatable, Hashable {
     }
 }
 
+public struct TaskBackgroundItemKind: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let Agent = TaskBackgroundItemKind("agent")
+    public static let Command = TaskBackgroundItemKind("command")
+    public static let Watch = TaskBackgroundItemKind("watch")
+
+    public static func other(_ value: String) -> TaskBackgroundItemKind { TaskBackgroundItemKind(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
 public struct TaskState: Codable, Equatable, Hashable {
     public let value: String
 
@@ -2235,6 +2257,22 @@ public struct TaskBackground: Codable {
     }
 }
 
+/// TaskBackgroundItem describes one running command, agent, or watch.
+public struct TaskBackgroundItem: Codable {
+    public let kind: TaskBackgroundItemKind
+    /// Preview of the harness label, or the item ID when unnamed.
+    public let label: String
+    public let agentKind: String?
+    public let agentScope: EventNativeSubagentScope?
+
+    public init(kind: TaskBackgroundItemKind, label: String, agentKind: String? = nil, agentScope: EventNativeSubagentScope? = nil) {
+        self.kind = kind
+        self.label = label
+        self.agentKind = agentKind
+        self.agentScope = agentScope
+    }
+}
+
 /// Task is the JSON representation sent to the frontend.
 public struct Task: Codable {
     public let pendingInput: PendingInput?
@@ -2314,6 +2352,8 @@ public struct Task: Codable {
     public let rateLimit: TaskRateLimit?
     /// Running background work; absent when none runs.
     public let background: TaskBackground?
+    /// Short preview of running work; Background has the full counts.
+    public let backgroundItems: [TaskBackgroundItem]?
     /// Per-task feature flags.
     public let gitHubToken: Bool?
 
@@ -2374,10 +2414,11 @@ public struct Task: Codable {
         case resourceUsage
         case rateLimit
         case background
+        case backgroundItems
         case gitHubToken
     }
 
-    public init(pendingInput: PendingInput?, id: String, initialPrompt: String, title: String, repos: [TaskRepo]? = nil, state: TaskState, stateUpdatedAt: ISOTimestamp, diffStat: DiffStat? = nil, repoStates: [GitRepositoryState]? = nil, costUSD: Double, costKnown: Bool, costComplete: Bool, duration: Double, numTurns: Int, cumulativeInputTokens: Int, cumulativeOutputTokens: Int, cumulativeCacheCreationInputTokens: Int, cumulativeCacheReadInputTokens: Int, activeInputTokens: Int, activeCacheReadTokens: Int, cacheTTLSeconds: Int? = nil, cacheExpiresAt: ISOTimestamp? = nil, stoppedDiskUsedBytes: Int, contextUsed: Int? = nil, contextWindowLimit: Int, autoCompactTokenLimit: Int, error: String? = nil, turnError: String? = nil, startupFailure: TaskStartupFailure? = nil, result: String? = nil, forgeOwner: String? = nil, forgeRepo: String? = nil, forgePR: Int? = nil, forgePRState: ForgePRState? = nil, forgeIssue: Int? = nil, ciStatus: CIStatus? = nil, ciChecks: [ForgeCheck]? = nil, owner: String? = nil, forkedFromTaskID: String? = nil, parentTaskID: String? = nil, caicMCP: Bool? = nil, harness: Harness, requestedModel: String? = nil, requestedEffort: String? = nil, reportedModel: String? = nil, reportedEffort: String? = nil, agentVersion: String? = nil, sessionID: String? = nil, startedAt: ISOTimestamp? = nil, turnStartedAt: ISOTimestamp? = nil, inPlanMode: Bool? = nil, currentPlan: TaskPlan? = nil, runtime: RuntimeInstance, resourceUsage: EventStats? = nil, rateLimit: TaskRateLimit? = nil, background: TaskBackground? = nil, gitHubToken: Bool? = nil) {
+    public init(pendingInput: PendingInput?, id: String, initialPrompt: String, title: String, repos: [TaskRepo]? = nil, state: TaskState, stateUpdatedAt: ISOTimestamp, diffStat: DiffStat? = nil, repoStates: [GitRepositoryState]? = nil, costUSD: Double, costKnown: Bool, costComplete: Bool, duration: Double, numTurns: Int, cumulativeInputTokens: Int, cumulativeOutputTokens: Int, cumulativeCacheCreationInputTokens: Int, cumulativeCacheReadInputTokens: Int, activeInputTokens: Int, activeCacheReadTokens: Int, cacheTTLSeconds: Int? = nil, cacheExpiresAt: ISOTimestamp? = nil, stoppedDiskUsedBytes: Int, contextUsed: Int? = nil, contextWindowLimit: Int, autoCompactTokenLimit: Int, error: String? = nil, turnError: String? = nil, startupFailure: TaskStartupFailure? = nil, result: String? = nil, forgeOwner: String? = nil, forgeRepo: String? = nil, forgePR: Int? = nil, forgePRState: ForgePRState? = nil, forgeIssue: Int? = nil, ciStatus: CIStatus? = nil, ciChecks: [ForgeCheck]? = nil, owner: String? = nil, forkedFromTaskID: String? = nil, parentTaskID: String? = nil, caicMCP: Bool? = nil, harness: Harness, requestedModel: String? = nil, requestedEffort: String? = nil, reportedModel: String? = nil, reportedEffort: String? = nil, agentVersion: String? = nil, sessionID: String? = nil, startedAt: ISOTimestamp? = nil, turnStartedAt: ISOTimestamp? = nil, inPlanMode: Bool? = nil, currentPlan: TaskPlan? = nil, runtime: RuntimeInstance, resourceUsage: EventStats? = nil, rateLimit: TaskRateLimit? = nil, background: TaskBackground? = nil, backgroundItems: [TaskBackgroundItem]? = nil, gitHubToken: Bool? = nil) {
         self.pendingInput = pendingInput
         self.id = id
         self.initialPrompt = initialPrompt
@@ -2434,6 +2475,7 @@ public struct Task: Codable {
         self.resourceUsage = resourceUsage
         self.rateLimit = rateLimit
         self.background = background
+        self.backgroundItems = backgroundItems
         self.gitHubToken = gitHubToken
     }
 
@@ -2495,6 +2537,7 @@ public struct Task: Codable {
         self.resourceUsage = try c.decodeIfPresent(EventStats.self, forKey: .resourceUsage)
         self.rateLimit = try c.decodeIfPresent(TaskRateLimit.self, forKey: .rateLimit)
         self.background = try c.decodeIfPresent(TaskBackground.self, forKey: .background)
+        self.backgroundItems = try c.decodeIfPresent([TaskBackgroundItem].self, forKey: .backgroundItems)
         self.gitHubToken = try c.decodeIfPresent(Bool.self, forKey: .gitHubToken)
     }
 
@@ -2556,6 +2599,7 @@ public struct Task: Codable {
         try c.encodeIfPresent(self.resourceUsage, forKey: .resourceUsage)
         try c.encodeIfPresent(self.rateLimit, forKey: .rateLimit)
         try c.encodeIfPresent(self.background, forKey: .background)
+        try c.encodeIfPresent(self.backgroundItems, forKey: .backgroundItems)
         try c.encodeIfPresent(self.gitHubToken, forKey: .gitHubToken)
     }
 }
