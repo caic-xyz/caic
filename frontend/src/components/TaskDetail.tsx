@@ -2913,7 +2913,9 @@ function ThinkingCard(props: { events: EventMessage[]; text?: string }) {
         onToggle={(e) => detailsOpenState.set(key(), e.currentTarget.open)}
       >
         <summary>
-          Thinking
+          <span role="img" aria-label="Thinking">
+            💭
+          </span>
           <Show when={excerpt()}>
             <span class={styles.thinkingExcerpt}>{excerpt()}</span>
           </Show>

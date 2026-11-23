@@ -55,7 +55,7 @@ for (const width of [390, 1280]) {
       await route.fulfill({ contentType: "application/json", body: await response.text() });
     });
     await page.goto(`/task/@${id}`);
-    const summaries = page.locator("summary").filter({ hasText: /^Thinking/ });
+    const summaries = page.locator("summary").filter({ has: page.getByRole("img", { name: "Thinking" }) });
     await expect(summaries).toHaveCount(2);
     await expect(summaries.first()).toContainText("Updating timing evidence.");
     await expect(summaries.first()).not.toContainText("**");

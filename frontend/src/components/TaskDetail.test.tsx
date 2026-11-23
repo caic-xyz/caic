@@ -2511,7 +2511,7 @@ describe("streamed conversation", () => {
       thinking: { text: "Checked the metrics. **Updating timing evidence.**\n\n" },
     });
     vi.advanceTimersByTime(100);
-    const summaries = () => screen.getAllByText(/^Thinking/).filter((el) => el.tagName === "SUMMARY");
+    const summaries = () => screen.queryAllByRole("img", { name: "Thinking" }).map((icon) => icon.closest("summary"));
     expect(summaries()).toHaveLength(1);
     expect(summaries()[0]).toHaveTextContent("Updating timing evidence.");
     expect(summaries()[0]).not.toHaveTextContent("**");
