@@ -798,13 +798,37 @@ func TestParseMessage(t *testing.T) {
 
 	t.Run("ErrorNotificationWillRetry", func(t *testing.T) {
 		t.Parallel()
-		const input = `{"jsonrpc":"2.0","method":"error","params":{"error":{"message":"rate limit"},"willRetry":true,"threadId":"t1","turnId":"turn_1"}}`
-		msgs, err := parseTestMessage([]byte(input))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(msgs) != 0 {
-			t.Fatalf("msgs = %d, want 0 (error with willRetry=true is suppressed)", len(msgs))
+		// Minimized from a task log where the model was at capacity and the turn
+		// showed no activity for 13 minutes.
+		for _, tc := range []struct {
+			name, error, detail string
+		}{
+			{
+				"AdditionalDetails",
+				`{"message":"Reconnecting... 2/5","codexErrorInfo":{"responseStreamDisconnected":{"httpStatusCode":null}},"additionalDetails":"Selected model is at capacity. Please try a different model.","misalignment":null}`,
+				"Reconnecting... 2/5: Selected model is at capacity. Please try a different model.",
+			},
+			{"MessageOnly", `{"message":"Reconnecting... 3/5"}`, "Reconnecting... 3/5"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				input := `{"jsonrpc":"2.0","method":"error","params":{"error":` + tc.error + `,"willRetry":true,"threadId":"t1","turnId":"turn_1"}}`
+				msgs, err := parseTestMessage([]byte(input))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(msgs) != 1 {
+					t.Fatalf("msgs = %d, want 1", len(msgs))
+				}
+				sm, ok := msgs[0].(*agent.SystemMessage)
+				if !ok {
+					t.Fatalf("type = %T, want *agent.SystemMessage", msgs[0])
+				}
+				want := taskslogv3.MessageSource{ThreadID: "t1", TurnID: "turn_1"}
+				if sm.Subtype != agent.SystemSubtypeError || sm.Detail != tc.detail || sm.Source != want {
+					t.Errorf("system = %q %q %+v, want error %q %+v", sm.Subtype, sm.Detail, sm.Source, tc.detail, want)
+				}
+			})
 		}
 	})
 	t.Run("ErrorNotificationFatal", func(t *testing.T) {

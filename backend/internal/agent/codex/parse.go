@@ -151,8 +151,22 @@ func parseMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, d
 		if err := json.Unmarshal(msg.Params, &p); err != nil {
 			return nil, decodedItem{}, fmt.Errorf("error notification params: %w", err)
 		}
-		if p.WillRetry || p.Error == nil {
+		if p.Error == nil {
 			return nil, decodedItem{}, nil
+		}
+		if p.WillRetry {
+			// Codex retries a dropped response stream silently up to its stream
+			// idle timeout; the notice is the only sign the turn is not stuck.
+			detail := p.Error.Message
+			if p.Error.AdditionalDetails != "" {
+				detail += ": " + p.Error.AdditionalDetails
+			}
+			return []agent.Message{&agent.SystemMessage{
+				Source:      v3.MessageSource{ThreadID: p.ThreadID, TurnID: p.TurnID},
+				MessageType: "system",
+				Subtype:     agent.SystemSubtypeError,
+				Detail:      detail,
+			}}, decodedItem{}, nil
 		}
 		return []agent.Message{&agent.ResultMessage{
 			Source:      v3.MessageSource{ThreadID: p.ThreadID, TurnID: p.TurnID},
