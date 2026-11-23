@@ -741,7 +741,6 @@ a.ciStatus:hover {
   align-items: baseline;
   min-width: 0;
   font-size: 0.8rem;
-  font-style: italic;
   color: var(--color-text-secondary);
   cursor: pointer;
 }
@@ -751,7 +750,6 @@ a.ciStatus:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 0.75rem;
-  font-style: normal;
   color: var(--color-text-muted);
   white-space: nowrap;
 }
