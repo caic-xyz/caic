@@ -30,15 +30,20 @@ the turn's `usage_update` measured the summarization request, so the context
 meter stays unknown until the next usage report. A cancelled, refused, or
 failed response emits none.
 
-Agent text can also arrive while no `session/prompt` runs, as when agy wakes
-its idle parent after a child reports. Shared ACP buffers that text until any
-other record or input ends it, then emits its final TextMessage before that
-record's messages. No prompt response settles it, so it carries no usage.
+ACP streams text and thought as chunks without a message identity. Shared ACP
+buffers a run of consecutive chunks of one kind until any other message or
+input ends it, then emits the run's final TextMessage or ThinkingMessage right
+after its deltas, inside or outside a prompt. Text also arrives while no
+`session/prompt` runs, as when agy wakes its idle parent after a child reports.
+
+The harness `ToolParser` receives each record's messages, including usage
+reports, with whether a `session/prompt` awaits its response. A harness that
+runs steps by itself, as agy does, bounds them as turns there.
 
 | ACP session/update type | agent.Message type   |
 |-------------------------|----------------------|
-| `agent_message_chunk`   | TextDeltaMessage; TextMessage when text outside a prompt ends |
-| `agent_thought_chunk`   | ThinkingDeltaMessage |
+| `agent_message_chunk`   | TextDeltaMessage; TextMessage when the run ends |
+| `agent_thought_chunk`   | ThinkingDeltaMessage; ThinkingMessage when the run ends |
 | `tool_call`             | ToolUseMessage / WidgetMessage; also ToolResultMessage when announced completed/failed |
 | `tool_call_update` (completed/failed) | ToolResultMessage |
 | `tool_call_update` (in_progress) | ToolOutputDeltaMessage |

@@ -124,7 +124,7 @@ type toolParser struct {
 	running []agent.NativeSubagent
 }
 
-func (p *toolParser) Parse(sessionID string, tool *acp.ToolCallUpdateUpdate, messages []agent.Message) ([]agent.Message, error) {
+func (p *toolParser) Parse(sessionID string, _ bool, tool *acp.ToolCallUpdateUpdate, messages []agent.Message) ([]agent.Message, error) {
 	if tool == nil || tool.ToolCallID == "" {
 		return messages, nil
 	}

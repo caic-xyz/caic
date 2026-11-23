@@ -19,6 +19,12 @@ Read main.go, edit the greeting on line 3 from "Hello" to "Hi", then run cat mai
 
 **File**: `/tmp/caic-record-4028261587/main.go`
 
+<details><summary>💭 Thinking</summary>
+
+The file `main.go` contains "Hello, World!" on line 6, not line 3. The prompt asks to edit the greeting, but it's unclear if the reference is to the actual greeting in the file, or a separate concept. It's necessary to determine which "greeting" to edit for the command to succeed.
+
+</details>
+
 ### 🔧 Tool: `Edit`
 
 **File**: `/tmp/caic-record-4028261587/main.go`
@@ -33,12 +39,6 @@ Read main.go, edit the greeting on line 3 from "Hello" to "Hi", then run cat mai
 ```bash
 cat main.go
 ```
-
-<details><summary>💭 Thinking</summary>
-
-The file `main.go` contains "Hello, World!" on line 6, not line 3. The prompt asks to edit the greeting, but it's unclear if the reference is to the actual greeting in the file, or a separate concept. It's necessary to determine which "greeting" to edit for the command to succeed.
-
-</details>
 
 ## Assistant
 

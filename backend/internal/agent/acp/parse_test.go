@@ -634,8 +634,6 @@ func TestWireFormatPromptResponse(t *testing.T) {
 			`{"t":"agent","ts":1.000,"msg":{"method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"previous turn"}}}}}`,
 			`{"t":"input","ts":2.000,"msg":{"jsonrpc":"2.0","id":17,"method":"session/prompt","params":{"sessionId":"session","prompt":[{"type":"text","text":"next"}]}}}`,
 			`{"t":"agent","ts":3.000,"msg":{"method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"current turn"}}}}}`,
-			// An output permission request must not reset accumulated prompt text.
-			`{"t":"agent","ts":4.000,"msg":{"jsonrpc":"2.0","id":18,"method":"session/request_permission","params":{}}}`,
 		} {
 			if _, err := parser.ParseRecord([]byte(line)); err != nil {
 				t.Fatal(err)
@@ -649,7 +647,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 		}
 		text, ok := messages[0].(*agent.TextMessage)
 		if !ok || text.Text != "current turn" {
-			t.Fatalf("accumulated response = %#v", messages[0])
+			t.Fatalf("ended run = %#v", messages[0])
 		}
 		result, ok := messages[1].(*agent.ResultMessage)
 		if !ok || !result.IsError || result.Result != "interrupted" {
@@ -986,7 +984,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 		}
 	})
 
-	t.Run("SyntheticFinalMessages", func(t *testing.T) {
+	t.Run("RunFinalMessages", func(t *testing.T) {
 		t.Parallel()
 		w := &wireFormat{config: testBackend().Config, session: agent.SessionMetadata{SessionID: "ses_1"}}
 		if _, err := w.ParseInput([]byte(`{"jsonrpc":"2.0","id":10,"method":"session/prompt","params":{}}`)); err != nil {
@@ -1010,7 +1008,9 @@ func TestWireFormatPromptResponse(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		for _, text := range []string{"I think ", "carefully"} {
+		// The first thought chunk ends the text run: its final follows the text
+		// deltas, not the thought.
+		for i, text := range []string{"I think ", "carefully"} {
 			chunk := mustJSON(t, map[string]any{
 				"jsonrpc": "2.0",
 				"method":  "session/update",
@@ -1022,12 +1022,28 @@ func TestWireFormatPromptResponse(t *testing.T) {
 					},
 				},
 			})
-			if _, err := w.ParseOutput(chunk); err != nil {
+			msgs, err := w.ParseOutput(chunk)
+			if err != nil {
 				t.Fatal(err)
+			}
+			if i > 0 {
+				if len(msgs) != 1 {
+					t.Fatalf("thought chunk = %#v", msgs)
+				}
+				continue
+			}
+			if len(msgs) != 2 {
+				t.Fatalf("first thought chunk = %#v", msgs)
+			}
+			if txm, ok := msgs[0].(*agent.TextMessage); !ok || txm.Text != "Hello world" {
+				t.Fatalf("msgs[0] = %#v, want TextMessage %q", msgs[0], "Hello world")
+			}
+			if _, ok := msgs[1].(*agent.ThinkingDeltaMessage); !ok {
+				t.Fatalf("msgs[1] type = %T, want *agent.ThinkingDeltaMessage", msgs[1])
 			}
 		}
 
-		// Now send prompt response.
+		// The prompt response ends the thought run.
 		resp := mustJSON(t, map[string]any{
 			"jsonrpc": "2.0",
 			"id":      10,
@@ -1037,26 +1053,14 @@ func TestWireFormatPromptResponse(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		// Expect: ThinkingMessage, TextMessage, ResultMessage.
-		if len(msgs) != 3 {
-			t.Fatalf("msgs = %d, want 3", len(msgs))
+		if len(msgs) != 2 {
+			t.Fatalf("msgs = %d, want 2", len(msgs))
 		}
-		tm, ok := msgs[0].(*agent.ThinkingMessage)
-		if !ok {
-			t.Fatalf("msgs[0] type = %T, want *agent.ThinkingMessage", msgs[0])
+		if tm, ok := msgs[0].(*agent.ThinkingMessage); !ok || tm.Text != "I think carefully" {
+			t.Fatalf("msgs[0] = %#v, want ThinkingMessage %q", msgs[0], "I think carefully")
 		}
-		if tm.Text != "I think carefully" {
-			t.Errorf("ThinkingMessage.Text = %q", tm.Text)
-		}
-		txm, ok := msgs[1].(*agent.TextMessage)
-		if !ok {
-			t.Fatalf("msgs[1] type = %T, want *agent.TextMessage", msgs[1])
-		}
-		if txm.Text != "Hello world" {
-			t.Errorf("TextMessage.Text = %q", txm.Text)
-		}
-		if _, ok := msgs[2].(*agent.ResultMessage); !ok {
-			t.Fatalf("msgs[2] type = %T, want *agent.ResultMessage", msgs[2])
+		if _, ok := msgs[1].(*agent.ResultMessage); !ok {
+			t.Fatalf("msgs[1] type = %T, want *agent.ResultMessage", msgs[1])
 		}
 	})
 

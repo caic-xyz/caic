@@ -16,13 +16,33 @@ do a silly task as a subagent
 
 <details><summary>💭 Thinking</summary>
 
-Started.The subagent finished.Acknowledge.
+Started.
 
 </details>
 
 ## Assistant
 
-Started subagent.Subagent completed.Confirmed.
+Started subagent.
+
+<details><summary>💭 Thinking</summary>
+
+The subagent finished.
+
+</details>
+
+## Assistant
+
+Subagent completed.
+
+<details><summary>💭 Thinking</summary>
+
+Acknowledge.
+
+</details>
+
+## Assistant
+
+Confirmed.
 
 ### 🤖 Native agent: Silly duck task — completed
 

@@ -352,9 +352,9 @@ type Launch struct {
 
 var _ agent.RecordHandshaker = (*Backend)(nil)
 
-// maxAccumulatedOutputBytes bounds synthetic final-message state. Streaming
+// maxAccumulatedOutputBytes bounds a run's final-message state. Streaming
 // deltas are already persisted independently, so an overflow disables the
-// synthetic final rather than retaining an incomplete duplicate.
+// final rather than retaining an incomplete duplicate.
 const maxAccumulatedOutputBytes = 1 << 20
 
 // wireFormat implements agent.WireFormat for the ACP JSON-RPC protocol.
@@ -368,14 +368,11 @@ type wireFormat struct {
 
 	skillReadCalls map[string]struct{}
 	nextID         int64
-	textAccum      strings.Builder // Accumulated text from agent_message_chunk.
-	thinkAccum     strings.Builder // Accumulated text from agent_thought_chunk.
-	textOverflow   bool
-	thinkOverflow  bool
-	// unprompted holds agent text that arrived while no session/prompt ran,
-	// until a later record ends it.
-	unprompted         strings.Builder
-	unpromptedOverflow bool
+	// run holds the streamed agent text, or the thought when runThinking, that
+	// the next other message ends; see ParseOutput.
+	run         strings.Builder
+	runThinking bool
+	runOverflow bool
 }
 
 // EncodePrompt encodes a session/prompt JSON-RPC request to begin a new turn.
@@ -458,54 +455,82 @@ func (w *wireFormat) EncodeCompact(instructions string) ([]byte, error) {
 }
 
 // ParseInput restores prompt response correlation and decodes recorded client
-// prompts. Each input ends agent text that arrived outside a prompt.
+// prompts. Each input ends the open text or thought run.
 func (w *wireFormat) ParseInput(line []byte) ([]agent.Message, error) {
 	msgs, err := w.parseInput(line)
 	if err != nil {
 		return nil, err
 	}
-	return w.endUnprompted(msgs), nil
+	return append(w.endRun(nil), msgs...), nil
 }
 
 // ParseOutput wraps the package-level parseMessage with interceptions:
 //
 //   - native permission requests → preserves controls for the connection interceptor.
-//   - prompt responses → emits final Text/Thinking messages, a compaction
-//     boundary for a completed CompactPrompt, and ResultMessage.
+//   - prompt responses → emits a compaction boundary for a completed
+//     CompactPrompt, the evidence the prompt settles, and ResultMessage.
 //
 // It also captures the session ID from InitMessage if present.
 //
-// Agent text that arrives while no session/prompt runs, such as agy's parent
-// step after an asynchronous child reports, accumulates until a later record
-// or input ends it; its final TextMessage then precedes that record.
+// ACP streams text and thought as chunks without a message identity. A run of
+// consecutive chunks of one kind ends at the next other message, inside or
+// outside a prompt, such as agy's parent step after an asynchronous child
+// reports; the run's final TextMessage or ThinkingMessage then directly
+// follows its deltas.
 func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 	msgs, err := w.parseOutputRecord(line)
 	if err != nil {
 		return nil, err
 	}
-	if len(msgs) == 1 && !w.promptPending() {
-		if delta, ok := msgs[0].(*agent.TextDeltaMessage); ok {
-			w.mu.Lock()
-			appendAccumulatedOutput(&w.unprompted, &w.unpromptedOverflow, delta.Text)
-			w.mu.Unlock()
-			return msgs, nil
+	out := make([]agent.Message, 0, len(msgs)+1)
+	for _, msg := range msgs {
+		switch m := msg.(type) {
+		case *agent.TextDeltaMessage:
+			out = w.extendRun(out, false, m.Text)
+		case *agent.ThinkingDeltaMessage:
+			out = w.extendRun(out, true, m.Text)
+		default:
+			out = w.endRun(out)
 		}
+		out = append(out, msg)
 	}
-	return w.endUnprompted(msgs), nil
+	return out, nil
 }
 
-// endUnprompted ends the agent text that arrived outside a prompt and
-// prepends its final message, which no prompt response settles, to msgs.
-func (w *wireFormat) endUnprompted(msgs []agent.Message) []agent.Message {
+// extendRun appends a chunk to the open run, first ending a run of the other
+// kind, and returns out with that run's final message, if any, appended.
+func (w *wireFormat) extendRun(out []agent.Message, thinking bool, text string) []agent.Message {
 	w.mu.Lock()
-	text, complete := w.unprompted.String(), !w.unpromptedOverflow
-	w.unprompted.Reset()
-	w.unpromptedOverflow = false
-	w.mu.Unlock()
-	if text == "" || !complete {
-		return msgs
+	defer w.mu.Unlock()
+	if w.runThinking != thinking {
+		out = w.endRunLocked(out)
+		w.runThinking = thinking
 	}
-	return append([]agent.Message{&agent.TextMessage{Text: text}}, msgs...)
+	appendAccumulatedOutput(&w.run, &w.runOverflow, text)
+	return out
+}
+
+// endRun ends the open run and returns out with its final message appended.
+func (w *wireFormat) endRun(out []agent.Message) []agent.Message {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.endRunLocked(out)
+}
+
+// endRunLocked is endRun for a caller holding w.mu. An overflowed run emits no
+// final: its deltas stay authoritative.
+func (w *wireFormat) endRunLocked(out []agent.Message) []agent.Message {
+	text, complete := w.run.String(), !w.runOverflow
+	w.run.Reset()
+	w.runOverflow = false
+	switch {
+	case text == "" || !complete:
+		return out
+	case w.runThinking:
+		return append(out, &agent.ThinkingMessage{Text: text})
+	default:
+		return append(out, &agent.TextMessage{Text: text})
+	}
 }
 
 func (w *wireFormat) parseOutputRecord(line []byte) ([]agent.Message, error) {
@@ -548,6 +573,10 @@ func (w *wireFormat) parseOutputRecord(line []byte) ([]agent.Message, error) {
 				return w.finishPrompt(line, metadata)
 			}
 		}
+		if w.tools != nil {
+			// Usage reports reach the harness, which may bound its own steps by them.
+			return w.tools.Parse("", w.promptPending(), nil, metadata)
+		}
 		return metadata, nil
 	}
 	if probe.ID != nil && string(probe.ID) != "null" && probe.Method == "" {
@@ -558,7 +587,8 @@ func (w *wireFormat) parseOutputRecord(line []byte) ([]agent.Message, error) {
 	if err != nil {
 		return nil, err
 	}
-	if w.promptPending() {
+	prompted := w.promptPending()
+	if prompted {
 		// agy echoes the running prompt as user_message_chunk; the recorded
 		// session/prompt input already carries it. Replayed history arrives
 		// outside a prompt.
@@ -575,7 +605,7 @@ func (w *wireFormat) parseOutputRecord(line []byte) ([]agent.Message, error) {
 				return nil, fmt.Errorf("session/update sessionId: %w", err)
 			}
 		}
-		msgs, err = w.tools.Parse(sessionID, toolCall, msgs)
+		msgs, err = w.tools.Parse(sessionID, prompted, toolCall, msgs)
 		if err != nil {
 			return nil, err
 		}
@@ -610,19 +640,6 @@ func (w *wireFormat) parseOutputRecord(line []byte) ([]agent.Message, error) {
 		}
 		w.mu.Unlock()
 	}
-	// Accumulate text/thinking deltas for synthetic final messages.
-	for _, msg := range msgs {
-		switch m := msg.(type) {
-		case *agent.TextDeltaMessage:
-			w.mu.Lock()
-			appendAccumulatedOutput(&w.textAccum, &w.textOverflow, m.Text)
-			w.mu.Unlock()
-		case *agent.ThinkingDeltaMessage:
-			w.mu.Lock()
-			appendAccumulatedOutput(&w.thinkAccum, &w.thinkOverflow, m.Text)
-			w.mu.Unlock()
-		}
-	}
 	return msgs, nil
 }
 
@@ -643,9 +660,6 @@ func (w *wireFormat) parseInput(line []byte) ([]agent.Message, error) {
 		w.nextID = max(w.nextID, id)
 		w.mu.Unlock()
 		if acp.Method(probe.Method) == acp.MethodSessionPrompt {
-			w.mu.Lock()
-			w.resetAccumulatedOutputLocked()
-			w.mu.Unlock()
 			var prompt acp.SessionPromptParams
 			if err := json.Unmarshal(probe.Params, &prompt); err != nil {
 				return nil, fmt.Errorf("unmarshal session/prompt params: %w", err)
@@ -676,13 +690,6 @@ func (w *wireFormat) parseInput(line []byte) ([]agent.Message, error) {
 	return []agent.Message{&agent.RawMessage{MessageType: "jsonrpc_response", Raw: append([]byte(nil), line...)}}, nil
 }
 
-func (w *wireFormat) resetAccumulatedOutputLocked() {
-	w.textAccum.Reset()
-	w.thinkAccum.Reset()
-	w.textOverflow = false
-	w.thinkOverflow = false
-}
-
 func appendAccumulatedOutput(builder *strings.Builder, overflow *bool, text string) {
 	if *overflow || len(text) > maxAccumulatedOutputBytes-builder.Len() {
 		builder.Reset()
@@ -699,9 +706,9 @@ func (w *wireFormat) allocIDLocked() int64 {
 	return w.nextID
 }
 
-// finishPrompt emits consolidated output and the evidence the prompt response
-// settles before the response's messages: a compaction boundary, if any, then
-// the normalized terminal report.
+// finishPrompt emits the evidence the prompt response settles before the
+// response's messages: a compaction boundary, if any, then the normalized
+// terminal report.
 func (w *wireFormat) finishPrompt(line []byte, response []agent.Message) ([]agent.Message, error) {
 	var settled []agent.Message
 	if w.tools != nil {
@@ -718,21 +725,10 @@ func (w *wireFormat) finishPrompt(line []byte, response []agent.Message) ([]agen
 		}
 		settled = w.tools.SettlePrompt(acp.StopReason(stop))
 	}
-	// Emit synthetic final messages from accumulated deltas, then reset.
 	w.mu.Lock()
-	var msgs []agent.Message
-	if !w.thinkOverflow && w.thinkAccum.Len() > 0 {
-		msgs = append(msgs, &agent.ThinkingMessage{Text: w.thinkAccum.String()})
-	}
-	if !w.textOverflow && w.textAccum.Len() > 0 {
-		msgs = append(msgs, &agent.TextMessage{Text: w.textAccum.String()})
-	}
-	w.resetAccumulatedOutputLocked()
 	clear(w.skillReadCalls)
 	w.mu.Unlock()
-	msgs = append(msgs, settled...)
-	msgs = append(msgs, response...)
-	return msgs, nil
+	return append(settled, response...), nil
 }
 
 // handshakeResult bundles everything returned by a successful handshake.

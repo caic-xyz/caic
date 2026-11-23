@@ -113,14 +113,46 @@ spawning prompt's response arrives, as dsh does: `end_turn` completes them,
 card takes the `Role` label, `TypeName` kind, and `Prompt`, and its ID derives
 from the tool call ID. It holds no result; the parent's text stays in the
 transcript. In the first ordering, the card completes before its child
-reports. Shared ACP keeps the final text of a step outside a prompt; that step
-reports no token usage, so caic does not price it. A failed `invoke_subagent`
+reports, and the parent's step is a woken turn; see below. That step reports no
+token usage, so caic does not price it. A failed `invoke_subagent`
 call fails its card.
 
 `testdata/evidence/native-subagent-joke-v3.jsonl` minimizes that recording to
 the `session/prompt` request, the spawn, its acknowledgment, and the prompt
 response. The request lets the wire correlate the response; the smoke replay
 sends it as the task's prompt.
+
+## Background commands and woken turns
+
+`run_command` takes a required `WaitMsBeforeAsync` (500 to 10000 ms): a
+command still running after it continues in the background. ACP reports no
+such transition; the call stays `in_progress`. agy's system prompt tells the
+model that "the system will automatically notify you with a message when the
+command finishes", and its changelog fixes headless runs "exiting before the
+agent could respond to a background command that finished after its first
+turn". `IsDaemon` marks a command not expected to end, such as a dev server.
+
+In a task log, the model started `make verify && make test` with
+`WaitMsBeforeAsync` 10000, said it would report back, and the prompt returned
+`end_turn` 18 s later. 13 s after that, a `tool_call_update` completed the
+command with `Command exited with code 0.` in `rawOutput.output`. agy then ran
+model calls without a `session/prompt`: one ran `git status`, one streamed the
+report, and no prompt response followed.
+
+`tools.go` therefore turns each `run_command` still running at `end_turn` into
+a background command bound to its tool call, whose end wakes the agent unless
+`IsDaemon` is set. Its completion settles the card with the reported exit code
+and replaces the late tool result, which belongs to an ended turn. After
+another prompt end, no card is kept.
+
+A step agy runs without a prompt, after a background command ends or a child
+reports, is a turn: it starts before the step's first activity. Each model call
+ends with a `usage_update`; tool calls follow it when the model requested any.
+Across the ACP recordings and task logs, 25 thought-only calls were followed
+by a tool call, and 19 calls that streamed text were followed by the prompt
+response, a new prompt, the end of the log, or another woken step, never by
+a tool call. The woken turn therefore ends at the `usage_update` of a call
+that streamed text. A prompt response ends the turn too.
 
 ## Stream-json history
 

@@ -964,6 +964,28 @@ func TestSectionIndex(t *testing.T) {
 			})
 		}
 	})
+	t.Run("turn duration falls back to elapsed time", func(t *testing.T) {
+		t.Parallel()
+		// An ACP prompt response reports no duration; a native one wins.
+		s := newSectionIndex()
+		for i, m := range []v1.EventMessage{
+			{Kind: v1.EventKindUserInput, Ts: 1000, UserInput: &v1.Prompt{Text: "prompt"}},
+			{Kind: v1.EventKindResult, Ts: 3500, Result: &v1.EventResult{}},
+			{Kind: v1.EventKindUserInput, Ts: 4000, UserInput: &v1.Prompt{Text: "prompt"}},
+			{Kind: v1.EventKindResult, Ts: 9000, Result: &v1.EventResult{Duration: 0.5}},
+			{Kind: v1.EventKindResult, Ts: 9500, Result: &v1.EventResult{}},
+		} {
+			s.append(&v1.HistoryEvent{RecordID: uint64(i + 1), Message: m})
+		}
+		_, metadata := s.snapshot()
+		got := make([]int64, 0, len(metadata.Turns))
+		for _, tr := range metadata.Turns {
+			got = append(got, tr.DurationMS)
+		}
+		if want := []int64{2500, 500, 0}; !slices.Equal(got, want) {
+			t.Fatalf("durations = %v, want %v", got, want)
+		}
+	})
 	t.Run("turns are numbered across contexts with explicit starts", func(t *testing.T) {
 		t.Parallel()
 		s := newSectionIndex()

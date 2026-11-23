@@ -1,10 +1,12 @@
-// Projects agy ACP tool calls onto caic's canonical tool inputs, outputs, inferred skill reads, and native subagent cards.
+// Projects agy ACP tool calls onto canonical tools, skill reads, subagent cards, background commands, and wake turns.
 
 package antigravity
 
 import (
 	"encoding/json"
+	"regexp"
 	"slices"
+	"strconv"
 
 	"github.com/maruel/genai/acp"
 
@@ -27,21 +29,93 @@ var inputKeys = map[string]string{
 // spawned the asynchronous child; see AGENTS.md.
 const invokeSubagent = "invoke_subagent"
 
-// tools projects agy tool calls and its asynchronous delegations.
+// runCommand is agy's shell tool. A call still running after its
+// WaitMsBeforeAsync continues in the background; see AGENTS.md.
+const runCommand = "run_command"
+
+// exitCode matches the exit status agy reports in a run_command output.
+var exitCode = regexp.MustCompile(`Command exited with code (-?\d+)\.`)
+
+// tools projects agy tool calls, its asynchronous delegations and commands,
+// and the steps agy runs without a prompt.
 type tools struct {
 	// running holds the delegation cards spawned during the current prompt.
 	running []agent.NativeSubagent
+	// commands holds the run_command calls of the current prompt that agy has
+	// announced and not settled.
+	commands []agent.BackgroundCommand
+	// detached holds the commands that outlived their prompt.
+	detached []agent.BackgroundCommand
+	// woken reports a turn that agy started without a prompt; see wake.
+	woken bool
+	// stepText reports that the woken turn's current model call streamed text.
+	stepText bool
 }
 
 // Parse canonicalizes the announced input and adds the output that agy
-// reports only on completion. An invoke_subagent call becomes a native card.
-func (t *tools) Parse(_ string, tool *acp.ToolCallUpdateUpdate, messages []agent.Message) ([]agent.Message, error) {
-	if tool == nil {
-		return messages, nil
+// reports only on completion. An invoke_subagent call becomes a native card,
+// and the end of a detached run_command settles its background command.
+// Outside a prompt, it brackets agy's own steps as a turn.
+func (t *tools) Parse(_ string, prompted bool, tool *acp.ToolCallUpdateUpdate, messages []agent.Message) ([]agent.Message, error) {
+	if prompted {
+		// The prompt's response ends its turn, including one agy started.
+		t.woken, t.stepText = false, false
 	}
-	if tool.Name == invokeSubagent {
-		return t.delegate(tool, messages), nil
+	switch {
+	case tool == nil:
+	case tool.Name == invokeSubagent:
+		messages = t.delegate(tool, messages)
+	case slices.ContainsFunc(t.detached, func(c agent.BackgroundCommand) bool { return c.ToolUseID == tool.ToolCallID }):
+		messages = t.settleDetached(tool, messages)
+	default:
+		var err error
+		if messages, err = t.project(tool, messages); err != nil {
+			return nil, err
+		}
 	}
+	if !prompted {
+		messages = t.wake(messages)
+	}
+	return messages, nil
+}
+
+// SettlePrompt ends the cards spawned during the prompt and detaches its
+// running commands. agy keeps each child's lifecycle outside ACP, so the prompt
+// response is the only boundary: end_turn completes them, cancelled interrupts
+// them, and any other end retires them with an unknown outcome. A parent can
+// end its turn before a child reports, so a card can complete before its child
+// does; see AGENTS.md. A command still running at end_turn continues in the
+// background, and agy reports its end later. After another end, agy's record
+// of the command is unknown, so caic keeps no card for it.
+func (t *tools) SettlePrompt(stop acp.StopReason) []agent.Message {
+	t.woken, t.stepText = false, false
+	messages := make([]agent.Message, 0, len(t.running)+len(t.commands))
+	for i := range t.running {
+		s := &t.running[i]
+		switch stop {
+		case acp.StopReasonEndTurn:
+			s.Status = agent.NativeSubagentStatusCompleted
+		case acp.StopReasonCancelled:
+			s.Status = agent.NativeSubagentStatusInterrupted
+		default:
+			messages = append(messages, &agent.BackgroundRetiredMessage{ID: s.ID})
+			continue
+		}
+		messages = append(messages, &agent.NativeSubagentMessage{Subagent: *s})
+	}
+	t.running = t.running[:0]
+	if stop == acp.StopReasonEndTurn {
+		for _, c := range t.commands {
+			t.detached = append(t.detached, c)
+			messages = append(messages, &agent.BackgroundCommandMessage{Command: c})
+		}
+	}
+	t.commands = t.commands[:0]
+	return messages
+}
+
+// project canonicalizes a generic tool call and tracks a running run_command.
+func (t *tools) project(tool *acp.ToolCallUpdateUpdate, messages []agent.Message) ([]agent.Message, error) {
 	for i, m := range messages {
 		use, ok := m.(*agent.ToolUseMessage)
 		if !ok || use.ToolUseID != tool.ToolCallID {
@@ -55,6 +129,9 @@ func (t *tools) Parse(_ string, tool *acp.ToolCallUpdateUpdate, messages []agent
 		agentacp.AddEditInputView(use)
 		messages = slices.Insert(messages, i+1, inferredSkillReads(use.Name, input, tool.ToolCallID)...)
 		break
+	}
+	if tool.Name == runCommand {
+		t.trackCommand(tool)
 	}
 	if tool.Status == acp.StatusCompleted {
 		if output := agentacp.ToolOutput(tool); output != "" {
@@ -70,27 +147,88 @@ func (t *tools) Parse(_ string, tool *acp.ToolCallUpdateUpdate, messages []agent
 	return messages, nil
 }
 
-// SettlePrompt ends the cards spawned during the prompt. agy keeps each
-// child's lifecycle outside ACP, so the prompt response is the only boundary:
-// end_turn completes them, cancelled interrupts them, and any other end
-// retires them with an unknown outcome. A parent can end its turn before a
-// child reports, so a card can complete before its child does; see AGENTS.md.
-func (t *tools) SettlePrompt(stop acp.StopReason) []agent.Message {
-	messages := make([]agent.Message, 0, len(t.running))
-	for i := range t.running {
-		s := &t.running[i]
-		switch stop {
-		case acp.StopReasonEndTurn:
-			s.Status = agent.NativeSubagentStatusCompleted
-		case acp.StopReasonCancelled:
-			s.Status = agent.NativeSubagentStatusInterrupted
+// trackCommand records a running run_command call until agy settles it.
+func (t *tools) trackCommand(tool *acp.ToolCallUpdateUpdate) {
+	i := slices.IndexFunc(t.commands, func(c agent.BackgroundCommand) bool { return c.ToolUseID == tool.ToolCallID })
+	switch {
+	case tool.Status == acp.StatusCompleted || tool.Status == acp.StatusFailed:
+		if i >= 0 {
+			t.commands = slices.Delete(t.commands, i, i+1)
+		}
+	case i < 0:
+		var in struct {
+			CommandLine string `json:"CommandLine"`
+			IsDaemon    bool   `json:"IsDaemon"`
+		}
+		// A malformed input still identifies the command by its call.
+		_ = json.Unmarshal(tool.RawInput, &in)
+		t.commands = append(t.commands, agent.BackgroundCommand{
+			ID:        "antigravity:command:" + tool.ToolCallID,
+			Label:     in.CommandLine,
+			Status:    agent.BackgroundCommandStatusRunning,
+			ToolUseID: tool.ToolCallID,
+			// agy notifies the model when a command ends; a daemon is not
+			// expected to end, so the agent waits for the user meanwhile.
+			WakesAgent: !in.IsDaemon,
+		})
+	}
+}
+
+// settleDetached reports the end of a command that outlived its prompt. Its
+// tool row belongs to an ended turn, so the background command carries the
+// outcome instead of a late tool result.
+func (t *tools) settleDetached(tool *acp.ToolCallUpdateUpdate, messages []agent.Message) []agent.Message {
+	messages = agentacp.DropToolMessages(messages, tool.ToolCallID)
+	var status agent.BackgroundCommandStatus
+	switch tool.Status {
+	case acp.StatusCompleted:
+		status = agent.BackgroundCommandStatusCompleted
+	case acp.StatusFailed:
+		status = agent.BackgroundCommandStatusFailed
+	default:
+		return messages
+	}
+	i := slices.IndexFunc(t.detached, func(c agent.BackgroundCommand) bool { return c.ToolUseID == tool.ToolCallID })
+	c := agent.BackgroundCommand{ID: t.detached[i].ID, Status: status}
+	t.detached = slices.Delete(t.detached, i, i+1)
+	if m := exitCode.FindStringSubmatch(agentacp.ToolOutput(tool)); m != nil {
+		if code, err := strconv.Atoi(m[1]); err == nil {
+			c.ExitCode = &code
+		}
+	}
+	return append(messages, &agent.BackgroundCommandMessage{Command: c})
+}
+
+// wake brackets the steps agy runs without a prompt, such as after a detached
+// command ends or a child reports, as a turn. The turn starts before its first
+// activity. Each model call ends with a usage_update, which tool calls follow
+// when the model requested any; the turn ends at the usage_update of a call
+// that streamed text. See AGENTS.md.
+func (t *tools) wake(messages []agent.Message) []agent.Message {
+	for i := 0; i < len(messages); i++ {
+		switch messages[i].(type) {
+		case *agent.TextDeltaMessage:
+			t.stepText = true
+		case *agent.UsageMessage:
+			if t.woken && t.stepText {
+				t.woken, t.stepText = false, false
+				messages = slices.Insert(messages, i+1, agent.Message(&agent.TurnEndedMessage{}))
+				i++
+			}
+			continue
+		case *agent.ToolUseMessage, *agent.ToolResultMessage:
+			t.stepText = false
+		case *agent.ThinkingDeltaMessage, *agent.ToolOutputDeltaMessage, *agent.SkillReadMessage,
+			*agent.TodoMessage, *agent.NativeSubagentMessage, *agent.BackgroundCommandMessage:
 		default:
-			messages = append(messages, &agent.BackgroundRetiredMessage{ID: s.ID})
 			continue
 		}
-		messages = append(messages, &agent.NativeSubagentMessage{Subagent: *s})
+		if !t.woken {
+			t.woken = true
+			messages = slices.Insert(messages, i, agent.Message(&agent.TurnStartedMessage{}))
+			i++
+		}
 	}
-	t.running = t.running[:0]
 	return messages
 }
 

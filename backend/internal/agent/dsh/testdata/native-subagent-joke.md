@@ -15,17 +15,31 @@
 
 Use a native subagent to tell a joke about README.md. Do not perform the task yourself; delegate it and return the subagent's result.
 
-### 🤖 Native agent: Tell README.md joke — running
-
 <details><summary>💭 Thinking</summary>
 
 The user wants me to delegate to a subagent to tell a joke about README.md. Simple single delegation. No skill needed really. Let me use the subagent tool.
 
 I should not do the task myself. Delegate.
 
-Let me start a subagent.The subagent is running. I need to wait for its result. The runtime will notify me. I should end my turn or wait. Let me use wait_agent.
+Let me start a subagent.
 
-Actually the guidance: "When only waiting for their results remains, end your turn instead of sleeping or polling; the next result starts...
+</details>
+
+### 🤖 Native agent: Tell README.md joke — running
+
+<details><summary>💭 Thinking</summary>
+
+The subagent is running. I need to wait for its result. The runtime will notify me. I should end my turn or wait. Let me use wait_agent.
+
+Actually the guidance: "When only waiting for their results remains, end your turn instead of sleeping or polling; the next result starts a new turn." So I should end my turn. But I can also call wait_agent. Hmm, the instruction says end turn. But I want to return the result. Let me just wait_agent — it's a legitimate blocking wait. Actually the system says ...
+
+</details>
+
+<details><summary>💭 Thinking</summary>
+
+The subagent's closing message is the joke. Retrieve and return it.
+
+Note the subagent finished. I should just present it.
 
 </details>
 

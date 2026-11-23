@@ -13,7 +13,7 @@ import (
 
 type tools struct{ native nativeSubagents }
 
-func (p *tools) Parse(_ string, tool *acp.ToolCallUpdateUpdate, messages []agent.Message) ([]agent.Message, error) {
+func (p *tools) Parse(_ string, _ bool, tool *acp.ToolCallUpdateUpdate, messages []agent.Message) ([]agent.Message, error) {
 	if tool == nil {
 		return messages, nil
 	}

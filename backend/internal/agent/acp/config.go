@@ -49,9 +49,10 @@ type ModelCodec interface {
 // A fresh parser belongs to each wire. Shared ACP deduplicates inferred skill
 // reads by active tool-call ID and settles them at turn completion.
 type ToolParser interface {
-	// Parse receives the session/update notification's sessionId and tool
-	// update; tool is nil for other notifications.
-	Parse(sessionID string, tool *acp.ToolCallUpdateUpdate, messages []agent.Message) ([]agent.Message, error)
+	// Parse receives the session/update notification's sessionId, whether a
+	// session/prompt awaits its response, and the tool update; tool is nil for
+	// other records.
+	Parse(sessionID string, prompted bool, tool *acp.ToolCallUpdateUpdate, messages []agent.Message) ([]agent.Message, error)
 	// SettlePrompt returns the evidence a session/prompt response settles; it
 	// precedes the turn result. stop is empty for a JSON-RPC error response.
 	SettlePrompt(stop acp.StopReason) []agent.Message

@@ -3535,8 +3535,10 @@ data class HistoryRoute(
  * background work, starts at its first root activity. Compaction keeps the
  * start; a context clear discards it, and so does a failed delivery of the
  * starting prompt before root output accepted it. A turn without any root
- * prompt or activity starts at its result. At is the result. WaitMS is the
- * time from At to the prompt at WaitInput, which starts the next turn.
+ * prompt or activity starts at its result. At is the result. DurationMS is the
+ * harness-reported turn duration, else the time from StartedAt to At, as in
+ * the task's turn metrics. WaitMS is the time from At to the prompt at
+ * WaitInput, which starts the next turn.
  * Effort is the root reasoning effort reported by the last init.
  * ContextTokens is the root context size when the turn ended, as the task's
  * context meter measures it: the native occupancy when the harness reports it,

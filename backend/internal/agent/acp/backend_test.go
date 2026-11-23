@@ -481,22 +481,25 @@ func TestEncodePromptCommittedCorrelation(t *testing.T) {
 		t.Fatal("unexpected protocol wire")
 	}
 	wire.session.SessionID = "session-1"
-	wire.textAccum.WriteString("prior text")
+	wire.run.WriteString("prior text")
 	data, err := wire.EncodePrompt(agent.Prompt{Text: "hello"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(wire.requests) != 0 || wire.textAccum.String() != "prior text" {
+	if len(wire.requests) != 0 || wire.run.String() != "prior text" {
 		t.Fatal("encoding changed decoder state")
 	}
 	messages, err := wire.ParseInput(data)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(messages) != 2 || len(wire.requests) != 1 || wire.textAccum.Len() != 0 {
-		t.Fatalf("committed prompt = %#v, requests = %#v, prior text = %q", messages, wire.requests, wire.textAccum.String())
+	if len(messages) != 3 || len(wire.requests) != 1 || wire.run.Len() != 0 {
+		t.Fatalf("committed prompt = %#v, requests = %#v, prior text = %q", messages, wire.requests, wire.run.String())
 	}
-	if input, ok := messages[0].(*agent.UserInputMessage); !ok || input.Text != "hello" {
+	if text, ok := messages[0].(*agent.TextMessage); !ok || text.Text != "prior text" {
+		t.Fatalf("ended run = %#v", messages)
+	}
+	if input, ok := messages[1].(*agent.UserInputMessage); !ok || input.Text != "hello" {
 		t.Fatalf("attempted input = %#v", messages)
 	}
 }

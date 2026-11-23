@@ -212,7 +212,13 @@ func (s *sectionIndex) append(e *v1.HistoryEvent) {
 			}
 			// A turn without any root prompt or activity starts at its result.
 			s.observeStart(p, m.Ts)
-			s.turns = append(s.turns, v1.HistoryTurn{HistoryPosition: p, Number: len(s.turns) + 1, SectionID: s.current.ID, StartedAt: s.startAt, At: historyTime(m.Ts), Model: model, Effort: s.effort, Usage: r.Usage, DurationMS: int64(math.Round(r.Duration * 1000)), DurationAPIMS: int64(math.Round(r.DurationAPI * 1000)), Cost: r.Cost, ContextTokens: s.contextMeter.Tokens()})
+			duration := int64(math.Round(r.Duration * 1000))
+			if duration == 0 && !s.startAt.IsZero() {
+				// As in the task's turn metrics, a harness that reports no
+				// duration, such as an ACP agent, takes the elapsed time.
+				duration = max(0, m.Ts-s.startAt.UnixMilli())
+			}
+			s.turns = append(s.turns, v1.HistoryTurn{HistoryPosition: p, Number: len(s.turns) + 1, SectionID: s.current.ID, StartedAt: s.startAt, At: historyTime(m.Ts), Model: model, Effort: s.effort, Usage: r.Usage, DurationMS: duration, DurationAPIMS: int64(math.Round(r.DurationAPI * 1000)), Cost: r.Cost, ContextTokens: s.contextMeter.Tokens()})
 			s.turnStarts = append(s.turnStarts, s.startPos)
 			s.waiting = len(s.turns) - 1
 			s.clearPrompt()
