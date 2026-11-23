@@ -1,4 +1,4 @@
-// Native activity disclosures show status icons, keep summaries mounted, and build child transcripts and results only while open.
+// Native activity disclosures show scope and status icons, keep summaries mounted, and build child transcripts and results only while open.
 
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 
@@ -83,7 +83,19 @@ export function NativeAgentCard(props: {
       <summary>
         <span class={styles.summaryContent}>
           <span class={styles.label}>
-            {activity().scope === "batch" ? "Batch" : "Subagent"}: {activity().label || "Unnamed"}
+            <Show
+              when={activity().scope === "batch"}
+              fallback={
+                <span role="img" aria-label="Subagent">
+                  🤖
+                </span>
+              }
+            >
+              <span role="img" aria-label="Batch">
+                👥
+              </span>
+            </Show>{" "}
+            {activity().label || "Unnamed"}
           </span>
           <NativeActivityStatus activity={activity()} settled={props.settled} />
           <Show when={activity().background}>

@@ -1755,7 +1755,9 @@ describe("TaskDetail", () => {
     });
 
     const { getByTestId } = await renderTaskDetail();
-    expect(within(getByTestId("native-subagents")).getByText("Subagent: Orphan")).toBeInTheDocument();
+    const card = within(getByTestId("native-subagents")).getByTestId("native-subagent-card");
+    expect(within(card).getByRole("img", { name: "Subagent" })).toBeInTheDocument();
+    expect(card).toHaveTextContent("Orphan");
   });
 
   it("updates a pending tool duration without new events and freezes it on completion", async () => {

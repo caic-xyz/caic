@@ -1,8 +1,8 @@
-// Tests disclosure-only actor fetches, suffix updates, cancellation, and payload-free lifecycle summaries.
+// Tests scope icons, disclosure-only actor fetches, suffix updates, cancellation, and payload-free lifecycle summaries.
 import { defined } from "@tests/history";
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
-import { render, screen, cleanup, waitFor } from "@solidjs/testing-library";
+import { render, screen, cleanup, waitFor, within } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 import { expect, vi } from "@tests/expect";
@@ -71,6 +71,32 @@ function actorFixture(events: HistoryEvent[]) {
   return { view, requests, advance, checkpoint, publish };
 }
 describe("native disclosures", () => {
+  it("prefixes agents and batches with named icons", () => {
+    for (const [scope, name] of [
+      ["agent", "Subagent"],
+      ["batch", "Batch"],
+    ] as const) {
+      const event: HistoryEvent = {
+        recordID: 1,
+        index: 0,
+        message: {
+          kind: "nativeSubagent",
+          ts: 1000,
+          nativeSubagent: { id: scope, label: "Review", scope, status: "running" },
+        },
+      };
+      const activity = defined(historyManifest([event], "").metadata.activities?.[0]);
+      render(() => (
+        <TaskTimelineProvider taskId="task">
+          <NativeAgentCard activity={activity} settled={false} />
+        </TaskTimelineProvider>
+      ));
+      const card = screen.getByTestId("native-subagent-card");
+      expect(within(card).getByRole("img", { name })).toBeInTheDocument();
+      expect(card).toHaveTextContent("Review");
+      cleanup();
+    }
+  });
   it("explains an unreported result while preserving identity and prompt", async () => {
     actorFixture([lifecycle(1, "unknown", "")]);
     const card = screen.getByTestId("native-subagent-card");
