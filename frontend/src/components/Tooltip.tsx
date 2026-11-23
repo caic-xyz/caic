@@ -1,13 +1,14 @@
-// Tooltip: hover on desktop, tap-to-toggle on mobile.
+// Tooltip opens on hover, focus, or tap and provides formatters with its opening time.
 // Uses a Portal so the popup is never clipped by overflow: hidden ancestors.
 
-import { createSignal, createEffect, createUniqueId, Show, onCleanup, type JSX } from "solid-js";
+import { createSignal, createEffect, createMemo, createUniqueId, Show, onCleanup, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 
 import styles from "./Tooltip.module.css";
 
 interface Props {
-  text?: string;
+  /** A formatter receives a fixed wall-clock time for each opening. */
+  text?: string | ((openedAt: number) => string);
   children: JSX.Element;
   class?: string;
   disabled?: boolean;
@@ -18,7 +19,14 @@ interface Props {
 const GAP = 6; // px between element and popup
 
 export default function Tooltip(props: Props) {
-  const [show, setShow] = createSignal(false);
+  const [openedAt, setOpenedAt] = createSignal<number | null>(null);
+  const show = () => openedAt() !== null;
+  const text = createMemo(() => {
+    const at = openedAt();
+    if (at === null) return "";
+    const value = props.text;
+    return typeof value === "function" ? value(at) : (value ?? "");
+  });
   const popupId = createUniqueId();
   let wrapperRef: HTMLSpanElement | undefined;
   let popupRef: HTMLSpanElement | undefined;
@@ -26,12 +34,21 @@ export default function Tooltip(props: Props) {
 
   function onDocClick(e: MouseEvent) {
     if (wrapperRef && !wrapperRef.contains(e.target as Node)) {
-      setShow(false);
+      dismiss();
     }
   }
 
+  function open() {
+    setOpenedAt((at) => at ?? Date.now());
+  }
+
   function dismiss() {
-    setShow(false);
+    setOpenedAt(null);
+  }
+
+  function toggle() {
+    if (show()) dismiss();
+    else open();
   }
 
   createEffect(() => {
@@ -46,7 +63,7 @@ export default function Tooltip(props: Props) {
 
   // Position the popup in fixed coordinates relative to the wrapper.
   createEffect(() => {
-    if (!show() || !props.text || !popupRef || !wrapperRef) return;
+    if (!show() || !text() || !popupRef || !wrapperRef) return;
     const wr = wrapperRef.getBoundingClientRect();
     const pr = popupRef.getBoundingClientRect();
     const margin = 4;
@@ -88,32 +105,32 @@ export default function Tooltip(props: Props) {
           touch = e.pointerType === "touch";
         }}
         onMouseEnter={() => {
-          if (!touch) setShow(true);
+          if (!touch) open();
         }}
         onMouseLeave={() => {
-          if (!touch) setShow(false);
+          if (!touch) dismiss();
         }}
         onFocus={() => {
-          if (!touch) setShow(true);
+          if (!touch) open();
         }}
         onBlur={() => {
           touch = false;
-          setShow(false);
+          dismiss();
         }}
         onClick={(e) => {
           if (props.stopActivationPropagation) e.stopPropagation();
-          setShow((v) => !v);
+          toggle();
         }}
         onKeyDown={(e) => {
           if (e.key === "Escape" && show()) {
             e.preventDefault();
             e.stopPropagation();
-            setShow(false);
+            dismiss();
           }
           if (e.key === "Enter" || e.key === " ") {
             if (props.stopActivationPropagation) e.stopPropagation();
             e.preventDefault();
-            setShow((v) => !v);
+            toggle();
           }
         }}
       >
@@ -121,7 +138,7 @@ export default function Tooltip(props: Props) {
         <Show when={show()}>
           <Portal>
             <span ref={popupRef} id={popupId} role="tooltip" class={styles.popup}>
-              {props.text ?? ""}
+              {text()}
             </span>
           </Portal>
         </Show>

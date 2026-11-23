@@ -70,14 +70,9 @@ for (const width of [390, 1280]) {
               if (name === "running") {
                 if (mobile) await row.tap();
                 else await row.hover();
-                const tooltip = page.getByRole("tooltip").filter({ hasText: text });
+                const tooltip = page.getByRole("tooltip").filter({ hasText: "Review the API handlers" });
                 await expect(tooltip).toHaveText(
-                  [
-                    text,
-                    "Command: Run fix, verify, and test",
-                    "general-purpose: Review the API handlers",
-                    "Watch: fix/verify/test results",
-                  ].join("\n"),
+                  /^• Command: Run fix, verify, and test\s+• general-purpose: Review the API handlers \((?:\d+ms|\d+:\d{2}(?::\d{2})?)\)\s+• Watch: fix\/verify\/test results$/,
                 );
                 if (mobile) await expect(page).toHaveURL(/\/$/);
                 const tooltipBox = await tooltip.boundingBox();

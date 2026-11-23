@@ -255,9 +255,14 @@ func taskBackgroundItems(items []taskrun.BackgroundItem) []v1.TaskBackgroundItem
 			if label == "" {
 				label = item.ID
 			}
+			var startedAt time.Time
+			if item.Kind == taskrun.BackgroundKindAgent {
+				startedAt = item.StartedAt
+			}
 			out = append(out, v1.TaskBackgroundItem{
 				Kind: v1.TaskBackgroundItemKind(item.Kind), Label: backgroundPreviewLine(label, 96),
 				AgentKind: backgroundPreviewLine(item.AgentKind, 32), AgentScope: v1.EventNativeSubagentScope(item.AgentScope),
+				StartedAt: startedAt,
 			})
 			if len(out) == cap(out) {
 				return out

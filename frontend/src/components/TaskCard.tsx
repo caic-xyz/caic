@@ -615,7 +615,11 @@ export default function TaskCard(props: TaskCardProps) {
               </Show>
               <Show when={background().length > 0}>
                 {" · "}
-                <Tooltip text={backgroundTooltip(background(), props.backgroundItems)} stopActivationPropagation>
+                <Tooltip
+                  text={(openedAt) => backgroundTooltip(background(), props.backgroundItems, openedAt)}
+                  disabled={!props.backgroundItems?.length}
+                  stopActivationPropagation
+                >
                   <span
                     class={styles.background}
                     data-testid="task-card-background"

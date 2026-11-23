@@ -8,6 +8,7 @@ import type {
   TaskBackgroundItem,
 } from "@sdk/types.gen";
 import { toolIdentity } from "./grouping";
+import { formatTimingDuration } from "./timing";
 
 export type BackgroundKind = TaskBackgroundItem["kind"];
 
@@ -77,20 +78,22 @@ export function backgroundItemTitle(kindName: string, label: string): string {
 export function backgroundTooltip(
   counts: readonly BackgroundCount[],
   items: readonly TaskBackgroundItem[] | undefined,
+  now: number,
 ): string {
-  const lines = [backgroundLabel(counts)];
+  if (!items?.length) return "";
+  const lines: string[] = [];
   for (const kind of kindOrder) {
-    for (const item of items ?? []) {
+    for (const item of items) {
       if (item.kind !== kind) continue;
       const name =
         kind === "agent" ? agentKindName({ kind: item.agentKind, scope: item.agentScope }) : genericKindNames[kind];
-      lines.push(backgroundItemTitle(name, item.label));
+      const start = kind === "agent" && item.startedAt ? Date.parse(item.startedAt) : NaN;
+      const elapsed = Number.isFinite(start) ? ` (${formatTimingDuration(Math.max(0, now - start))})` : "";
+      lines.push(`• ${backgroundItemTitle(name, item.label)}${elapsed}`);
     }
   }
-  if (items) {
-    const remaining = counts.reduce((total, entry) => total + entry.count, 0) - items.length;
-    if (remaining > 0) lines.push(`${remaining} more`);
-  }
+  const remaining = counts.reduce((total, entry) => total + entry.count, 0) - items.length;
+  if (remaining > 0) lines.push(`${remaining} more`);
   return lines.join("\n");
 }
 

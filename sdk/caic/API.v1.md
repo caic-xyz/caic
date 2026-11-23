@@ -1237,6 +1237,7 @@ TaskBackgroundItem describes one running command, agent, or watch.
 | `label` | `string` | Preview of the harness label, or the item ID when unnamed. | yes |
 | `agentKind` | `string` |  |  |
 | `agentScope` | `EventNativeSubagentScope` |  |  |
+| `startedAt` | `ISOTimestamp` | Start of the agent's current run, when known. |  |
 
 ### Task
 

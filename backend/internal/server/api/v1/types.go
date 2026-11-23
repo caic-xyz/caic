@@ -488,6 +488,7 @@ type TaskBackgroundItem struct {
 	Label      string                   `json:"label"` // Preview of the harness label, or the item ID when unnamed.
 	AgentKind  string                   `json:"agentKind,omitempty"`
 	AgentScope EventNativeSubagentScope `json:"agentScope,omitempty"`
+	StartedAt  time.Time                `json:"startedAt,omitzero"` // Start of the agent's current run, when known.
 }
 
 // TaskRateLimit is the current quota block resolved by the backend for one task.

@@ -40,28 +40,31 @@ describe("backgroundLabel", () => {
 describe("backgroundTooltip", () => {
   it("shows preview items by kind and reports how many were omitted", () => {
     const counts = backgroundCounts({ commands: 2, agents: 3, watches: 1 });
-    const text = backgroundTooltip(counts, [
-      { kind: "watch", label: "results" },
-      { kind: "agent", agentKind: "Explore", label: "Explore" },
-      { kind: "agent", agentScope: "batch", label: "Review changes" },
-      { kind: "agent", label: "Check logs" },
-      { kind: "command", label: "Run tests" },
-    ]);
+    const text = backgroundTooltip(
+      counts,
+      [
+        { kind: "watch", label: "results" },
+        { kind: "agent", agentKind: "Explore", label: "Explore", startedAt },
+        { kind: "agent", agentScope: "batch", label: "Review changes" },
+        { kind: "agent", label: "Check logs" },
+        { kind: "command", label: "Run tests" },
+      ],
+      Date.parse("2026-07-08T12:01:17Z"),
+    );
     expect(text.split("\n")).toEqual([
-      "Background: 2 commands · 3 agents · 1 watch",
-      "Command: Run tests",
-      "Explore",
-      "Batch: Review changes",
-      "Agent: Check logs",
-      "Watch: results",
+      "• Command: Run tests",
+      "• Explore (1:17)",
+      "• Batch: Review changes",
+      "• Agent: Check logs",
+      "• Watch: results",
       "1 more",
     ]);
   });
 
-  it("uses the counts alone when the server has no preview", () => {
-    expect(backgroundTooltip(backgroundCounts({ commands: 0, agents: 1, watches: 0 }), undefined)).toBe(
-      "Background: 1 agent",
-    );
+  it("omits the tooltip when the server has no preview", () => {
+    const counts = backgroundCounts({ commands: 0, agents: 1, watches: 0 });
+    expect(backgroundTooltip(counts, undefined, 0)).toBe("");
+    expect(backgroundTooltip(counts, [], 0)).toBe("");
   });
 });
 

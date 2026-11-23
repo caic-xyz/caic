@@ -1679,16 +1679,18 @@ func (t *Task) backgroundItemsLocked(counts BackgroundCounts) []BackgroundItem {
 
 // foldBackgroundLocked folds a background lifecycle message into the card
 // timelines and records the first running observation of each card's run.
-// It reports changes to display labels and names for work already running.
+// It reports changes to the summary of work already running.
 func (t *Task) foldBackgroundLocked(m agent.Message, at time.Time) bool {
 	switch m := m.(type) {
 	case *agent.NativeSubagentMessage:
 		before, _ := t.nativeSubagents.Subagent(m.Subagent.ID)
+		startedAt := t.backgroundStarts[m.Subagent.ID].at
 		t.nativeSubagents.Apply(&m.Subagent)
 		s, _ := t.nativeSubagents.Subagent(m.Subagent.ID)
 		t.observeBackgroundStartLocked(s.ID, s.RunID, s.Status == agent.NativeSubagentStatusRunning, at)
 		return s.Background && s.Status == agent.NativeSubagentStatusRunning &&
-			(s.Label != before.Label || s.Kind != before.Kind || s.Scope != before.Scope)
+			(s.Label != before.Label || s.Kind != before.Kind || s.Scope != before.Scope ||
+				!t.backgroundStarts[s.ID].at.Equal(startedAt))
 	case *agent.BackgroundCommandMessage:
 		before, _ := t.backgroundCommands.Command(m.Command.ID)
 		t.backgroundCommands.Apply(&m.Command)

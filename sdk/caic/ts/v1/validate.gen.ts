@@ -275,6 +275,7 @@ export function validateTaskBackgroundItem(raw: ValidatorInput): TaskBackgroundI
     label: asString(obj["label"], "TaskBackgroundItem.label"),
     ...(Object.prototype.hasOwnProperty.call(obj, "agentKind") ? { agentKind: asString(obj["agentKind"], "TaskBackgroundItem.agentKind") } : {}),
     ...(Object.prototype.hasOwnProperty.call(obj, "agentScope") ? { agentScope: (asString(obj["agentScope"], "TaskBackgroundItem.agentScope") as EventNativeSubagentScope) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "startedAt") ? { startedAt: asString(obj["startedAt"], "TaskBackgroundItem.startedAt") as ISOTimestamp } : {}),
   };
 }
 

@@ -3437,6 +3437,26 @@ func TestTask(t *testing.T) {
 					t.Fatalf("turn ended %t, state %v, want an ended turn kept running", got.TurnEnded, tk.GetState())
 				}
 			})
+			t.Run("AgentRestartRefreshesSummary", func(t *testing.T) {
+				t.Parallel()
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+				setState(tk, task.StateRunning)
+				at := time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)
+				first := &agent.NativeSubagentMessage{Subagent: agent.NativeSubagent{
+					ID: "reviewer", RunID: "1", Status: agent.NativeSubagentStatusRunning, Background: true,
+				}}
+				tk.addParsedMessage(agent.TimedMessage{ProducerTime: at, Message: first})
+				restarted := *first
+				restarted.Subagent.RunID = "2"
+				at = at.Add(time.Minute)
+				if !tk.addParsedMessage(agent.TimedMessage{ProducerTime: at, Message: &restarted}) {
+					t.Fatal("a new run with the same agent count did not report a summary change")
+				}
+				got := tk.Snapshot().BackgroundItems
+				if len(got) != 1 || !got[0].StartedAt.Equal(at) {
+					t.Fatalf("background items = %+v, want one agent that started at %s", got, at)
+				}
+			})
 			t.Run("CodexCommandOutlivesTurn", func(t *testing.T) {
 				t.Parallel()
 				// Minimized from a task log: the agent ended its turn while its

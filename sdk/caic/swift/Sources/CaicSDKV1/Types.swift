@@ -2264,12 +2264,15 @@ public struct TaskBackgroundItem: Codable {
     public let label: String
     public let agentKind: String?
     public let agentScope: EventNativeSubagentScope?
+    /// Start of the agent's current run, when known.
+    public let startedAt: ISOTimestamp?
 
-    public init(kind: TaskBackgroundItemKind, label: String, agentKind: String? = nil, agentScope: EventNativeSubagentScope? = nil) {
+    public init(kind: TaskBackgroundItemKind, label: String, agentKind: String? = nil, agentScope: EventNativeSubagentScope? = nil, startedAt: ISOTimestamp? = nil) {
         self.kind = kind
         self.label = label
         self.agentKind = agentKind
         self.agentScope = agentScope
+        self.startedAt = startedAt
     }
 }
 

@@ -271,6 +271,31 @@ describe("TaskCard", () => {
     expect(screen.queryByTestId("task-card-background")).not.toBeInTheDocument();
   });
 
+  it("samples elapsed time when the background tooltip opens and holds it until reopening", (t) => {
+    let clock = now();
+    const [label, setLabel] = createSignal("Review the changes");
+    t.mock.method(Date, "now", () => clock);
+    renderCard(() => (
+      <TaskCard
+        {...props({
+          background: { commands: 0, watches: 0, agents: 1 },
+          backgroundItems: [{ kind: "agent", label: label(), startedAt: "2026-07-08T11:59:30Z" as ISOTimestamp }],
+          now: () => Date.now(),
+        })}
+      />
+    ));
+    const trigger = screen.getByRole("button", { name: "Background: 1 agent" });
+    fireEvent.focus(trigger);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("• Agent: Review the changes (0:30)");
+    clock += 15_000;
+    setLabel("Review API changes");
+    expect(screen.getByRole("tooltip")).toHaveTextContent("• Agent: Review API changes (0:30)");
+    fireEvent.keyDown(trigger, { key: "Escape" });
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    expect(screen.getByRole("tooltip")).toHaveTextContent("• Agent: Review API changes (0:45)");
+  });
+
   it("renders every repository and branch before Git status is available", () => {
     renderCard(() => (
       <TaskCard

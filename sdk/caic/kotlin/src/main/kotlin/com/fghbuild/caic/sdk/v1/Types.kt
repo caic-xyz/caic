@@ -2177,6 +2177,8 @@ data class TaskBackgroundItem(
     val label: String,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val agentKind: String? = null,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val agentScope: EventNativeSubagentScope? = null,
+    /** Start of the agent's current run, when known. */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val startedAt: Instant? = null,
 )
 
 /** Task is the JSON representation sent to the frontend. */

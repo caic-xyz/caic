@@ -29,12 +29,13 @@ func TestTaskBackgroundItems(t *testing.T) {
 	t.Parallel()
 	t.Run("shortens multiline and long labels", func(t *testing.T) {
 		t.Parallel()
+		at := time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)
 		got := taskBackgroundItems([]taskrun.BackgroundItem{
-			{Kind: taskrun.BackgroundKindCommand, Label: "cat <<EOF\r\n" + strings.Repeat("private output\n", 100)},
-			{Kind: taskrun.BackgroundKindAgent, Label: strings.Repeat("🌱", 40), AgentKind: "Explore"},
+			{Kind: taskrun.BackgroundKindCommand, Label: "cat <<EOF\r\n" + strings.Repeat("private output\n", 100), StartedAt: at},
+			{Kind: taskrun.BackgroundKindAgent, Label: strings.Repeat("🌱", 40), AgentKind: "Explore", StartedAt: at},
 		})
 		want := []v1.TaskBackgroundItem{
-			{Kind: v1.TaskBackgroundItemKindAgent, Label: strings.Repeat("🌱", 23) + "…", AgentKind: "Explore"},
+			{Kind: v1.TaskBackgroundItemKindAgent, Label: strings.Repeat("🌱", 23) + "…", AgentKind: "Explore", StartedAt: at},
 			{Kind: v1.TaskBackgroundItemKindCommand, Label: "cat <<EOF…"},
 		}
 		if !reflect.DeepEqual(got, want) {

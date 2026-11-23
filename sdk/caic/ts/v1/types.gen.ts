@@ -1164,6 +1164,8 @@ export interface TaskBackgroundItem {
   label: string;
   agentKind?: string;
   agentScope?: EventNativeSubagentScope;
+  /** Start of the agent's current run, when known. */
+  startedAt?: ISOTimestamp;
 }
 
 /** Task is the JSON representation sent to the frontend. */
