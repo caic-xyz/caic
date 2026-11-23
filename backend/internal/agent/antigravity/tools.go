@@ -1,4 +1,4 @@
-// Projects agy ACP tool calls onto caic's canonical tool inputs, outputs, and inferred skill reads.
+// Projects agy ACP tool calls onto caic's canonical tool inputs, outputs, inferred skill reads, and native subagent cards.
 
 package antigravity
 
@@ -23,15 +23,24 @@ var inputKeys = map[string]string{
 	"Target":      "oldString",
 }
 
-// tools maps no native subagents: agy's ACP output reports only the spawn of an
-// invoke_subagent child, never its lifecycle (see AGENTS.md).
-type tools struct{}
+// invokeSubagent is agy's delegation tool. Its call completes once agy has
+// spawned the asynchronous child; see AGENTS.md.
+const invokeSubagent = "invoke_subagent"
+
+// tools projects agy tool calls and its asynchronous delegations.
+type tools struct {
+	// running holds the delegation cards spawned during the current prompt.
+	running []agent.NativeSubagent
+}
 
 // Parse canonicalizes the announced input and adds the output that agy
-// reports only on completion.
-func (tools) Parse(tool *acp.ToolCallUpdateUpdate, messages []agent.Message) ([]agent.Message, error) {
+// reports only on completion. An invoke_subagent call becomes a native card.
+func (t *tools) Parse(tool *acp.ToolCallUpdateUpdate, messages []agent.Message) ([]agent.Message, error) {
 	if tool == nil {
 		return messages, nil
+	}
+	if tool.Name == invokeSubagent {
+		return t.delegate(tool, messages), nil
 	}
 	for i, m := range messages {
 		use, ok := m.(*agent.ToolUseMessage)
@@ -61,10 +70,71 @@ func (tools) Parse(tool *acp.ToolCallUpdateUpdate, messages []agent.Message) ([]
 	return messages, nil
 }
 
-// SettlePrompt adds nothing: agy reports each tool's end on its own call.
-func (tools) SettlePrompt(acp.StopReason) []agent.Message { return nil }
+// SettlePrompt ends the cards spawned during the prompt. agy keeps each
+// child's lifecycle outside ACP, so the prompt response is the only boundary:
+// end_turn completes them, cancelled interrupts them, and any other end
+// retires them with an unknown outcome. A parent can end its turn before a
+// child reports, so a card can complete before its child does; see AGENTS.md.
+func (t *tools) SettlePrompt(stop acp.StopReason) []agent.Message {
+	messages := make([]agent.Message, 0, len(t.running))
+	for i := range t.running {
+		s := &t.running[i]
+		switch stop {
+		case acp.StopReasonEndTurn:
+			s.Status = agent.NativeSubagentStatusCompleted
+		case acp.StopReasonCancelled:
+			s.Status = agent.NativeSubagentStatusInterrupted
+		default:
+			messages = append(messages, &agent.BackgroundRetiredMessage{ID: s.ID})
+			continue
+		}
+		messages = append(messages, &agent.NativeSubagentMessage{Subagent: *s})
+	}
+	t.running = t.running[:0]
+	return messages
+}
 
-func newTools() agentacp.ToolParser { return tools{} }
+// delegate replaces the invoke_subagent tool messages with a native card. The
+// first update announces the child; a completed update only acknowledges the
+// spawn, so the card keeps running until the prompt settles it.
+func (t *tools) delegate(tool *acp.ToolCallUpdateUpdate, messages []agent.Message) []agent.Message {
+	messages = agentacp.DropToolMessages(messages, tool.ToolCallID)
+	i := slices.IndexFunc(t.running, func(s agent.NativeSubagent) bool { return s.ToolUseID == tool.ToolCallID })
+	var s agent.NativeSubagent
+	switch {
+	case i >= 0 && tool.Status != acp.StatusFailed:
+		return messages
+	case i >= 0:
+		s = t.running[i]
+		t.running = slices.Delete(t.running, i, i+1)
+	default:
+		var in struct {
+			Prompt   string `json:"Prompt"`
+			Role     string `json:"Role"`
+			TypeName string `json:"TypeName"`
+		}
+		// A malformed input still identifies the delegation by its call.
+		_ = json.Unmarshal(tool.RawInput, &in)
+		s = agent.NativeSubagent{
+			ToolUseID: tool.ToolCallID,
+			Scope:     agent.NativeSubagentScopeAgent,
+			ID:        "antigravity:tool:" + tool.ToolCallID,
+			Label:     in.Role,
+			Kind:      in.TypeName,
+			Prompt:    in.Prompt,
+			Status:    agent.NativeSubagentStatusRunning,
+		}
+		if tool.Status != acp.StatusFailed {
+			t.running = append(t.running, s)
+		}
+	}
+	if tool.Status == acp.StatusFailed {
+		s.Status = agent.NativeSubagentStatusFailed
+	}
+	return append(messages, &agent.NativeSubagentMessage{Subagent: s})
+}
+
+func newTools() agentacp.ToolParser { return &tools{} }
 
 // canonicalInput renames agy argument keys; other keys and values stay.
 func canonicalInput(raw json.RawMessage) (json.RawMessage, error) {

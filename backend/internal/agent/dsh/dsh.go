@@ -128,7 +128,7 @@ func (p *toolParser) Parse(tool *acp.ToolCallUpdateUpdate, messages []agent.Mess
 		switch tool.Status {
 		case acp.StatusCompleted:
 			delete(p.subagents, tool.ToolCallID)
-			messages = dropToolMessages(messages, tool.ToolCallID)
+			messages = agentacp.DropToolMessages(messages, tool.ToolCallID)
 			// TODO: Attach the child's final message once dsh exposes it
 			// through ACP. The parent receives the child result internally, so
 			// the journal keeps only the spawn identity, label, and prompt.
@@ -147,9 +147,9 @@ func (p *toolParser) Parse(tool *acp.ToolCallUpdateUpdate, messages []agent.Mess
 			return messages, nil
 		case acp.StatusFailed:
 			delete(p.subagents, tool.ToolCallID)
-			return dropToolMessages(messages, tool.ToolCallID), nil
+			return agentacp.DropToolMessages(messages, tool.ToolCallID), nil
 		default:
-			return dropToolMessages(messages, tool.ToolCallID), nil
+			return agentacp.DropToolMessages(messages, tool.ToolCallID), nil
 		}
 	}
 	if tool.Status == acp.StatusInProgress {
@@ -187,7 +187,7 @@ func (p *toolParser) Parse(tool *acp.ToolCallUpdateUpdate, messages []agent.Mess
 				if err := json.Unmarshal(tool.RawInput, &in); err == nil {
 					p.subagents[tool.ToolCallID] = subagentCall{label: in.Description, prompt: in.Prompt}
 				}
-				return dropToolMessages(messages, tool.ToolCallID), nil
+				return agentacp.DropToolMessages(messages, tool.ToolCallID), nil
 			default:
 				continue
 			}
@@ -244,21 +244,6 @@ func startedSubagentID(output string) (string, bool) {
 		return "", false
 	}
 	return id, true
-}
-
-func dropToolMessages(messages []agent.Message, toolUseID string) []agent.Message {
-	return slices.DeleteFunc(messages, func(message agent.Message) bool {
-		switch m := message.(type) {
-		case *agent.ToolUseMessage:
-			return m.ToolUseID == toolUseID
-		case *agent.ToolResultMessage:
-			return m.ToolUseID == toolUseID
-		case *agent.ToolOutputDeltaMessage:
-			return m.ToolUseID == toolUseID
-		default:
-			return false
-		}
-	})
 }
 
 func newTools() agentacp.ToolParser { return &toolParser{subagents: make(map[string]subagentCall)} }

@@ -10,7 +10,8 @@ package.
 `testdata/*.jsonl` are `record-trace --local` recordings with
 `gemini-3.8-flash`: read/edit/command, a failed read, two prompts in one
 session, and a resumed process with agy 1.5.9, and a native delegation and a
-compaction with agy 1.5.14 at low effort. They ran with HOME holding only
+compaction with agy 1.5.14 at low effort. The delegation recording continued
+past the prompt response to the parent's wake-up. They ran with HOME holding only
 `~/.gemini/antigravity-cli/antigravity-oauth-token`, so no user instructions
 or skills reached the model. The subscription tier in the `authenticate` and
 `session/new` results is replaced with `Example Tier`. `record-trace` owns
@@ -93,21 +94,28 @@ instructions.
 agy delegates with its `invoke_subagent` tool. In
 `testdata/native-subagent-joke.jsonl`, ACP reports it as one `tool_call` with
 `name` `invoke_subagent`, kind `other`, title `Run invoke_subagent`, and
-`rawInput` holding `Prompt`, `Role`, `TypeName`, and `Model`. A `completed`
-update without `rawOutput` follows 9 ms later. That completion acknowledges the
-spawn: agy's step output, which it keeps outside ACP, names the child
-conversation and says the child "will send you a message when it has
-completed". The child runs asynchronously and reports with its `send_message`
-tool; agy adds the report to the parent conversation as a system-message step
-that ACP does not emit. No `session/update` carries the child's session ID,
-tools, or end.
+`rawInput` holding `Prompt`, `Role`, and `TypeName`. A `completed` update
+without `rawOutput` follows within 20 ms: it acknowledges the spawn, and the
+child runs asynchronously. No `session/update` carries the child's session ID,
+tools, end, or report. agy delivers each report to the parent outside ACP and
+runs a parent step for it; that step's text is the parent model's own.
 
-caic does not map this delegation to a native-subagent card. The recording
-supplies an identity (the tool call ID), a label (`Role`), and a prompt, but no
-child status: a card completed by the spawn acknowledgment invents an outcome,
-and a running card never settles. The delegation stays a plain tool call, and
-`record-trace` accepts that call as the `native-subagent-joke` delegation.
-Revisit when agy's ACP output reports the child's lifecycle.
+Task logs show two orderings. With one child, the parent ended its turn while
+the child ran; when the child reported, agy ran a parent step without a
+`session/prompt` that streamed `agent_message_chunk` text and a
+`usage_update` and sent no prompt response. With 33 children, the parent
+stayed in its turn: reports arriving in batches started further steps ("25 of
+33 subagents have reported back"), and the turn ended after the last report.
+
+ACP cannot tell these apart, so `tools.go` settles the cards when the
+spawning prompt's response arrives, as dsh does: `end_turn` completes them,
+`cancelled` interrupts them, and any other end retires them as unknown. The
+card takes the `Role` label, `TypeName` kind, and `Prompt`, and its ID derives
+from the tool call ID. It holds no result; the parent's text stays in the
+transcript. In the first ordering, the card completes before its child
+reports. Shared ACP keeps the final text of a step outside a prompt; that step
+reports no token usage, so caic does not price it. A failed `invoke_subagent`
+call fails its card.
 
 ## Stream-json history
 

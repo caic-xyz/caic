@@ -216,22 +216,6 @@ func TestValidateGoldenRecording(t *testing.T) {
 			t.Fatalf("validateGoldenRecording = %v, want a missing-delegation failure", err)
 		}
 	})
-	t.Run("UnmappedDelegation", func(t *testing.T) {
-		t.Parallel()
-		agy, ok := backends[string(harness.Antigravity)]
-		if !ok {
-			t.Fatalf("no %s backend registered", harness.Antigravity)
-		}
-		// Minimized from the agy 1.5.14 native-subagent-joke recording.
-		const spawn = `{"t":"agent","ts":1.000,"msg":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"c1","name":"invoke_subagent","status":"in_progress","kind":"other","title":"Run invoke_subagent","rawInput":{"Prompt":"Tell a joke about README.md","Role":"Comedian"}}}}}`
-		const read = `{"t":"agent","ts":1.000,"msg":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"c1","name":"read_file","status":"in_progress","kind":"read","title":"File README.md","rawInput":{"Path":"/w/README.md"}}}}}`
-		if err := validateGoldenRecording("recording.jsonl", record(header, spawn, footer), agy, true); err != nil {
-			t.Fatalf("validateGoldenRecording = %v, want the spawn accepted", err)
-		}
-		if err := validateGoldenRecording("recording.jsonl", record(header, read, footer), agy, true); err == nil {
-			t.Fatal("validateGoldenRecording accepted a recording without the spawn")
-		}
-	})
 	t.Run("ScenarioWithoutNativeEvidence", func(t *testing.T) {
 		t.Parallel()
 		if err := validateGoldenRecording("recording.jsonl", record(header, unrelated, footer), claude, false); err != nil {

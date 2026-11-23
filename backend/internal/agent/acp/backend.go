@@ -372,6 +372,10 @@ type wireFormat struct {
 	thinkAccum     strings.Builder // Accumulated text from agent_thought_chunk.
 	textOverflow   bool
 	thinkOverflow  bool
+	// unprompted holds agent text that arrived while no session/prompt ran,
+	// until a later record ends it.
+	unprompted         strings.Builder
+	unpromptedOverflow bool
 }
 
 // EncodePrompt encodes a session/prompt JSON-RPC request to begin a new turn.
@@ -453,55 +457,14 @@ func (w *wireFormat) EncodeCompact(instructions string) ([]byte, error) {
 	return w.EncodePrompt(agent.Prompt{Text: w.config.CompactPrompt})
 }
 
-// ParseInput restores prompt response correlation and decodes recorded client prompts.
+// ParseInput restores prompt response correlation and decodes recorded client
+// prompts. Each input ends agent text that arrived outside a prompt.
 func (w *wireFormat) ParseInput(line []byte) ([]agent.Message, error) {
-	probe, err := agent.ParseJSONRPCEnvelope(line)
+	msgs, err := w.parseInput(line)
 	if err != nil {
-		return nil, fmt.Errorf("unmarshal input: %w", err)
-	}
-	if _, err := w.metadataState.ParseInput(line); err != nil {
 		return nil, err
 	}
-	if probe.ID != nil && string(probe.ID) != "null" && probe.Method != "" {
-		var id int64
-		if err := json.Unmarshal(probe.ID, &id); err != nil {
-			return nil, fmt.Errorf("unmarshal request ID: %w", err)
-		}
-		w.mu.Lock()
-		w.nextID = max(w.nextID, id)
-		w.mu.Unlock()
-		if acp.Method(probe.Method) == acp.MethodSessionPrompt {
-			w.mu.Lock()
-			w.resetAccumulatedOutputLocked()
-			w.mu.Unlock()
-			var prompt acp.SessionPromptParams
-			if err := json.Unmarshal(probe.Params, &prompt); err != nil {
-				return nil, fmt.Errorf("unmarshal session/prompt params: %w", err)
-			}
-			input := &agent.UserInputMessage{}
-			for i := range prompt.Prompt {
-				content := &prompt.Prompt[i]
-				switch content.Type {
-				case acp.ContentText:
-					input.Text += content.Text
-				case acp.ContentImage:
-					input.Images = append(input.Images, v3.ImageData{MediaType: content.MimeType, Data: content.Data})
-				case acp.ContentResourceLink:
-					if img, ok := linkedImage(content); ok {
-						input.Images = append(input.Images, img)
-					}
-				case acp.ContentAudio, acp.ContentResource:
-					// UserInputMessage currently has no representation for these ACP content types.
-				}
-			}
-			return []agent.Message{
-				input,
-				&agent.RawMessage{MessageType: "jsonrpc_request", Raw: append([]byte(nil), line...)},
-			}, nil
-		}
-		return []agent.Message{&agent.RawMessage{MessageType: "jsonrpc_request", Raw: append([]byte(nil), line...)}}, nil
-	}
-	return []agent.Message{&agent.RawMessage{MessageType: "jsonrpc_response", Raw: append([]byte(nil), line...)}}, nil
+	return w.endUnprompted(msgs), nil
 }
 
 // ParseOutput wraps the package-level parseMessage with interceptions:
@@ -511,7 +474,41 @@ func (w *wireFormat) ParseInput(line []byte) ([]agent.Message, error) {
 //     boundary for a completed CompactPrompt, and ResultMessage.
 //
 // It also captures the session ID from InitMessage if present.
+//
+// Agent text that arrives while no session/prompt runs, such as agy's parent
+// step after an asynchronous child reports, accumulates until a later record
+// or input ends it; its final TextMessage then precedes that record.
 func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
+	msgs, err := w.parseOutputRecord(line)
+	if err != nil {
+		return nil, err
+	}
+	if len(msgs) == 1 && !w.promptPending() {
+		if delta, ok := msgs[0].(*agent.TextDeltaMessage); ok {
+			w.mu.Lock()
+			appendAccumulatedOutput(&w.unprompted, &w.unpromptedOverflow, delta.Text)
+			w.mu.Unlock()
+			return msgs, nil
+		}
+	}
+	return w.endUnprompted(msgs), nil
+}
+
+// endUnprompted ends the agent text that arrived outside a prompt and
+// prepends its final message, which no prompt response settles, to msgs.
+func (w *wireFormat) endUnprompted(msgs []agent.Message) []agent.Message {
+	w.mu.Lock()
+	text, complete := w.unprompted.String(), !w.unpromptedOverflow
+	w.unprompted.Reset()
+	w.unpromptedOverflow = false
+	w.mu.Unlock()
+	if text == "" || !complete {
+		return msgs
+	}
+	return append([]agent.Message{&agent.TextMessage{Text: text}}, msgs...)
+}
+
+func (w *wireFormat) parseOutputRecord(line []byte) ([]agent.Message, error) {
 	probe, err := agent.ParseJSONRPCEnvelope(line)
 	if err != nil {
 		return nil, fmt.Errorf("unmarshal probe: %w", err)
@@ -620,6 +617,56 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 		}
 	}
 	return msgs, nil
+}
+
+func (w *wireFormat) parseInput(line []byte) ([]agent.Message, error) {
+	probe, err := agent.ParseJSONRPCEnvelope(line)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshal input: %w", err)
+	}
+	if _, err := w.metadataState.ParseInput(line); err != nil {
+		return nil, err
+	}
+	if probe.ID != nil && string(probe.ID) != "null" && probe.Method != "" {
+		var id int64
+		if err := json.Unmarshal(probe.ID, &id); err != nil {
+			return nil, fmt.Errorf("unmarshal request ID: %w", err)
+		}
+		w.mu.Lock()
+		w.nextID = max(w.nextID, id)
+		w.mu.Unlock()
+		if acp.Method(probe.Method) == acp.MethodSessionPrompt {
+			w.mu.Lock()
+			w.resetAccumulatedOutputLocked()
+			w.mu.Unlock()
+			var prompt acp.SessionPromptParams
+			if err := json.Unmarshal(probe.Params, &prompt); err != nil {
+				return nil, fmt.Errorf("unmarshal session/prompt params: %w", err)
+			}
+			input := &agent.UserInputMessage{}
+			for i := range prompt.Prompt {
+				content := &prompt.Prompt[i]
+				switch content.Type {
+				case acp.ContentText:
+					input.Text += content.Text
+				case acp.ContentImage:
+					input.Images = append(input.Images, v3.ImageData{MediaType: content.MimeType, Data: content.Data})
+				case acp.ContentResourceLink:
+					if img, ok := linkedImage(content); ok {
+						input.Images = append(input.Images, img)
+					}
+				case acp.ContentAudio, acp.ContentResource:
+					// UserInputMessage currently has no representation for these ACP content types.
+				}
+			}
+			return []agent.Message{
+				input,
+				&agent.RawMessage{MessageType: "jsonrpc_request", Raw: append([]byte(nil), line...)},
+			}, nil
+		}
+		return []agent.Message{&agent.RawMessage{MessageType: "jsonrpc_request", Raw: append([]byte(nil), line...)}}, nil
+	}
+	return []agent.Message{&agent.RawMessage{MessageType: "jsonrpc_response", Raw: append([]byte(nil), line...)}}, nil
 }
 
 func (w *wireFormat) resetAccumulatedOutputLocked() {

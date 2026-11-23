@@ -656,6 +656,58 @@ func TestWireFormatPromptResponse(t *testing.T) {
 			t.Fatalf("continued result = %#v", messages[1])
 		}
 	})
+	t.Run("UnpromptedText", func(t *testing.T) {
+		t.Parallel()
+		// Minimized from an agy recording: after a turn's result, a parent step
+		// streams text with no session/prompt, then a usage_update.
+		w := &wireFormat{config: testBackend().Config, session: agent.SessionMetadata{SessionID: "ses_1"}}
+		chunk := func(text string) []agent.Message {
+			t.Helper()
+			msgs, err := w.ParseOutput(mustJSON(t, map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{
+				"sessionId": "ses_1", "update": map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": text}},
+			}}))
+			if err != nil || len(msgs) != 1 {
+				t.Fatalf("chunk %q = %#v, %v", text, msgs, err)
+			}
+			return msgs
+		}
+		if _, err := w.ParseInput([]byte(`{"jsonrpc":"2.0","id":5,"method":"session/prompt","params":{"sessionId":"ses_1","prompt":[{"type":"text","text":"delegate"}]}}`)); err != nil {
+			t.Fatal(err)
+		}
+		chunk("waiting")
+		msgs, err := w.ParseOutput([]byte(`{"jsonrpc":"2.0","id":5,"result":{"stopReason":"end_turn"}}`))
+		if err != nil || len(msgs) != 2 {
+			t.Fatalf("prompted turn = %#v, %v", msgs, err)
+		}
+		if text, ok := msgs[0].(*agent.TextMessage); !ok || text.Text != "waiting" {
+			t.Fatalf("prompted final = %#v", msgs[0])
+		}
+		chunk("late ")
+		chunk("report")
+		msgs, err = w.ParseOutput([]byte(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"usage_update","used":1,"size":10}}}`))
+		if err != nil || len(msgs) != 2 {
+			t.Fatalf("ending record = %#v, %v", msgs, err)
+		}
+		if text, ok := msgs[0].(*agent.TextMessage); !ok || text.Text != "late report" {
+			t.Fatalf("final = %#v", msgs[0])
+		}
+		if _, ok := msgs[1].(*agent.UsageMessage); !ok {
+			t.Fatalf("record = %#v", msgs[1])
+		}
+		// A prompt input also ends unprompted text, and its final excludes
+		// the next turn's text.
+		chunk("second")
+		msgs, err = w.ParseInput([]byte(`{"jsonrpc":"2.0","id":6,"method":"session/prompt","params":{"sessionId":"ses_1","prompt":[{"type":"text","text":"next"}]}}`))
+		if err != nil || len(msgs) != 3 {
+			t.Fatalf("input = %#v, %v", msgs, err)
+		}
+		if text, ok := msgs[0].(*agent.TextMessage); !ok || text.Text != "second" {
+			t.Fatalf("final = %#v", msgs[0])
+		}
+		if input, ok := msgs[1].(*agent.UserInputMessage); !ok || input.Text != "next" {
+			t.Fatalf("input = %#v", msgs[1])
+		}
+	})
 	t.Run("Success", func(t *testing.T) {
 		t.Parallel()
 		w := &wireFormat{config: testBackend().Config, session: agent.SessionMetadata{SessionID: "ses_1"}}

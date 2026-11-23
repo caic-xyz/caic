@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"slices"
 	"strings"
 
 	"github.com/maruel/genai/acp"
@@ -236,6 +237,23 @@ func ToolError(u *acp.ToolCallUpdateUpdate) string {
 		}
 	}
 	return "tool call failed"
+}
+
+// DropToolMessages removes the generic tool messages of one call, for a
+// harness that projects the call as native evidence instead.
+func DropToolMessages(messages []agent.Message, toolUseID string) []agent.Message {
+	return slices.DeleteFunc(messages, func(message agent.Message) bool {
+		switch m := message.(type) {
+		case *agent.ToolUseMessage:
+			return m.ToolUseID == toolUseID
+		case *agent.ToolResultMessage:
+			return m.ToolUseID == toolUseID
+		case *agent.ToolOutputDeltaMessage:
+			return m.ToolUseID == toolUseID
+		default:
+			return false
+		}
+	})
 }
 
 // ToolOutput returns native structured output or textual tool content.

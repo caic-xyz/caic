@@ -73,17 +73,8 @@ type scenario struct {
 	compact bool
 	// wantNative marks a scenario that must record native subagent activity, so a
 	// regeneration that lost the delegation fails instead of publishing evidence
-	// that proves nothing. For a harness in unmappedDelegationTools, the
-	// delegation tool call stands in for that activity.
+	// that proves nothing.
 	wantNative bool
-}
-
-// unmappedDelegationTools names, per harness, the tool whose call is a native
-// delegation that caic does not map onto native-subagent cards.
-var unmappedDelegationTools = map[harness.Name]string{
-	// agy reports only the spawn of an asynchronous child over ACP; see
-	// antigravity/AGENTS.md.
-	harness.Antigravity: "Run invoke_subagent",
 }
 
 var scenarios = map[string]scenario{
@@ -800,17 +791,14 @@ func writeGoldenFile(ctx context.Context, journalPath string, b agent.Backend, s
 
 // validateGoldenRecording replays a recording through the recorder's own wire
 // and reports the native-subagent lifecycle it contains. wantNative requires the
-// recording to hold at least one native observation, or the harness's unmapped
-// delegation tool call, so a scenario that asks the harness to delegate cannot
-// publish evidence that proves nothing.
+// recording to hold at least one native observation, so a scenario that asks
+// the harness to delegate cannot publish evidence that proves nothing.
 func validateGoldenRecording(path, sanitized string, b agent.Backend, wantNative bool) error {
 	parser, err := agent.NewLogRecordParser(b.NewWire())
 	if err != nil {
 		return err
 	}
 	var statuses []string
-	delegationTool := unmappedDelegationTools[b.Harness()]
-	delegated := false
 	scanner := bufio.NewScanner(strings.NewReader(sanitized))
 	scanner.Buffer(make([]byte, 64*1024), 32<<20)
 	for scanner.Scan() {
@@ -822,19 +810,16 @@ func validateGoldenRecording(path, sanitized string, b agent.Backend, wantNative
 			return fmt.Errorf("parse recording %s: %w", path, err)
 		}
 		for _, message := range record.Messages {
-			switch m := message.Message.(type) {
-			case *agent.NativeSubagentMessage:
+			if m, ok := message.Message.(*agent.NativeSubagentMessage); ok {
 				statuses = append(statuses, string(m.Subagent.Status))
-			case *agent.ToolUseMessage:
-				delegated = delegated || (delegationTool != "" && m.Name == delegationTool)
 			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("read recording %s: %w", path, err)
 	}
-	slog.Info("recording native activity", "path", path, "harness", b.Harness(), "observations", len(statuses), "statuses", statuses, "unmapped_delegation", delegated)
-	if wantNative && len(statuses) == 0 && !delegated {
+	slog.Info("recording native activity", "path", path, "harness", b.Harness(), "observations", len(statuses), "statuses", statuses)
+	if wantNative && len(statuses) == 0 {
 		return fmt.Errorf("%s recorded no native subagent activity for %s", path, b.Harness())
 	}
 	return nil

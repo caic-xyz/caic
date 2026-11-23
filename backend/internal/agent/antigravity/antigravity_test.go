@@ -264,34 +264,38 @@ func TestRecordings(t *testing.T) {
 	})
 	t.Run("native-subagent-joke", func(t *testing.T) {
 		t.Parallel()
-		// invoke_subagent completes when agy has spawned the child, with no
-		// output. The child's lifecycle and report never reach ACP, so the
-		// delegation stays a plain tool call without a native card.
-		var spawn *agent.ToolUseMessage
-		var spawned *agent.ToolResultMessage
+		// invoke_subagent completes when agy has spawned the child. The prompt
+		// response settles the card, here before the child reports: the
+		// parent's next step streams text outside any prompt and keeps its
+		// final.
+		var cards []agent.NativeSubagent
+		var resulted, wokeUp bool
 		for _, m := range replay(t, "native-subagent-joke.jsonl", New("", nil).NewWire()) {
 			switch m := m.(type) {
 			case *agent.ToolUseMessage:
 				if m.Name == "Run invoke_subagent" {
-					spawn = m
+					t.Fatalf("delegation tool call %+v, want only its card", m)
 				}
-			case *agent.ToolResultMessage:
-				if spawn != nil && m.ToolUseID == spawn.ToolUseID {
-					spawned = m
-				}
-			case *agent.ToolOutputDeltaMessage:
-				if spawn != nil && m.ToolUseID == spawn.ToolUseID {
-					t.Fatalf("spawn output = %q, want none", m.Delta)
-				}
+			case *agent.ResultMessage:
+				resulted = true
+			case *agent.TextMessage:
+				wokeUp = wokeUp || (resulted && strings.Contains(m.Text, "README"))
 			case *agent.NativeSubagentMessage:
-				t.Fatalf("native card %+v from a spawn-only delegation", m.Subagent)
+				if resulted {
+					t.Fatalf("card %+v after the prompt response", m.Subagent)
+				}
+				cards = append(cards, m.Subagent)
 			}
 		}
-		if spawn == nil || spawned == nil || spawned.Error != "" {
-			t.Fatalf("spawn = %+v, result = %+v", spawn, spawned)
+		if len(cards) != 2 || cards[0].Status != agent.NativeSubagentStatusRunning || cards[1].Status != agent.NativeSubagentStatusCompleted {
+			t.Fatalf("cards = %+v, want running then completed", cards)
 		}
-		if role, err := agent.JSONString(spawn.Input, "Role"); err != nil || role == "" {
-			t.Fatalf("spawn input = %s, %v", spawn.Input, err)
+		spawn := cards[0]
+		if spawn.Background || spawn.Label == "" || spawn.Prompt == "" || spawn.ID != "antigravity:tool:"+spawn.ToolUseID || cards[1].ID != spawn.ID {
+			t.Fatalf("cards = %+v", cards)
+		}
+		if !wokeUp {
+			t.Fatal("the parent's text after the prompt response has no final message")
 		}
 	})
 	t.Run("compact", func(t *testing.T) {

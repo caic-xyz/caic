@@ -30,9 +30,14 @@ the turn's `usage_update` measured the summarization request, so the context
 meter stays unknown until the next usage report. A cancelled, refused, or
 failed response emits none.
 
+Agent text can also arrive while no `session/prompt` runs, as when agy wakes
+its idle parent after a child reports. Shared ACP buffers that text until any
+other record or input ends it, then emits its final TextMessage before that
+record's messages. No prompt response settles it, so it carries no usage.
+
 | ACP session/update type | agent.Message type   |
 |-------------------------|----------------------|
-| `agent_message_chunk`   | TextDeltaMessage     |
+| `agent_message_chunk`   | TextDeltaMessage; TextMessage when text outside a prompt ends |
 | `agent_thought_chunk`   | ThinkingDeltaMessage |
 | `tool_call`             | ToolUseMessage / WidgetMessage; also ToolResultMessage when announced completed/failed |
 | `tool_call_update` (completed/failed) | ToolResultMessage |
