@@ -1,14 +1,36 @@
-/* Tooltip shown on hover (desktop) and tap (mobile). */
+/* Shared tooltip placement, surface, and pointer passage between popup and trigger. */
 
 .wrapper {
   display: inline-flex;
 }
 
 .popup {
+  --tooltip-gap: 6px;
+
   position: fixed;
   z-index: 1000;
-  box-sizing: border-box;
+  inline-size: max-content;
   max-inline-size: min(28rem, calc(100vw - 8px));
+}
+
+.popup[data-side]::after {
+  position: absolute;
+  inset-inline: 0;
+  block-size: var(--tooltip-gap);
+  content: "";
+}
+
+.popup[data-side="above"]::after {
+  top: 100%;
+}
+
+.popup[data-side="below"]::after {
+  bottom: 100%;
+}
+
+.content {
+  box-sizing: border-box;
+  display: block;
   max-block-size: calc(100dvh - 8px);
   padding: 0.3rem 0.5rem;
   overflow: hidden;
@@ -18,7 +40,6 @@
   color: var(--color-on-tooltip);
   overflow-wrap: anywhere;
   white-space: pre-line;
-  pointer-events: none;
   background: var(--color-tooltip-bg);
   border-radius: var(--radius-md);
 }

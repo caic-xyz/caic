@@ -3,7 +3,6 @@ declare const classes: {
   readonly "high": string;
   readonly "link": string;
   readonly "normal": string;
-  readonly "tooltip": string;
   readonly "unavailable": string;
   readonly "warning": string;
   readonly "wrapper": string;

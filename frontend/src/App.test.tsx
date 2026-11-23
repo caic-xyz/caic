@@ -4627,9 +4627,10 @@ it("lets a foreground account menu consume Escape before a hovered health toolti
   const link = screen.getByRole("link", { name: "CPU high, memory high — open System" });
   const menu = screen.getByRole("button", { name: "Menu" });
   menu.focus();
-  fireEvent.mouseEnter(link);
   fireEvent.click(menu);
   expect(screen.getByRole("menu")).toBeInTheDocument();
+  fireEvent.mouseEnter(link);
+  expect(screen.getByRole("tooltip")).toBeInTheDocument();
   fireEvent.keyDown(menu, { key: "Escape" });
   expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   expect(screen.getByRole("tooltip")).toBeInTheDocument();

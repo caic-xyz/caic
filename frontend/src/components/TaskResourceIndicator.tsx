@@ -16,6 +16,7 @@ import {
   type ResourceLevel,
 } from "../resourceLevel";
 import styles from "./TaskResourceIndicator.module.css";
+import Tooltip from "./Tooltip";
 
 const levelClass: Record<ResourceLevel, string> = {
   high: styles.high,
@@ -69,20 +70,28 @@ export default function TaskResourceIndicator(props: {
     ].join("\n");
   };
   return (
-    <A
-      class={styles.levels}
-      href={props.href}
-      title={description()}
-      aria-label={`Task performance: ${description()}`}
-      data-testid="task-resource-levels"
-      onClick={(event) => event.stopPropagation()}
-    >
-      <span class={levelClass[cpuLevel()]} data-testid="task-cpu-level">
-        <CPUIcon aria-hidden="true" />
-      </span>
-      <span class={levelClass[memoryLevel()]} data-testid="task-memory-level">
-        <MemoryIcon aria-hidden="true" />
-      </span>
-    </A>
+    <Tooltip
+      text={description()}
+      trigger={(tip) => (
+        <A
+          {...tip}
+          class={styles.levels}
+          href={props.href}
+          aria-label={`Task performance: ${description()}`}
+          data-testid="task-resource-levels"
+          onClick={(event) => {
+            tip.onClick();
+            event.stopPropagation();
+          }}
+        >
+          <span class={levelClass[cpuLevel()]} data-testid="task-cpu-level">
+            <CPUIcon aria-hidden="true" />
+          </span>
+          <span class={levelClass[memoryLevel()]} data-testid="task-memory-level">
+            <MemoryIcon aria-hidden="true" />
+          </span>
+        </A>
+      )}
+    />
   );
 }

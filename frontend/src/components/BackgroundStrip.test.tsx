@@ -25,8 +25,8 @@ describe("BackgroundStrip", () => {
     const onReveal = vi.fn();
     render(() => <BackgroundStrip items={items()} onReveal={onReveal} />);
     const chip = screen.getByRole("button", { name: "Watch results" });
-    expect(chip).toHaveAttribute("title", "Watch: results");
     chip.focus();
+    expect(chip).toHaveAccessibleDescription("Watch: results");
     await userEvent.setup().keyboard("{Enter}");
     expect(onReveal).toHaveBeenCalledWith(watch);
     setItems([]);
@@ -45,7 +45,10 @@ describe("BackgroundStrip", () => {
       />
     ));
     const named = screen.getByRole("button", { name: "general-purpose Review the API handlers" });
-    expect(named).toHaveAttribute("title", "general-purpose: Review the API handlers");
-    expect(screen.getByRole("button", { name: "worker" })).toHaveAttribute("title", "worker");
+    named.focus();
+    expect(named).toHaveAccessibleDescription("general-purpose: Review the API handlers");
+    const worker = screen.getByRole("button", { name: "worker" });
+    worker.focus();
+    expect(worker).toHaveAccessibleDescription("worker");
   });
 });

@@ -81,6 +81,16 @@ for (const width of [390, 1280]) {
                 expect(tooltipBox.x + tooltipBox.width).toBeLessThanOrEqual(width);
                 expect(tooltipBox.y).toBeGreaterThanOrEqual(0);
                 expect(tooltipBox.y + tooltipBox.height).toBeLessThanOrEqual(844);
+                if (!mobile && !reload) {
+                  await row.click();
+                  await expect(tooltip).toBeHidden();
+                  await page.mouse.move(0, 843);
+                  await row.hover();
+                  await expect(tooltip).toBeVisible();
+                  await page.mouse.move(0, 843);
+                  await expect(tooltip).toBeHidden();
+                  await row.hover();
+                }
                 await row.locator("..").press("Escape");
                 await expect(tooltip).toBeHidden();
               }

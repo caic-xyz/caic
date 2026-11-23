@@ -267,11 +267,15 @@ test("task cards keep single- and multi-repository states coherent", async ({ pa
 
   const singleCard = page.locator(`[data-task-id="${singleTask.id}"]`);
   const multiCard = page.locator(`[data-task-id="${multiTask.id}"]`);
-  await expect(
-    singleCard.getByRole("img", {
-      name: "2 changed files, 12 additions, 2 deletions, 1 uncommitted file, 1 commit ahead of upstream",
-    }),
-  ).toBeVisible();
+  const summary = "2 changed files, 12 additions, 2 deletions, 1 uncommitted file, 1 commit ahead of upstream";
+  const singleMarkers = singleCard.getByRole("img", { name: summary });
+  await singleMarkers.hover();
+  const repoTooltip = page.getByRole("tooltip").filter({ hasText: summary });
+  await expect(repoTooltip).toBeVisible();
+  await repoTooltip.click();
+  await expect(page).toHaveURL(new RegExp(`/task/@${multiTask.id}`));
+  await page.keyboard.press("Escape");
+  await expect(repoTooltip).toBeHidden();
   await expect(
     multiCard.getByRole("img", {
       name: "2 changed files, 12 additions, 2 deletions, 1 uncommitted file, 1 commit ahead of upstream",

@@ -91,6 +91,9 @@ for (const width of [320, 390, 1280]) {
       if (!tipBox) throw new Error("Tooltip missing");
       expect(tipBox.x).toBeGreaterThanOrEqual(0);
       expect(tipBox.x + tipBox.width).toBeLessThanOrEqual(width);
+      await tooltip.hover();
+      await page.clock.fastForward(250);
+      await expect(tooltip).toBeVisible();
 
       // Hover must dismiss even while keyboard focus belongs to another control.
       await page.keyboard.press("Escape");

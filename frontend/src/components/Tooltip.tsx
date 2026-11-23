@@ -1,148 +1,214 @@
-// Tooltip opens on hover, focus, or tap and provides formatters with its opening time.
-// Uses a Portal so the popup is never clipped by overflow: hidden ancestors.
+// Shared informational popup attached to an existing trigger or a standalone disclosure.
 
 import { createSignal, createEffect, createMemo, createUniqueId, Show, onCleanup, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 
 import styles from "./Tooltip.module.css";
 
+interface TooltipTrigger {
+  ref: (element: HTMLElement) => void;
+  readonly "aria-describedby": string | undefined;
+  onPointerOver: (event: PointerEvent) => void;
+  onPointerDown: (event: PointerEvent) => void;
+  onMouseEnter: () => void;
+  onMouseLeave: () => void;
+  onFocus: () => void;
+  onBlur: () => void;
+  onClick: () => void;
+}
+
 interface Props {
   /** A formatter receives a fixed wall-clock time for each opening. */
   text?: string | ((openedAt: number) => string);
-  children: JSX.Element;
+  /** Attach to a control that owns its own activation and focus. */
+  trigger?: (attributes: TooltipTrigger) => JSX.Element;
+  children?: JSX.Element;
   class?: string;
   disabled?: boolean;
-  /** Keep activation from triggering a containing control. */
+  /** Keep standalone disclosure activation from triggering a containing control. */
   stopActivationPropagation?: boolean;
 }
 
-const GAP = 6; // px between element and popup
+const HOVER_EXIT_DELAY = 150;
+let dismissActiveTooltip: (() => void) | undefined;
 
 export default function Tooltip(props: Props) {
   const [openedAt, setOpenedAt] = createSignal<number | null>(null);
-  const show = () => openedAt() !== null;
+  const disabled = () => props.disabled || !props.text;
   const text = createMemo(() => {
     const at = openedAt();
-    if (at === null) return "";
+    if (at === null || disabled()) return "";
     const value = props.text;
     return typeof value === "function" ? value(at) : (value ?? "");
   });
   const popupId = createUniqueId();
-  let wrapperRef: HTMLSpanElement | undefined;
+  let triggerRef: HTMLElement | undefined;
   let popupRef: HTMLSpanElement | undefined;
+  let hoverExit: ReturnType<typeof setTimeout> | undefined;
   let touch = false;
+  let hovering = false;
+  let focused = false;
 
-  function onDocClick(e: MouseEvent) {
-    if (wrapperRef && !wrapperRef.contains(e.target as Node)) {
-      dismiss();
-    }
+  function cancelHoverExit() {
+    clearTimeout(hoverExit);
+    hoverExit = undefined;
   }
 
   function open() {
-    setOpenedAt((at) => at ?? Date.now());
+    cancelHoverExit();
+    if (disabled() || openedAt() !== null) return;
+    dismissActiveTooltip?.();
+    dismissActiveTooltip = dismiss;
+    setOpenedAt(Date.now());
   }
 
   function dismiss() {
+    cancelHoverExit();
+    if (dismissActiveTooltip === dismiss) dismissActiveTooltip = undefined;
     setOpenedAt(null);
   }
 
-  function toggle() {
-    if (show()) dismiss();
-    else open();
+  function handleMouseEnter() {
+    if (touch) return;
+    hovering = true;
+    open();
   }
 
+  function handleMouseLeave() {
+    if (touch) return;
+    hovering = false;
+    cancelHoverExit();
+    if (!focused && openedAt() !== null) hoverExit = setTimeout(dismiss, HOVER_EXIT_DELAY);
+  }
+
+  function toggle(event: MouseEvent | KeyboardEvent) {
+    if (props.stopActivationPropagation) event.stopPropagation();
+    if (openedAt() === null) open();
+    else dismiss();
+  }
+
+  const trigger: TooltipTrigger = {
+    ref: (el) => {
+      if (triggerRef && triggerRef !== el) dismiss();
+      triggerRef = el;
+    },
+    get "aria-describedby"() {
+      return text() ? popupId : undefined;
+    },
+    onPointerOver: (event) => {
+      touch = event.pointerType === "touch";
+    },
+    onPointerDown: (event) => {
+      touch = event.pointerType === "touch";
+      focused = false;
+    },
+    onMouseEnter: handleMouseEnter,
+    onMouseLeave: handleMouseLeave,
+    onFocus: () => {
+      if (touch) return;
+      focused = triggerRef?.matches(":focus-visible") ?? false;
+      open();
+    },
+    onBlur: () => {
+      focused = false;
+      touch = false;
+      if (!hovering) dismiss();
+    },
+    onClick: dismiss,
+  };
+
   createEffect(() => {
-    if (show()) {
-      document.addEventListener("click", onDocClick, true);
-      document.addEventListener("scroll", dismiss, true);
-    } else {
-      document.removeEventListener("click", onDocClick, true);
+    if (disabled()) dismiss();
+  });
+
+  createEffect(() => {
+    if (!text()) return;
+    const onOutsideClick = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (!triggerRef?.contains(target) && !popupRef?.contains(target)) dismiss();
+    };
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      const overlay = document.querySelector('dialog[open], [role="dialog"], [role="menu"], [role="listbox"]');
+      if (overlay && !overlay.contains(triggerRef ?? null)) return;
+      dismiss();
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+
+    document.addEventListener("click", onOutsideClick, true);
+    document.addEventListener("scroll", dismiss, true);
+    document.addEventListener("keydown", onEscape, true);
+    window.addEventListener("resize", dismiss);
+    onCleanup(() => {
+      document.removeEventListener("click", onOutsideClick, true);
       document.removeEventListener("scroll", dismiss, true);
-    }
+      document.removeEventListener("keydown", onEscape, true);
+      window.removeEventListener("resize", dismiss);
+    });
   });
 
-  // Position the popup in fixed coordinates relative to the wrapper.
   createEffect(() => {
-    if (!show() || !text() || !popupRef || !wrapperRef) return;
-    const wr = wrapperRef.getBoundingClientRect();
-    const pr = popupRef.getBoundingClientRect();
+    if (!text() || !popupRef || !triggerRef) return;
+    const anchor = triggerRef.getBoundingClientRect();
+    const popup = popupRef.getBoundingClientRect();
+    const gap = parseFloat(getComputedStyle(popupRef).getPropertyValue("--tooltip-gap")) || 0;
     const margin = 4;
+    const above = anchor.top - gap - popup.height;
+    const top = above >= margin ? above : anchor.bottom + gap;
+    const clampedTop = Math.max(margin, Math.min(top, window.innerHeight - popup.height - margin));
+    const left = anchor.left + (anchor.width - popup.width) / 2;
 
-    // Prefer above, then below, and keep tall content in the viewport.
-    const above = wr.top - GAP - pr.height;
-    const top = above >= margin ? above : wr.bottom + GAP;
-    popupRef.style.top = `${Math.max(margin, Math.min(top, window.innerHeight - pr.height - margin))}px`;
-
-    // Horizontal: center on wrapper, clamp to viewport.
-    let left = wr.left + wr.width / 2 - pr.width / 2;
-    left = Math.max(margin, Math.min(left, window.innerWidth - pr.width - margin));
-    popupRef.style.left = `${left}px`;
+    popupRef.style.top = `${clampedTop}px`;
+    popupRef.style.left = `${Math.max(margin, Math.min(left, window.innerWidth - popup.width - margin))}px`;
+    if (top === clampedTop) popupRef.dataset.side = above >= margin ? "above" : "below";
+    else delete popupRef.dataset.side;
   });
 
-  onCleanup(() => {
-    document.removeEventListener("click", onDocClick, true);
-    document.removeEventListener("scroll", dismiss, true);
-  });
+  onCleanup(dismiss);
 
   const wrapperClass = () => `${styles.wrapper}${props.class ? ` ${props.class}` : ""}`;
 
-  const disabled = () => props.disabled || !props.text;
-
   return (
-    <Show when={!disabled()} fallback={<span class={wrapperClass()}>{props.children}</span>}>
-      <span
-        ref={wrapperRef}
-        class={wrapperClass()}
-        role="button"
-        tabIndex={0}
-        aria-describedby={show() ? popupId : undefined}
-        // Touch generates compatibility mouse and focus events before click.
-        // Only click toggles visibility for that sequence.
-        onPointerOver={(e) => {
-          touch = e.pointerType === "touch";
-        }}
-        onPointerDown={(e) => {
-          touch = e.pointerType === "touch";
-        }}
-        onMouseEnter={() => {
-          if (!touch) open();
-        }}
-        onMouseLeave={() => {
-          if (!touch) dismiss();
-        }}
-        onFocus={() => {
-          if (!touch) open();
-        }}
-        onBlur={() => {
-          touch = false;
-          dismiss();
-        }}
-        onClick={(e) => {
-          if (props.stopActivationPropagation) e.stopPropagation();
-          toggle();
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Escape" && show()) {
-            e.preventDefault();
-            e.stopPropagation();
-            dismiss();
-          }
-          if (e.key === "Enter" || e.key === " ") {
-            if (props.stopActivationPropagation) e.stopPropagation();
-            e.preventDefault();
-            toggle();
-          }
-        }}
-      >
-        {props.children}
-        <Show when={show()}>
-          <Portal>
-            <span ref={popupRef} id={popupId} role="tooltip" class={styles.popup}>
-              {text()}
+    <>
+      <Show
+        when={props.trigger}
+        fallback={
+          <Show when={!disabled()} fallback={<span class={wrapperClass()}>{props.children}</span>}>
+            <span
+              {...trigger}
+              class={wrapperClass()}
+              role="button"
+              tabIndex={0}
+              onClick={toggle}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                toggle(event);
+              }}
+            >
+              {props.children}
             </span>
-          </Portal>
-        </Show>
-      </span>
-    </Show>
+          </Show>
+        }
+      >
+        {(renderTrigger) => renderTrigger()(trigger)}
+      </Show>
+      <Show when={text()}>
+        <Portal mount={triggerRef?.closest("dialog[open]") ?? undefined}>
+          <span
+            ref={popupRef}
+            id={popupId}
+            role="tooltip"
+            class={styles.popup}
+            onMouseEnter={handleMouseEnter}
+            onMouseLeave={handleMouseLeave}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <span class={styles.content}>{text()}</span>
+          </span>
+        </Portal>
+      </Show>
+    </>
   );
 }

@@ -7,6 +7,7 @@ import { createLiveDuration } from "../liveDuration";
 import { formatTimingDuration } from "../timing";
 import BackgroundKindIcon from "./BackgroundKindIcon";
 import styles from "./BackgroundStrip.module.css";
+import Tooltip from "./Tooltip";
 
 // BackgroundStrip renders nothing when no item runs. Activating a chip asks
 // the owner to reveal the transcript element that started the item.
@@ -42,28 +43,38 @@ function Chip(props: { item: BackgroundItem; onReveal: (item: BackgroundItem) =>
   );
   return (
     <li>
-      <button
-        type="button"
-        class={styles.chip}
-        data-testid="background-chip"
-        data-kind={props.item.kind}
-        title={backgroundItemTitle(props.item.kindName, props.item.label)}
-        onClick={() => props.onReveal(props.item)}
-        // Keyboard focus can land on a chip that the narrow single row clips;
-        // wrapped chips are already in view, so this is then a no-op.
-        onFocus={(event) => event.currentTarget.scrollIntoView({ block: "nearest", inline: "nearest" })}
-      >
-        <BackgroundKindIcon kind={props.item.kind} class={styles.icon} />
-        <span class={generic() ? styles.visuallyHidden : styles.kind}>{props.item.kindName}</span>
-        <Show when={label()}>
-          {" "}
-          <span class={styles.label}>{label()}</span>
-        </Show>
-        <Show when={elapsed() !== null}>
-          {" "}
-          <span class={styles.duration}>{formatTimingDuration(elapsed() ?? 0)}</span>
-        </Show>
-      </button>
+      <Tooltip
+        text={backgroundItemTitle(props.item.kindName, props.item.label)}
+        trigger={(tip) => (
+          <button
+            {...tip}
+            type="button"
+            class={styles.chip}
+            data-testid="background-chip"
+            data-kind={props.item.kind}
+            onClick={() => {
+              tip.onClick();
+              props.onReveal(props.item);
+            }}
+            // A focused chip can be clipped by the narrow scrolling row.
+            onFocus={(event) => {
+              event.currentTarget.scrollIntoView({ block: "nearest", inline: "nearest" });
+              tip.onFocus();
+            }}
+          >
+            <BackgroundKindIcon kind={props.item.kind} class={styles.icon} />
+            <span class={generic() ? styles.visuallyHidden : styles.kind}>{props.item.kindName}</span>
+            <Show when={label()}>
+              {" "}
+              <span class={styles.label}>{label()}</span>
+            </Show>
+            <Show when={elapsed() !== null}>
+              {" "}
+              <span class={styles.duration}>{formatTimingDuration(elapsed() ?? 0)}</span>
+            </Show>
+          </button>
+        )}
+      />
     </li>
   );
 }

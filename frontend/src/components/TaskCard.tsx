@@ -1,7 +1,7 @@
 // Compact sidebar task card with container resource levels, background-work counts and tooltip, and per-repository Git markers.
 
 import { For, Show, createEffect, createMemo, createSignal, onMount, onCleanup } from "solid-js";
-import type { Accessor } from "solid-js";
+import type { Accessor, JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import { A } from "@solidjs/router";
 import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
@@ -306,44 +306,53 @@ export default function TaskCard(props: TaskCardProps) {
           </Tooltip>
           <span class={styles.stateGroup}>
             <Show when={props.gitHubToken}>
-              <span class={styles.featureIconBadge} title="GitHub token">
-                <TokenIcon width="0.7rem" height="0.7rem" />
-              </span>
+              <StatusBadge class={styles.featureIconBadge} label="GitHub token">
+                <TokenIcon width="0.7rem" height="0.7rem" aria-hidden="true" />
+              </StatusBadge>
             </Show>
             <Show when={props.runtime?.sudo}>
-              <span class={styles.featureIconBadge} title="Sudo">
-                <SudoIcon width="0.7rem" height="0.7rem" />
-              </span>
+              <StatusBadge class={styles.featureIconBadge} label="Sudo">
+                <SudoIcon width="0.7rem" height="0.7rem" aria-hidden="true" />
+              </StatusBadge>
             </Show>
             <Show when={props.runtime?.tailscale} keyed>
               {(ts) =>
                 ts.startsWith("https://") ? (
-                  <a
-                    class={styles.featureIconBadge}
-                    href={ts}
-                    target="_blank"
-                    rel="noopener"
-                    title="Tailscale"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <TailscaleIcon width="0.7rem" height="0.7rem" />
-                  </a>
+                  <Tooltip
+                    text="Tailscale"
+                    trigger={(tip) => (
+                      <a
+                        {...tip}
+                        class={styles.featureIconBadge}
+                        href={ts}
+                        target="_blank"
+                        rel="noopener"
+                        aria-label="Tailscale"
+                        onClick={(event) => {
+                          tip.onClick();
+                          event.stopPropagation();
+                        }}
+                      >
+                        <TailscaleIcon width="0.7rem" height="0.7rem" aria-hidden="true" />
+                      </a>
+                    )}
+                  />
                 ) : (
-                  <span class={styles.featureIconBadge} title="Tailscale">
-                    <TailscaleIcon width="0.7rem" height="0.7rem" />
-                  </span>
+                  <StatusBadge class={styles.featureIconBadge} label="Tailscale">
+                    <TailscaleIcon width="0.7rem" height="0.7rem" aria-hidden="true" />
+                  </StatusBadge>
                 )
               }
             </Show>
             <Show when={props.runtime?.usb}>
-              <span class={styles.featureBadge} title="USB">
+              <StatusBadge class={styles.featureBadge} label="USB passthrough">
                 USB
-              </span>
+              </StatusBadge>
             </Show>
             <Show when={props.runtime?.display}>
-              <span class={styles.featureIconBadge} title="Display">
-                <DisplayIcon width="0.7rem" height="0.7rem" />
-              </span>
+              <StatusBadge class={styles.featureIconBadge} label="Display">
+                <DisplayIcon width="0.7rem" height="0.7rem" aria-hidden="true" />
+              </StatusBadge>
             </Show>
             {/* Mobile exposes revive without selection; purge still requires selection. */}
             <Show when={props.state === "stopped" || props.state === "crashed"}>
@@ -432,9 +441,9 @@ export default function TaskCard(props: TaskCardProps) {
               </span>
             </Show>
             <Show when={props.inPlanMode}>
-              <span class={styles.planBadge} title="Plan mode">
+              <StatusBadge class={styles.planBadge} label="Plan mode">
                 P
-              </span>
+              </StatusBadge>
             </Show>
           </span>
         </div>
@@ -504,14 +513,14 @@ export default function TaskCard(props: TaskCardProps) {
           const statusBadges = () => (
             <>
               <Show when={props.forgePR}>
-                <span class={styles.prBadge} title={`PR #${props.forgePR}`}>
+                <StatusBadge class={styles.prBadge} label={`PR #${props.forgePR}`}>
                   PR
-                </span>
+                </StatusBadge>
               </Show>
               <Show when={props.autoFixPR && props.forgePR}>
-                <span class={styles.autoBadge} title="Auto-fix PR enabled">
+                <StatusBadge class={styles.autoBadge} label="Auto-fix PR enabled">
                   auto
-                </span>
+                </StatusBadge>
               </Show>
               <Show when={props.forgePR && props.ciStatus} keyed>
                 {(status) => <CIDot status={status as CIStatus} checks={props.ciChecks} />}
@@ -751,6 +760,19 @@ export default function TaskCard(props: TaskCardProps) {
         </Show>
       </Portal>
     </>
+  );
+}
+
+function StatusBadge(props: { class: string; label: string; children: JSX.Element }) {
+  return (
+    <Tooltip
+      text={props.label}
+      trigger={(tip) => (
+        <span {...tip} class={props.class} role="img" aria-label={props.label}>
+          {props.children}
+        </span>
+      )}
+    />
   );
 }
 

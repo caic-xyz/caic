@@ -23,11 +23,10 @@ test("task-card resources open performance from either icon and the keyboard", a
     await expect(levels).toBeVisible();
     const link = card.getByRole("link", { name: /^Task performance:/ });
     await expect(link).toHaveAttribute("href", `/task/@${id}/perf`);
-    await expect(link).toHaveAttribute("title", /CPU: [\d.]+ \/ [\d.]+ CPUs/);
-    await expect(link).toHaveAttribute("title", /RAM: /);
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await link.focus();
     await expect(link).toBeFocused();
+    await expect(link).toHaveAccessibleDescription(/CPU: [\d.]+ \/ [\d.]+ CPUs.*RAM: /);
     await page.screenshot({ path: `test-results/task-card-resources-${width}.png` });
     expect(histories).toEqual([]);
     await card.getByTestId(width === 1280 ? "task-cpu-level" : "task-memory-level").click();
