@@ -217,7 +217,7 @@ func TestHeaderCache(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, version := range []int{6, 7, 8, 9, 10, 11, 12, 14} {
+		for _, version := range []int{6, 7, 8, 9, 10, 11, 12, 13, 15} {
 			body := fmt.Sprintf(`{"version":%d,"log_size":1,"log_mtime_unix_nano":%d,"task":%s}`, version, info.ModTime().UnixNano(), pinnedHeaderTask)
 			if err := os.WriteFile(logHeaderCachePath(path), []byte(body), 0o600); err != nil {
 				t.Fatal(err)
@@ -238,7 +238,7 @@ func TestHeaderCache(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		body := fmt.Sprintf(`{"version":13,"log_size":1,"log_mtime_unix_nano":%d,"task":%s}`, info.ModTime().UnixNano(), pinnedHeaderTask)
+		body := fmt.Sprintf(`{"version":14,"log_size":1,"log_mtime_unix_nano":%d,"task":%s}`, info.ModTime().UnixNano(), pinnedHeaderTask)
 		if err := os.WriteFile(logHeaderCachePath(path), []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -318,7 +318,7 @@ func TestHeaderCache(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					body := fmt.Sprintf(`{"version":13,"log_size":%d,"log_mtime_unix_nano":%d,"task":%s}`, info.Size(), info.ModTime().UnixNano(), tc.body)
+					body := fmt.Sprintf(`{"version":14,"log_size":%d,"log_mtime_unix_nano":%d,"task":%s}`, info.Size(), info.ModTime().UnixNano(), tc.body)
 					if err := os.WriteFile(logHeaderCachePath(path), []byte(body), 0o600); err != nil {
 						t.Fatal(err)
 					}
@@ -347,7 +347,7 @@ func TestHeaderCache(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					body := fmt.Sprintf(`{"version":13,"log_size":%d,"log_mtime_unix_nano":%d,"task":%s}`, info.Size(), info.ModTime().UnixNano(), tc.body)
+					body := fmt.Sprintf(`{"version":14,"log_size":%d,"log_mtime_unix_nano":%d,"task":%s}`, info.Size(), info.ModTime().UnixNano(), tc.body)
 					if err := os.WriteFile(logHeaderCachePath(path), []byte(body), 0o600); err != nil {
 						t.Fatal(err)
 					}

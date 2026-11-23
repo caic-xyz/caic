@@ -69,6 +69,7 @@ type CostTracker struct {
 	sessionUnknown      int
 	deferredUnknown     int // Non-request usage awaiting a root aggregate that covers its tokens.
 	deferredUsage       agent.Usage
+	countRestarted      bool // The harness restarted its running total during the current turn.
 }
 
 // Snapshot returns cumulative amounts and coverage from the same fold state.
@@ -233,9 +234,19 @@ func (c *CostTracker) Observe(msg agent.Message, at time.Time, pricer usage.Mode
 			c.unknownCost()
 		}
 		cost := TurnCost{USD: c.TotalUSD - c.lastTurnUSD, Source: c.pendingTurnSource}
+		known := cost.Source != "" && cost.USD >= 0
+		if c.countRestarted {
+			// No later report covers the restarted turn, so its part stays
+			// unknown in the task's coverage.
+			if known {
+				c.provenance.UnknownParts++
+			}
+			known = false
+			c.countRestarted = false
+		}
 		c.lastTurnUSD = c.TotalUSD
 		c.pendingTurnSource = ""
-		return cost, cost.Source != "" && cost.USD >= 0
+		return cost, known
 	}
 	return TurnCost{}, false
 }
@@ -299,6 +310,17 @@ func (c *CostTracker) applyResultReport(usd float64) {
 }
 
 func (c *CostTracker) reportCumulative(usd float64) {
+	if c.sessionCostReported && usd < c.sessionReportedUSD {
+		// A running total never falls within one session: the harness restarted
+		// its count from an unknown base. A task log shows Claude Code doing so
+		// after its agent crashed. The base may be zero or an older saved total,
+		// so keep the total already reported, continue from the new count, and
+		// leave the turn unknown: assuming zero could count a restored part
+		// twice.
+		c.priorUSD += c.sessionReportedUSD - usd
+		c.sessionReportedUSD = usd
+		c.countRestarted = true
+	}
 	c.provenance.EstimatedUSD -= c.sessionPricedUSD
 	c.provenance.EstimatedParts -= c.sessionEstimates
 	c.provenance.ReportedUSD += usd - c.sessionReportedUSD

@@ -461,10 +461,15 @@ func (p *taskMetadataProjection) finish(loaded *LoadedTask) {
 	if r.NumTurns == 0 {
 		r.NumTurns = p.turnMetrics.NumTurns
 	}
-	if r.CostUSD == 0 && p.lastResult != nil && p.lastResult.TotalCostUSD > 0 {
-		r.CostUSD = p.lastResult.TotalCostUSD
+	// A trailer without a cost, such as a crash, takes the cost folded from
+	// every result, not the last result's report: a harness's running total can
+	// restart, and Pi reports per invocation.
+	if r.CostUSD == 0 && p.costs.Known && p.costs.TotalUSD > 0 {
+		r.CostUSD = p.costs.TotalUSD
 		r.CostKnown = true
-		r.Usage = p.lastResult.Usage
+		if p.lastResult != nil {
+			r.Usage = p.lastResult.Usage
+		}
 	}
 	// Native metadata can certify an older summary only when its complete
 	// amount agrees with the authoritative stored amount. Missing proof never

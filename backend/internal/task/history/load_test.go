@@ -349,6 +349,27 @@ func TestLoadLogHeader(t *testing.T) {
 			}
 		}
 	})
+	t.Run("CostlessTrailerFoldsRestartedRunningTotal", func(t *testing.T) {
+		// Minimized from a task log: the agent crashed, and the resumed process
+		// restarted its running total, so the last result alone loses the cost
+		// reported before the crash.
+		t.Parallel()
+		path := writePhysicalTestLog(t, false,
+			`{"t":"caic_meta","version":3,"harness":"claude","prompt":"task","repos":[]}`,
+			`{"t":"agent","ts":102.000,"msg":{"type":"result","subtype":"success","total_cost_usd":10}}`,
+			`{"t":"agent","ts":150.000,"msg":{"type":"system","subtype":"init","session_id":"s"}}`,
+			`{"t":"agent","ts":202.000,"msg":{"type":"result","subtype":"success","total_cost_usd":1}}`,
+			`{"t":"agent","ts":302.000,"msg":{"type":"result","subtype":"success","total_cost_usd":3}}`,
+			`{"t":"result","state":"failed","error":"agent exited: exit status 255"}`,
+		)
+		loaded, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r := loaded.LastTrailer; r == nil || r.CostUSD != 12 || !r.CostKnown || r.CostComplete {
+			t.Fatalf("trailer = %+v; want 12 known and incomplete", r)
+		}
+	})
 	t.Run("NativeDSHMetricsColdCacheAndFull", func(t *testing.T) {
 		t.Parallel()
 		raw, err := os.ReadFile("../../agent/dsh/testdata/session-turns.jsonl")

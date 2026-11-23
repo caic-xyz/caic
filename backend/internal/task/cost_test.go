@@ -453,6 +453,26 @@ func TestCostTracker(t *testing.T) {
 			}
 		})
 
+		t.Run("ClaudeRestartedCountKeepsReportedTotal", func(t *testing.T) {
+			// Minimized from a task log: after the agent crashed, the resumed
+			// process reported $1.81 where the session had reached $154.08.
+			t.Parallel()
+			c := CostTracker{Harness: harness.Claude}
+			c.Observe(&agent.ResultMessage{TotalCostUSD: 10}, at, nil)
+			c.Observe(&agent.InitMessage{SessionID: "s"}, at, nil)
+			restarted, ok := c.Observe(&agent.ResultMessage{TotalCostUSD: 1}, at, nil)
+			if ok || c.TotalUSD != 10 {
+				t.Fatalf("restarted = %+v, ok = %v, total = %v; want unknown with the total kept", restarted, ok, c.TotalUSD)
+			}
+			next, ok := c.Observe(&agent.ResultMessage{TotalCostUSD: 3}, at, nil)
+			if !ok || next.USD != 2 || next.Source != CostReported || c.TotalUSD != 12 {
+				t.Errorf("next = %+v, ok = %v, total = %v; want 2 reported, total 12", next, ok, c.TotalUSD)
+			}
+			if snap := c.Snapshot(); c.Complete() || snap.USD != 12 || snap.ReportedUSD != 12 {
+				t.Errorf("snapshot = %+v, complete = %v; want 12 reported and the restarted turn unknown", snap, c.Complete())
+			}
+		})
+
 		t.Run("ClaudeNativeReportOverridesPerCallEstimate", func(t *testing.T) {
 			t.Parallel()
 			c := CostTracker{Harness: harness.Claude, Model: "claude-sonnet-5-5"}
