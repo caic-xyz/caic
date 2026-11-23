@@ -1,44 +1,41 @@
-// Tests agy command construction, prompt provenance, stream parsing, and model discovery.
+// Tests agy ACP launch, protocol routing, compaction encoding, model discovery, and recorded ACP evidence.
 
 package antigravity
 
 import (
-	"bufio"
 	"bytes"
+	"errors"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"reflect"
-	"strconv"
 	"strings"
 	"testing"
 
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/gomodedev/gomode/mcp/mcptest"
 )
 
+//nolint:paralleltest // FetchModelInventory replaces ssh through PATH.
 func TestBackend(t *testing.T) {
-	t.Parallel()
 	b := New("", nil)
 	t.Run("AgentArgs", func(t *testing.T) {
-		t.Parallel()
-		want := []string{"agy", "-p=", "--input-format", "stream-json", "--output-format", "stream-json", "--dangerously-skip-permissions", "--model", "gemini-3.8-flash-low", "--effort", "high", "--conversation", "session"}
-		got := b.AgentArgs(agent.HarnessArgs{Model: "gemini-3.8-flash-low", Effort: "high", ResumeSessionID: "session"})
+		want := []string{"agy", "acp", "--dangerously-skip-permissions"}
+		got := b.AgentArgs(agent.HarnessArgs{Model: "gemini-3.8-flash", Effort: "high", ResumeSessionID: "session"})
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("args = %q, want %q", got, want)
 		}
 	})
 	t.Run("capabilities", func(t *testing.T) {
-		t.Parallel()
-		if b.Harness() != harness.Antigravity || !b.SupportsImages() || b.SupportsCompact() || b.QuotaProvider() != agent.QuotaProviderAntigravity {
+		if b.Harness() != harness.Antigravity || !b.SupportsImages() || !b.SupportsCompact() || b.QuotaProvider() != agent.QuotaProviderAntigravity {
 			t.Fatal("unexpected backend capabilities")
 		}
 	})
 	t.Run("Start", func(t *testing.T) {
-		t.Parallel()
 		if _, err := b.Start(t.Context(), &agent.Options{MCP: mcptest.FakeRegistry{}, Logger: slog.Default(), Dir: "/tmp"}); err == nil || !strings.Contains(err.Error(), "missing SSH host") {
 			t.Fatalf("task MCP start target validation = %v", err)
 		}
@@ -47,405 +44,97 @@ func TestBackend(t *testing.T) {
 		}
 	})
 	t.Run("AttachRelay", func(t *testing.T) {
-		t.Parallel()
 		if _, err := b.AttachRelay(t.Context(), &agent.Options{MCP: mcptest.FakeRegistry{}}); err == nil || !strings.Contains(err.Error(), "missing SSH host") {
 			t.Fatalf("task MCP attach target validation = %v", err)
 		}
 	})
-	t.Run("FetchModelInventory", func(t *testing.T) {
-		t.Parallel()
-		if _, err := b.FetchModelInventory(t.Context(), agent.Options{}.Target, nil); err == nil {
-			t.Fatal("empty SSH target must fail")
+	t.Run("SetModelInventory", func(t *testing.T) {
+		// sortModels prefers Gemini; alphabetical order would put Claude first.
+		models := []agent.Model{{ID: "gemini-3.8-flash"}, {ID: "claude-opus-5-5"}}
+		b := New("", nil)
+		b.SetModelInventory(agent.ModelInventory{Models: models})
+		if got := b.ModelInventory().Models; !reflect.DeepEqual(got, models) {
+			t.Fatalf("models = %+v, want %+v", got, models)
 		}
 	})
-}
-
-func TestWireFormat(t *testing.T) {
-	t.Parallel()
-	t.Run("EncodePrompt", func(t *testing.T) {
-		t.Parallel()
-
-		t.Run(strconv.Itoa(agent.LogVersionV3), func(t *testing.T) {
-			t.Parallel()
+	t.Run("NewWire", func(t *testing.T) {
+		const (
+			streamInit = `{"event":"init","conversation_id":"conversation","init":{"model":"gemini-3.8-flash-low"}}`
+			resume     = `{"jsonrpc":"2.0","id":1,"method":"session/resume","params":{"sessionId":"conversation","cwd":"/w","mcpServers":[]}}`
+			resumed    = `{"jsonrpc":"2.0","id":1,"result":{"sessionId":"conversation"}}`
+		)
+		t.Run("new task", func(t *testing.T) {
+			if _, err := New("", nil).NewWire().EncodePrompt(agent.Prompt{Text: "hi"}); err == nil || !strings.Contains(err.Error(), "ACP") {
+				t.Fatalf("EncodePrompt before handshake = %v, want ACP error", err)
+			}
+		})
+		t.Run("stream-json conversation resumed over ACP", func(t *testing.T) {
 			w := New("", nil).NewWire()
-			var out bytes.Buffer
-			data, err := w.EncodePrompt(agent.Prompt{Text: "hello\nworld"})
+			msgs, err := w.ParseOutput([]byte(streamInit))
+			if err != nil || len(msgs) != 1 {
+				t.Fatalf("stream-json init = %v, %v", msgs, err)
+			}
+			if m, ok := msgs[0].(*agent.InitMessage); !ok || m.SessionID != "conversation" {
+				t.Fatalf("stream-json init = %+v", msgs[0])
+			}
+			if _, err := w.ParseInput([]byte(resume)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := w.ParseOutput([]byte(resumed)); err != nil {
+				t.Fatal(err)
+			}
+			data, err := w.EncodePrompt(agent.Prompt{Text: "hi"})
 			if err != nil {
 				t.Fatal(err)
 			}
-			out.Write(data)
-			want := `{"event":"user","message":{"content":[{"type":"text","text":"hello\nworld"}]}}` + "\n"
-			if out.String() != want {
-				t.Fatalf("input = %q", out.String())
-			}
-			msgs, err := w.ParseInput(out.Bytes())
-			if err != nil || len(msgs) != 1 {
-				t.Fatalf("parse input = %v, %v", msgs, err)
-			}
-			if m, ok := msgs[0].(*agent.UserInputMessage); !ok || m.Text != "hello\nworld" {
-				t.Fatalf("input = %+v", msgs[0])
+			if want := `{"jsonrpc":"2.0","id":2,"method":"session/prompt","params":{"sessionId":"conversation","prompt":[{"type":"text","text":"hi"}]}}` + "\n"; string(data) != want {
+				t.Fatalf("prompt = %q, want %q", data, want)
 			}
 		})
-
-		t.Run("images and text", func(t *testing.T) {
-			t.Parallel()
+		t.Run("EncodeCompact", func(t *testing.T) {
 			w := New("", nil).NewWire()
-			var out bytes.Buffer
-			prompt := agent.Prompt{
-				Text:   "describe this",
-				Images: []v3.ImageData{{MediaType: "image/png", Data: "aW1hZ2U="}},
+			if _, err := w.ParseInput([]byte(resume)); err != nil {
+				t.Fatal(err)
 			}
-			data, err := w.EncodePrompt(prompt)
+			if _, err := w.ParseOutput([]byte(resumed)); err != nil {
+				t.Fatal(err)
+			}
+			c, ok := w.(agent.CompactCommand)
+			if !ok {
+				t.Fatal("agy wire does not encode compaction")
+			}
+			// "/compact <message>" compacts, then answers the message.
+			if data, err := c.EncodeCompact("keep the failing test"); !errors.Is(err, agent.ErrCompactInstructionsUnsupported) || data != nil {
+				t.Fatalf("custom instructions = %q, %v", data, err)
+			}
+			data, err := c.EncodeCompact("")
 			if err != nil {
 				t.Fatal(err)
 			}
-			out.Write(data)
-			want := `{"event":"user","message":{"content":[{"type":"text","text":"describe this"},{"type":"text","text":"\nAttached image: /tmp/caic-relay/attachments/6fd6529e1a080d633cc56dd862cc9fc4.png","caic_image":{"media_type":"image/png","data":"aW1hZ2U="}}]}}` + "\n"
-			if out.String() != want {
-				t.Fatalf("input = %q, want %q", out.String(), want)
-			}
-			msgs, err := w.ParseInput(out.Bytes())
-			if err != nil || len(msgs) != 1 {
-				t.Fatalf("parse input = %v, %v", msgs, err)
-			}
-			m, ok := msgs[0].(*agent.UserInputMessage)
-			if !ok || m.Text != "describe this" || len(m.Images) != 1 || m.Images[0].MediaType != "image/png" || m.Images[0].Data != "aW1hZ2U=" {
-				t.Fatalf("parsed input = %+v", msgs[0])
-			}
-		})
-		t.Run("images only", func(t *testing.T) {
-			t.Parallel()
-			w := New("", nil).NewWire()
-			var out bytes.Buffer
-			prompt := agent.Prompt{
-				Images: []v3.ImageData{{MediaType: "image/jpeg", Data: "anBn"}},
-			}
-			data, err := w.EncodePrompt(prompt)
-			if err != nil {
-				t.Fatal(err)
-			}
-			out.Write(data)
-			want := `{"event":"user","message":{"content":[{"type":"text","text":"\nAttached image: /tmp/caic-relay/attachments/7fb574c59d4bc36b817c23a03bf8f62c.jpg","caic_image":{"media_type":"image/jpeg","data":"anBn"}}]}}` + "\n"
-			if out.String() != want {
-				t.Fatalf("input = %q, want %q", out.String(), want)
-			}
-			msgs, err := w.ParseInput(out.Bytes())
-			if err != nil || len(msgs) != 1 {
-				t.Fatalf("parse input = %v, %v", msgs, err)
-			}
-			m, ok := msgs[0].(*agent.UserInputMessage)
-			if !ok || m.Text != "" || len(m.Images) != 1 || m.Images[0].MediaType != "image/jpeg" || m.Images[0].Data != "anBn" {
-				t.Fatalf("parsed input = %+v", msgs[0])
-			}
-		})
-		t.Run("non-image media type", func(t *testing.T) {
-			t.Parallel()
-			w := New("", nil).NewWire()
-			if _, err := w.EncodePrompt(agent.Prompt{Images: []v3.ImageData{{MediaType: "text/plain", Data: "dGlm"}}}); err == nil || !strings.Contains(err.Error(), "text/plain") {
-				t.Fatalf("EncodePrompt error = %v", err)
-			}
-		})
-		t.Run("historical data URL", func(t *testing.T) {
-			t.Parallel()
-			w := New("", nil).NewWire()
-			line := `{"event":"user","message":{"content":[{"type":"text","text":"describe this"},{"type":"text","text":"data:image/png;base64,aW1hZ2U="}]}}`
-			msgs, err := w.ParseInput([]byte(line))
-			if err != nil || len(msgs) != 1 {
-				t.Fatalf("parse input = %v, %v", msgs, err)
-			}
-			m, ok := msgs[0].(*agent.UserInputMessage)
-			if !ok || m.Text != "describe this" || len(m.Images) != 1 || m.Images[0].MediaType != "image/png" || m.Images[0].Data != "aW1hZ2U=" {
-				t.Fatalf("parsed input = %+v", msgs[0])
+			if want := `{"jsonrpc":"2.0","id":2,"method":"session/prompt","params":{"sessionId":"conversation","prompt":[{"type":"text","text":"/compact"}]}}` + "\n"; string(data) != want {
+				t.Fatalf("compact = %q, want %q", data, want)
 			}
 		})
 	})
-	t.Run("ParseMessage", func(t *testing.T) {
-		t.Parallel()
-		t.Run("recorded turn", func(t *testing.T) {
-			t.Parallel()
-			data, err := os.ReadFile("testdata/turn.ndjson")
-			if err != nil {
+	t.Run("FetchModelInventory", func(t *testing.T) {
+		t.Run("empty target", func(t *testing.T) {
+			if _, err := b.FetchModelInventory(t.Context(), agent.Options{}.Target, nil); err == nil {
+				t.Fatal("empty SSH target must fail")
+			}
+		})
+		t.Run("missing sign-in", func(t *testing.T) {
+			// agy 1.5.14 in an md container without a sign-in writes only this
+			// stderr and exits 1.
+			dir := t.TempDir()
+			script := "#!/bin/sh\nprintf '\\r\\033[KError: Please sign in to view available models. Launch the CLI without arguments to sign in.\\n' >&2\nexit 1\n"
+			if err := os.WriteFile(filepath.Join(dir, "ssh"), []byte(script), 0o700); err != nil { //nolint:gosec // Fake SSH executable in a private test directory.
 				t.Fatal(err)
 			}
-			w := New("", nil).NewWire()
-			sc := bufio.NewScanner(bytes.NewReader(data))
-			var text string
-			var result *agent.ResultMessage
-			var all []agent.Message
-			for sc.Scan() {
-				msgs, err := w.ParseOutput(sc.Bytes())
-				if err != nil {
-					t.Fatal(err)
-				}
-				all = append(all, msgs...)
-				for _, msg := range msgs {
-					switch m := msg.(type) {
-					case *agent.InitMessage:
-						if m.SessionID != "session" || m.ReportedModel != "gemini-3.8-flash-low" {
-							t.Fatalf("init = %+v", m)
-						}
-					case *agent.TextDeltaMessage:
-						text += m.Text
-					case *agent.ResultMessage:
-						result = m
-					}
-				}
-			}
-			if err := sc.Err(); err != nil {
-				t.Fatal(err)
-			}
-			if text != "OK.\n" || result == nil || result.IsError || result.Result != text || result.Usage.InputTokens != 12260 || result.Usage.ReasoningOutputTokens != 38 {
-				t.Fatalf("text = %q, result = %+v", text, result)
-			}
-			if got := agenttest.TurnBoundaries(all); got != "SR" {
-				t.Errorf("boundaries = %q, want %q", got, "SR")
-			}
-		})
-		t.Run("prompt during a turn", func(t *testing.T) {
-			t.Parallel()
-			// Trimmed and anonymized from a task log: agy started a turn for
-			// the prompt delivered during the first turn 29 ms after its result.
-			const (
-				first  = `{"event":"user","message":{"content":[{"type":"text","text":"Investigate image input."}]}}`
-				second = `{"event":"user","message":{"content":[{"type":"text","text":"Clone the client library if it helps."}]}}`
-				init   = `{"event":"init","conversation_id":"conv","init":{"model":"gemini-3.8-flash-high","cwd":"/src","tools":["view_file"]}}`
-				start  = `{"event":"step_update","step_update":{"conversation_id":"conv","step_index":0,"state":"DONE","step_type":"user_input"}}`
-				result = `{"event":"result","result":{"conversation_id":"conv","status":"SUCCESS","response":"Yes."}}`
-				next   = `{"event":"step_update","step_update":{"conversation_id":"conv","step_index":154,"state":"DONE","step_type":"user_input"}}`
-			)
-			w := New("", nil).NewWire()
-			var all []agent.Message
-			for i, line := range []string{first, init, start, second, result, next, result} {
-				parse := w.ParseOutput
-				if line == first || line == second {
-					parse = w.ParseInput
-				}
-				msgs, err := parse([]byte(line))
-				if err != nil {
-					t.Fatalf("line %d: %v", i, err)
-				}
-				all = append(all, msgs...)
-			}
-			if got := agenttest.TurnBoundaries(all); got != "ISIQSR" {
-				t.Errorf("boundaries = %q, want %q", got, "ISIQSR")
-			}
-		})
-		t.Run("recorded cached usage and tool output", func(t *testing.T) {
-			t.Parallel()
-			// Session IDs and workspace paths are sanitized in this recording.
-			// Retain native cached usage, command output, task
-			// status, scheduling, streamed text, and conversation-wide result.
-			f, err := os.Open("testdata/cached-tools.ndjson")
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() {
-				if err := f.Close(); err != nil {
-					t.Error(err)
-				}
-			})
-			w := New("", nil).NewWire()
-			sc := bufio.NewScanner(f)
-			uses := make(map[string]string)
-			outputs := make(map[string]string)
-			var calls []agent.Usage
-			var result *agent.ResultMessage
-			var text strings.Builder
-			for sc.Scan() {
-				msgs, err := w.ParseOutput(sc.Bytes())
-				if err != nil {
-					t.Fatal(err)
-				}
-				for _, msg := range msgs {
-					switch m := msg.(type) {
-					case *agent.InitMessage:
-						if m.ReportedModel != "" || m.SessionID != "session" {
-							t.Fatalf("init = %+v, want unknown model", m)
-						}
-					case *agent.UsageMessage:
-						if m.ReportedModel != "" {
-							t.Fatalf("invented model: %q", m.ReportedModel)
-						}
-						if !m.PerCall {
-							t.Fatal("DONE-step usage must price as one API request")
-						}
-						calls = append(calls, m.Usage)
-					case *agent.ToolUseMessage:
-						uses[m.ToolUseID] = m.Name
-					case *agent.ToolOutputDeltaMessage:
-						if uses[m.ToolUseID] == "" {
-							t.Fatalf("output before invocation: %+v", m)
-						}
-						outputs[m.ToolUseID] += m.Delta
-					case *agent.ToolResultMessage:
-						if m.Error != "" {
-							t.Fatalf("output text invented a native error: %+v", m)
-						}
-						if outputs[m.ToolUseID] == "" {
-							t.Fatalf("completion lost output: %+v", m)
-						}
-					case *agent.TextDeltaMessage:
-						text.WriteString(m.Text)
-					case *agent.ResultMessage:
-						result = m
-					}
-				}
-			}
-			if err := sc.Err(); err != nil {
-				t.Fatal(err)
-			}
-			if len(calls) != 2 || calls[0].InputTokens != 3157 || calls[0].CacheReadInputTokens != 16275 {
-				t.Fatalf("cached usage = %+v", calls)
-			}
-			if result == nil || result.IsError || result.Usage.InputTokens != 7897 || result.Usage.CacheReadInputTokens != 191461 || result.Usage.OutputTokens != 1127 || result.Usage.ReasoningOutputTokens != 452 {
-				t.Fatalf("turn result = %+v", result)
-			}
-			if len(uses) != 4 || len(outputs) != 4 || !strings.Contains(outputs["session:12"], "undefined: typesafe.Questions") || !strings.Contains(outputs["session:160"], "Status: RUNNING") || !strings.Contains(outputs["session:162"], "Timer cancelled early") {
-				t.Fatalf("tool output lost: uses=%v outputs=%v", uses, outputs)
-			}
-			if !strings.Contains(text.String(), "Updated `github.com/maruel/genai`") || !strings.Contains(text.String(), "make verify") {
-				t.Fatalf("streamed text lost: %q", text.String())
-			}
-		})
-		t.Run("turn usage and tool correlation", func(t *testing.T) {
-			t.Parallel()
-			w := New("", nil).NewWire()
-			lines := []string{
-				`{"event":"step_update","step_update":{"conversation_id":"s","step_index":2,"state":"ACTIVE","step_type":"tool","tool_name":"view_file","tool_info":{"parameters":{"path":"README.md"}}}}`,
-				`{"event":"step_update","step_update":{"conversation_id":"s","step_index":2,"state":"ACTIVE","step_type":"tool","tool_name":"view_file"}}`,
-				`{"event":"step_update","step_update":{"conversation_id":"s","step_index":2,"state":"DONE","step_type":"tool","duration_seconds":0.25,"tool_info":{"error":{"type":"error","message":"not found"}}}}`,
-				`{"event":"step_update","step_update":{"conversation_id":"s","step_index":3,"state":"DONE","step_type":"agent_response","text_delta":"answer","usage":{"input_tokens":100,"cache_read_tokens":60,"output_tokens":20,"thinking_tokens":10}}}`,
-				`{"event":"step_update","step_update":{"conversation_id":"s","step_index":3,"state":"DONE","step_type":"agent_response","usage":{"input_tokens":100,"output_tokens":20}}}`,
-				`{"event":"result","result":{"conversation_id":"s","status":"SUCCESS","usage":{"input_tokens":5000,"output_tokens":4000},"duration_seconds":30,"num_turns":5}}`,
-				`{"event":"result","result":{"conversation_id":"s","status":"ERROR","error":"quota exhausted","usage":{"input_tokens":5000,"output_tokens":4000}}}`,
-			}
-			var uses []*agent.ToolUseMessage
-			var results []*agent.ToolResultMessage
-			var turns []*agent.ResultMessage
-			for _, line := range lines {
-				msgs, err := w.ParseOutput([]byte(line))
-				if err != nil {
-					t.Fatal(err)
-				}
-				for _, msg := range msgs {
-					switch m := msg.(type) {
-					case *agent.ToolUseMessage:
-						uses = append(uses, m)
-					case *agent.ToolResultMessage:
-						results = append(results, m)
-					case *agent.ResultMessage:
-						turns = append(turns, m)
-					}
-				}
-			}
-			if len(uses) != 1 || len(results) != 1 || uses[0].ToolUseID != results[0].ToolUseID || results[0].DurationMs != 250 || results[0].Error != "not found" {
-				t.Fatalf("tools = %+v, results = %+v", uses, results)
-			}
-			if len(turns) != 2 || turns[0].Usage.InputTokens != 100 || turns[0].Usage.CacheReadInputTokens != 60 || turns[0].Usage.OutputTokens != 20 || turns[0].DurationMs != 0 || turns[0].NumTurns != 0 {
-				t.Fatalf("turns = %+v", turns)
-			}
-			if !turns[1].IsError || !strings.Contains(turns[1].Result, "quota exhausted") || !turns[1].Usage.Equal(agent.Usage{}) {
-				t.Fatalf("second result = %+v", turns[1])
-			}
-		})
-		t.Run("tool output completes once", func(t *testing.T) {
-			t.Parallel()
-			w := New("", nil).NewWire()
-			line := []byte(`{"event":"step_update","step_update":{"conversation_id":"s","step_index":2,"state":"DONE","step_type":"tool","tool_name":"run_command","tool_info":{"output":"build failed\n","error":{"type":"error","message":"command failed"}}}}`)
-			msgs, err := w.ParseOutput(line)
-			if err != nil || len(msgs) != 3 {
-				t.Fatalf("completion = %v, %v", msgs, err)
-			}
-			use, ok := msgs[0].(*agent.ToolUseMessage)
-			if !ok {
-				t.Fatalf("first message = %T, want invocation", msgs[0])
-			}
-			out, ok := msgs[1].(*agent.ToolOutputDeltaMessage)
-			if !ok || out.ToolUseID != use.ToolUseID || out.Delta != "build failed\n" {
-				t.Fatalf("output = %+v", msgs[1])
-			}
-			result, ok := msgs[2].(*agent.ToolResultMessage)
-			if !ok || result.ToolUseID != use.ToolUseID || result.Error != "command failed" {
-				t.Fatalf("result = %+v", msgs[2])
-			}
-			if msgs, err := w.ParseOutput(line); err != nil || len(msgs) != 0 {
-				t.Fatalf("duplicate completion = %v, %v", msgs, err)
-			}
-		})
-		t.Run("failed tool ends in ERROR", func(t *testing.T) {
-			t.Parallel()
-			w := New("", nil).NewWire()
-			if _, err := w.ParseOutput([]byte(`{"event":"step_update","step_update":{"conversation_id":"s","step_index":69,"state":"ACTIVE","step_type":"tool","tool_name":"edit_file"}}`)); err != nil {
-				t.Fatal(err)
-			}
-			msgs, err := w.ParseOutput([]byte(`{"event":"step_update","step_update":{"conversation_id":"s","step_index":69,"state":"ERROR","step_type":"tool","tool_name":"edit_file","tool_info":{"name":"edit_file","error":{"type":"TOOL_ERROR","message":"target content not found"}}}}`))
-			if err != nil || len(msgs) != 1 {
-				t.Fatalf("failure = %v, %v", msgs, err)
-			}
-			if result, ok := msgs[0].(*agent.ToolResultMessage); !ok || result.Error != "target content not found" {
-				t.Fatalf("result = %+v", msgs[0])
-			}
-		})
-		t.Run("response finalization preserves tool order", func(t *testing.T) {
-			t.Parallel()
-			w := New("", nil).NewWire()
-			lines := []string{
-				`{"event":"step_update","step_update":{"step_index":1,"state":"ACTIVE","step_type":"agent_response","text_delta":"Before."}}`,
-				`{"event":"step_update","step_update":{"step_index":1,"state":"DONE","step_type":"agent_response","usage":{"input_tokens":10}}}`,
-				`{"event":"step_update","step_update":{"step_index":2,"state":"DONE","step_type":"tool","tool_name":"view_file"}}`,
-				`{"event":"step_update","step_update":{"step_index":3,"state":"DONE","step_type":"agent_response","text_delta":"After."}}`,
-				`{"event":"result","result":{"status":"SUCCESS","response":"Before.After."}}`,
-			}
-			var types, texts []string
-			for _, line := range lines {
-				msgs, err := w.ParseOutput([]byte(line))
-				if err != nil {
-					t.Fatal(err)
-				}
-				for _, msg := range msgs {
-					types = append(types, msg.Type())
-					if m, ok := msg.(*agent.TextMessage); ok {
-						texts = append(texts, m.Text)
-					}
-				}
-			}
-			want := []string{"text_delta", "text", "usage", "tool_use", "tool_result", "text_delta", "text", "result"}
-			if !reflect.DeepEqual(types, want) || !reflect.DeepEqual(texts, []string{"Before.", "After."}) {
-				t.Fatalf("types=%q texts=%q", types, texts)
-			}
-		})
-		t.Run("response fallback", func(t *testing.T) {
-			t.Parallel()
-			msgs, err := New("", nil).NewWire().ParseOutput([]byte(`{"event":"result","result":{"status":"SUCCESS","response":"answer"}}`))
-			if err != nil || len(msgs) != 2 || msgs[0].Type() != "text" || msgs[1].Type() != "result" {
-				t.Fatalf("fallback = %v, %v", msgs, err)
-			}
-		})
-		t.Run("independent state", func(t *testing.T) {
-			t.Parallel()
-			b := New("", nil)
-			first, second := b.NewWire(), b.NewWire()
-			if _, err := first.ParseOutput([]byte(`{"event":"step_update","step_update":{"state":"DONE","step_type":"agent_response","usage":{"input_tokens":123}}}`)); err != nil {
-				t.Fatal(err)
-			}
-			msgs, err := second.ParseOutput([]byte(`{"event":"result","result":{"status":"SUCCESS"}}`))
-			if err != nil || len(msgs) != 1 {
-				t.Fatalf("fresh result = %v, %v", msgs, err)
-			}
-			if m, ok := msgs[0].(*agent.ResultMessage); !ok || !m.Usage.Equal(agent.Usage{}) {
-				t.Fatalf("fresh result = %v", msgs)
-			}
-		})
-		t.Run("errors and forward fields", func(t *testing.T) {
-			t.Parallel()
-			w := New("", nil).NewWire()
-			for _, line := range []string{`{`, `{"event":"user","message":{"content":[{"type":"image"}]}}`} {
-				if _, err := w.ParseInput([]byte(line)); err == nil {
-					t.Fatalf("accepted %s", line)
-				}
-			}
-			if _, err := w.ParseOutput([]byte(`{"event":"init","future":true}`)); err != nil {
-				t.Fatal(err)
+			t.Setenv("PATH", dir)
+			_, err := b.FetchModelInventory(t.Context(), runtime.ConnectionTarget{SSHHost: "agy"}, nil)
+			want := "agy models: exit status 1: Error: Please sign in to view available models. Launch the CLI without arguments to sign in."
+			if err == nil || err.Error() != want {
+				t.Fatalf("error = %v, want %q", err, want)
 			}
 		})
 	})
@@ -506,6 +195,179 @@ func TestParseModels(t *testing.T) {
 			if _, err := parseModels([]byte(out)); err == nil {
 				t.Fatalf("accepted %s", out)
 			}
+		}
+	})
+}
+
+func TestRecordings(t *testing.T) {
+	t.Parallel()
+	replay := func(t *testing.T, name string, p agent.MessageParser) []agent.Message {
+		// #nosec G304 -- name is one of this test's testdata fixtures.
+		data, err := os.ReadFile(filepath.Join("testdata", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		parser, err := agent.NewLogRecordParser(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var msgs []agent.Message
+		for i, line := range bytes.Split(bytes.TrimSpace(data), []byte{'\n'}) {
+			if i == 0 {
+				continue // The caic_meta header.
+			}
+			record, err := parser.ParseRecord(line)
+			if err != nil {
+				t.Fatalf("record %d: %v", i+1, err)
+			}
+			for _, m := range record.Messages {
+				msgs = append(msgs, m.Message)
+			}
+		}
+		return msgs
+	}
+	t.Run("read-edit-bash", func(t *testing.T) {
+		t.Parallel()
+		var inputs, edits, bashOutputs int
+		var result *agent.ResultMessage
+		bash := map[string]struct{}{}
+		for _, m := range replay(t, "read-edit-bash.jsonl", New("", nil).NewWire()) {
+			switch m := m.(type) {
+			case *agent.UserInputMessage:
+				inputs++
+			case *agent.ToolUseMessage:
+				if m.Name == "Edit" && m.Detail == "main.go" && len(m.InputView.Files) == 1 {
+					edits++
+				}
+				if m.Name == "Bash" {
+					if cmd, err := agent.JSONString(m.Input, "command"); err != nil || cmd != "cat main.go" {
+						t.Fatalf("Bash input = %s, %v", m.Input, err)
+					}
+					bash[m.ToolUseID] = struct{}{}
+				}
+			case *agent.ToolOutputDeltaMessage:
+				if _, ok := bash[m.ToolUseID]; ok && strings.Contains(m.Delta, `fmt.Println("Hi, World!")`) {
+					bashOutputs++
+				}
+			case *agent.ResultMessage:
+				result = m
+			}
+		}
+		// agy echoes the prompt as user_message_chunk; only the recorded
+		// session/prompt input counts.
+		if inputs != 1 || edits != 1 || bashOutputs != 1 {
+			t.Fatalf("user inputs = %d, edit views = %d, cat outputs = %d", inputs, edits, bashOutputs)
+		}
+		if result == nil || result.IsError || result.Usage.InputTokens == 0 || result.Usage.CacheReadInputTokens == 0 || result.Usage.ReasoningOutputTokens == 0 {
+			t.Fatalf("result = %+v", result)
+		}
+	})
+	t.Run("native-subagent-joke", func(t *testing.T) {
+		t.Parallel()
+		// invoke_subagent completes when agy has spawned the child, with no
+		// output. The child's lifecycle and report never reach ACP, so the
+		// delegation stays a plain tool call without a native card.
+		var spawn *agent.ToolUseMessage
+		var spawned *agent.ToolResultMessage
+		for _, m := range replay(t, "native-subagent-joke.jsonl", New("", nil).NewWire()) {
+			switch m := m.(type) {
+			case *agent.ToolUseMessage:
+				if m.Name == "Run invoke_subagent" {
+					spawn = m
+				}
+			case *agent.ToolResultMessage:
+				if spawn != nil && m.ToolUseID == spawn.ToolUseID {
+					spawned = m
+				}
+			case *agent.ToolOutputDeltaMessage:
+				if spawn != nil && m.ToolUseID == spawn.ToolUseID {
+					t.Fatalf("spawn output = %q, want none", m.Delta)
+				}
+			case *agent.NativeSubagentMessage:
+				t.Fatalf("native card %+v from a spawn-only delegation", m.Subagent)
+			}
+		}
+		if spawn == nil || spawned == nil || spawned.Error != "" {
+			t.Fatalf("spawn = %+v, result = %+v", spawn, spawned)
+		}
+		if role, err := agent.JSONString(spawn.Input, "Role"); err != nil || role == "" {
+			t.Fatalf("spawn input = %s, %v", spawn.Input, err)
+		}
+	})
+	t.Run("compact", func(t *testing.T) {
+		t.Parallel()
+		// The /compact prompt answers with end_turn and the usage of agy's
+		// summarization call; its usage_update reports that call's request,
+		// not the compacted context. Shared ACP adds the compaction boundary
+		// before the result, so the context meter becomes unknown until the
+		// next prompt reports the reduced occupancy. The recall answer shows
+		// what the summary kept.
+		var inputs []string
+		var occupancy, meterAtResult, boundaries []int
+		var results []*agent.ResultMessage
+		var meter agent.ContextMeter
+		var text string
+		for _, m := range replay(t, "compact.jsonl", New("", nil).NewWire()) {
+			meter.Observe(m, "")
+			switch m := m.(type) {
+			case *agent.UserInputMessage:
+				inputs = append(inputs, m.Text)
+				occupancy = append(occupancy, 0)
+			case *agent.UsageMessage:
+				if m.ContextUsed != nil {
+					occupancy[len(occupancy)-1] = *m.ContextUsed
+				}
+			case *agent.SystemMessage:
+				if m.Subtype == agent.SystemSubtypeCompactBoundary {
+					boundaries = append(boundaries, len(inputs))
+				}
+			case *agent.TextMessage:
+				text = m.Text
+			case *agent.ResultMessage:
+				if m.IsError {
+					t.Fatalf("result = %+v", m)
+				}
+				results = append(results, m)
+				meterAtResult = append(meterAtResult, meter.Tokens())
+			}
+		}
+		if len(inputs) != 3 || inputs[1] != "/compact" || len(results) != 3 {
+			t.Fatalf("inputs = %q, results = %d", inputs, len(results))
+		}
+		if got := results[1].Usage; got.InputTokens != 2951 || got.CacheReadInputTokens != 14879 || got.OutputTokens != 299 {
+			t.Fatalf("compaction usage = %+v", got)
+		}
+		if want := []int{16925, 18129, 9134}; !reflect.DeepEqual(occupancy, want) {
+			t.Fatalf("context occupancy = %v, want %v", occupancy, want)
+		}
+		if want := []int{2}; !reflect.DeepEqual(boundaries, want) {
+			t.Fatalf("boundaries after inputs = %v, want %v", boundaries, want)
+		}
+		if want := []int{16925, 0, 9134}; !reflect.DeepEqual(meterAtResult, want) {
+			t.Fatalf("context meter at results = %v, want %v", meterAtResult, want)
+		}
+		if text != "cobalt-otter" {
+			t.Fatalf("recall after compaction = %q", text)
+		}
+	})
+	t.Run("session-resume metadata", func(t *testing.T) {
+		t.Parallel()
+		// session/resume reports agy's default model; caic then selects the
+		// requested one.
+		var init *agent.InitMessage
+		var model string
+		for _, m := range replay(t, "session-resume.jsonl", New("", nil).NewMetadataParser()) {
+			switch m := m.(type) {
+			case *agent.InitMessage:
+				init = m
+			case *agent.SessionMetadataMessage:
+				if m.ReportedModel != "" {
+					model = m.ReportedModel
+				}
+			}
+		}
+		if init == nil || init.SessionID == "" || init.Version != "1.5.9" || model != "gemini-3.8-flash" {
+			t.Fatalf("init = %+v, model = %q", init, model)
 		}
 	})
 }

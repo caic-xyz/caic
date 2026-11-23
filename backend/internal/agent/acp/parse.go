@@ -25,7 +25,7 @@ import (
 //   - TextDeltaMessage     — agent_message_chunk
 //   - ThinkingDeltaMessage — agent_thought_chunk
 //   - ToolUseMessage       — tool_call
-//   - ToolResultMessage    — tool_call_update (completed/failed)
+//   - ToolResultMessage    — tool_call or tool_call_update (completed/failed)
 //   - ToolOutputDeltaMessage — tool_call_update (in_progress with output)
 //   - TodoMessage          — plan update
 //   - UserInputMessage     — user_message_chunk
@@ -145,8 +145,13 @@ func parseToolCall(u *acp.ToolCallUpdateUpdate) []agent.Message {
 		Name:      normalizeToolName(u.Title, u.Kind),
 		Input:     u.RawInput,
 	}
-	addEditInputView(use)
-	return []agent.Message{use}
+	AddEditInputView(use)
+	msgs := []agent.Message{use}
+	// An announcement can carry a terminal status; no update follows it.
+	if u.Status == acp.StatusCompleted || u.Status == acp.StatusFailed {
+		msgs = append(msgs, parseToolCallUpdate(u)...)
+	}
+	return msgs
 }
 
 // parseToolCallUpdate handles tool_call_update session updates (progress/completion),
@@ -173,7 +178,7 @@ func parseToolCallUpdate(u *acp.ToolCallUpdateUpdate) []agent.Message {
 				Name:      name,
 				Input:     u.RawInput,
 			}
-			addEditInputView(use)
+			AddEditInputView(use)
 			msgs = append(msgs, use)
 		}
 		// Also emit output delta if content is available.
@@ -189,7 +194,9 @@ func parseToolCallUpdate(u *acp.ToolCallUpdateUpdate) []agent.Message {
 	}
 }
 
-func addEditInputView(use *agent.ToolUseMessage) {
+// AddEditInputView renders an Edit tool's file_path, old_string, and
+// new_string input as a file change.
+func AddEditInputView(use *agent.ToolUseMessage) {
 	if use == nil || !strings.EqualFold(use.Name, "Edit") {
 		return
 	}

@@ -61,7 +61,6 @@ PID_PATH = os.path.join(RELAY_DIR, "pid")
 CLAUDE_CODE_CAIC_MCP_CONFIG_PATH = os.path.join(RELAY_DIR, "caic-mcp.json")
 CAIC_MCP_SOCK_PATH = os.path.join(RELAY_DIR, "caic-mcp.sock")
 PI_CAIC_MCP_EXTENSION_PATH = os.path.join(RELAY_DIR, "caic-mcp.ts")
-ANTIGRAVITY_CAIC_MCP_DIR = os.path.join(RELAY_DIR, "antigravity-mcp")
 
 # Max size of a single read from subprocess stdout.
 BUF_SIZE = 65536
@@ -130,33 +129,6 @@ def _write_claude_code_caic_mcp_config() -> None:
     os.replace(temp_path, CLAUDE_CODE_CAIC_MCP_CONFIG_PATH)
 
 
-def _write_antigravity_caic_mcp_plugin() -> None:
-    """Use agy's supported --add-dir discovery without changing HOME or repos.
-
-    agy 1.2.17 discovers .agents/plugins in additional workspace directories.
-    A fresh plugin namespace avoids collisions in its shared ~/.gemini schema
-    cache. Only this auxiliary workspace is relay-owned; credential/history
-    storage and user customizations retain their normal paths.
-    """
-    os.mkdir(ANTIGRAVITY_CAIC_MCP_DIR, 0o700)
-    plugin_dir = os.path.join(ANTIGRAVITY_CAIC_MCP_DIR, ".agents", "plugins", "caic-task-" + uuid.uuid4().hex)
-    os.makedirs(plugin_dir, mode=0o700)
-    config = {
-        "mcpServers": {
-            "caic": {
-                "command": "python3",
-                "args": [os.path.abspath(sys.argv[0]), "caic-mcp"],
-                "env": {"CAIC_RELAY_DIR": RELAY_DIR},
-            }
-        }
-    }
-    for name, value in (("plugin.json", {"name": os.path.basename(plugin_dir)}), ("mcp_config.json", config)):
-        with open(os.path.join(plugin_dir, name), "x", encoding="utf-8") as f:
-            os.fchmod(f.fileno(), 0o600)
-            json.dump(value, f)
-            f.write("\n")
-
-
 def _remove_caic_mcp_files() -> None:
     """Remove relay-owned MCP configuration and bridge access for every harness."""
     for path in (CAIC_MCP_SOCK_PATH, CLAUDE_CODE_CAIC_MCP_CONFIG_PATH, PI_CAIC_MCP_EXTENSION_PATH):
@@ -164,10 +136,6 @@ def _remove_caic_mcp_files() -> None:
             os.unlink(path)
         except FileNotFoundError:
             pass
-    try:
-        shutil.rmtree(ANTIGRAVITY_CAIC_MCP_DIR)
-    except FileNotFoundError:
-        pass
 
 
 def _write_pi_caic_mcp_extension() -> None:
@@ -843,16 +811,13 @@ def _configure_caic_mcp(harness: str, cmd_args: list[str]) -> list[str]:
     """Prepare only the selected harness's integration before process startup.
 
     Codex receives its MCP command through backend-generated CLI options.
-    OpenCode receives it through ACP session creation/loading. The relay
+    ACP harnesses receive it through session creation or resumption. The relay
     owns their bridges but needs no additional configuration.
     """
     match harness:
-        case "antigravity":
-            _write_antigravity_caic_mcp_plugin()
-            return [*cmd_args, "--add-dir", ANTIGRAVITY_CAIC_MCP_DIR]
         case "claude":
             _write_claude_code_caic_mcp_config()
-        case "codex" | "dsh" | "opencode":
+        case "antigravity" | "codex" | "dsh" | "opencode":
             pass
         case "pi":
             _write_pi_caic_mcp_extension()

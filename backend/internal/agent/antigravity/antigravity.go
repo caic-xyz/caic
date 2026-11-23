@@ -1,4 +1,4 @@
-// Package antigravity implements agy sessions with conversation-scoped provenance and relay-owned task MCP.
+// Package antigravity implements agy sessions over shared ACP and reads stream-json records from earlier agy tasks.
 package antigravity
 
 import (
@@ -9,17 +9,196 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os/exec"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/maruel/genai/acp"
+	"github.com/maruel/genai/providers/antigravity"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	antigravityv1 "github.com/caic-xyz/caic/backend/internal/agent/antigravity/data/v1"
+	agentacp "github.com/caic-xyz/caic/backend/internal/agent/acp"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
-	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
-	"github.com/maruel/genai/providers/antigravity"
 )
+
+// effortID is agy 1.5.9's ACP reasoning-effort configuration option. Its
+// values vary by model, like the effort suffixes of `agy models`.
+const effortID acp.ConfigOptionID = "thought_level"
+
+// Backend implements agy over shared ACP. Task MCP is registered through
+// session/new, so shared ~/.gemini settings stay untouched.
+type Backend struct{ *agentacp.Backend }
+
+// New creates an Antigravity backend with its cached model inventory.
+// agy 1.5.3 accepts --settings, but its published schema has no general
+// compaction threshold: https://antigravity.google/schemas/v1/settings.json.
+// maxTokens in customModelsConfig.customModels entries describes context capacity
+// for Gemini API-authenticated custom models, not a built-in subscription model threshold.
+// Unknown settings are ignored, so no unsupported compaction override is exposed.
+// See https://antigravity.google/docs/settings?tab=cli.
+func New(cacheDir string, envVars []string) *Backend {
+	b := &Backend{Backend: agentacp.New(harness.Antigravity, &agentacp.Config{
+		// agy keeps conversations in ~/.gemini/antigravity-cli/conversations,
+		// which md mounts into new containers. The ACP session ID is that
+		// conversation ID, so stream-json conversations resume too.
+		ResumeMethod: acp.MethodSessionResume,
+		// Without authenticate, agy 1.5.9 ACP prefers GEMINI_API_KEY over
+		// the CLI's Google sign-in, which changes the model catalog and
+		// billing. The CLI and quota use the sign-in. A missing sign-in
+		// fails with agy's "Run agy acp --login" error.
+		AuthMethod: "oauth-personal",
+		EffortID:   effortID,
+		Images:     true,
+		NewTools:   newTools,
+		// agy's advertised "compact" command summarizes the conversation
+		// and ends the turn; testdata/compact.jsonl records it. Text after
+		// it is a prompt agy answers after compacting, not summary
+		// instructions, so custom instructions stay unsupported.
+		CompactPrompt: "/compact",
+	})}
+	b.QuotaProviderID = agent.QuotaProviderAntigravity
+	b.SetModelInventory(agent.CachedModelInventory(cacheDir, harness.Antigravity, envVars))
+	return b
+}
+
+// Start launches agy's ACP server through the shared relay.
+func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	return b.Backend.Start(ctx, opts, agentacp.Launch{Args: b.AgentArgs(agent.HarnessArgs{})})
+}
+
+// AgentArgs implements agent.Backend. caic tasks run unattended, so agy
+// approves its own tool requests, as it did in stream-json mode.
+func (*Backend) AgentArgs(_ agent.HarnessArgs) []string {
+	return []string{"agy", "acp", "--dangerously-skip-permissions"}
+}
+
+// SetModelInventory keeps the order sortModels chose; shared ACP
+// normalization would reorder it alphabetically.
+func (b *Backend) SetModelInventory(inventory agent.ModelInventory) {
+	b.Base.SetModelInventory(inventory)
+}
+
+// NewWire routes each record to the protocol that wrote it.
+func (b *Backend) NewWire() agent.WireFormat {
+	w := b.Backend.NewWire().(acpWire) //nolint:forcetypeassert // Shared ACP's wire encodes compaction.
+	return &wire{router: router{acp: w, streamJSON: newStreamWire()}, acp: w}
+}
+
+// NewMetadataParser routes each record to the protocol that wrote it.
+func (b *Backend) NewMetadataParser() agent.MessageParser {
+	return &router{acp: b.Backend.NewMetadataParser(), streamJSON: &metadataParser{accounting: newAccounting()}}
+}
+
+// FetchModelInventory discovers models on the agent's SSH target.
+func (*Backend) FetchModelInventory(ctx context.Context, target runtime.ConnectionTarget, env []string) (agent.ModelInventory, error) {
+	if target.SSHHost == "" {
+		return agent.ModelInventory{}, errors.New("agent connection target missing SSH host")
+	}
+	var args []string
+	if len(env) != 0 {
+		args = append(args, "env")
+		args = append(args, env...)
+	}
+	args = append(args, "agy", "--output-format", "stream-json", "models")
+	out, err := agent.SSHCommand(ctx, target.SSHHost, args...).Output()
+	if err != nil {
+		// agy 1.5.14 reports a missing sign-in on stderr only, with no
+		// stream-json event.
+		if e, ok := errors.AsType[*exec.ExitError](err); ok {
+			if msg := lastStderrLine(e.Stderr); msg != "" {
+				return agent.ModelInventory{}, fmt.Errorf("agy models: %w: %s", err, msg)
+			}
+		}
+		return agent.ModelInventory{}, fmt.Errorf("agy models: %w", err)
+	}
+	return parseModels(out)
+}
+
+// terminalControl matches the ANSI control sequences agy writes to redraw
+// its status line, such as "\x1b[K".
+var terminalControl = regexp.MustCompile(`\x1b\[[0-9;?]*[A-Za-z]`)
+
+// lastStderrLine returns the last visible stderr line. Text before a carriage
+// return is overwritten on a terminal, so it is dropped.
+func lastStderrLine(stderr []byte) string {
+	last := ""
+	for line := range strings.Lines(string(stderr)) {
+		line = strings.TrimRight(line, "\r\n")
+		line = line[strings.LastIndexByte(line, '\r')+1:]
+		if line = strings.TrimSpace(terminalControl.ReplaceAllString(line, "")); line != "" {
+			last = line
+		}
+	}
+	return last
+}
+
+var (
+	_ agent.Backend      = (*Backend)(nil)
+	_ agent.ModelFetcher = (*Backend)(nil)
+)
+
+// router dispatches records by protocol. A task's log holds stream-json
+// records only before its first ACP record: once caic launches agy in ACP mode,
+// every later process of the task speaks ACP, including a stream-json
+// conversation resumed through session/resume. Its state belongs to the
+// goroutine that parses the ordered records.
+type router struct {
+	acp, streamJSON agent.MessageParser
+
+	acpSeen bool
+}
+
+// ParseInput implements agent.MessageParser.
+func (r *router) ParseInput(line []byte) ([]agent.Message, error) {
+	return r.parser(line).ParseInput(line)
+}
+
+// ParseOutput implements agent.MessageParser.
+func (r *router) ParseOutput(line []byte) ([]agent.Message, error) {
+	return r.parser(line).ParseOutput(line)
+}
+
+// parser selects the protocol of line. Each JSON-RPC record carries a
+// top-level "jsonrpc" member; a stream-json record never does. A malformed
+// line reaches the ACP parser, which reports it.
+func (r *router) parser(line []byte) agent.MessageParser {
+	if r.acpSeen {
+		return r.acp
+	}
+	if v, err := agent.JSONField(line, "jsonrpc"); err != nil || v != nil {
+		r.acpSeen = err == nil
+		return r.acp
+	}
+	return r.streamJSON
+}
+
+// acpWire is shared ACP's wire, which also encodes compaction.
+type acpWire interface {
+	agent.WireFormat
+	agent.CompactCommand
+}
+
+// wire encodes every prompt and compaction over ACP. A stream-json process
+// that caic adopts across the upgrade has no ACP session, so its prompts fail;
+// reviving the task resumes the conversation over ACP.
+type wire struct {
+	router
+
+	acp acpWire
+}
+
+// EncodePrompt implements agent.WireFormat.
+func (w *wire) EncodePrompt(p agent.Prompt) ([]byte, error) {
+	return w.acp.EncodePrompt(p)
+}
+
+// EncodeCompact implements agent.CompactCommand.
+func (w *wire) EncodeCompact(instructions string) ([]byte, error) {
+	return w.acp.EncodeCompact(instructions)
+}
 
 // modelFamilyOrder lists model families from most to least preferred.
 var modelFamilyOrder = []string{"gemini", "claude"}
@@ -131,362 +310,6 @@ func sortModels(ids []string) []agent.Model {
 		out[i] = agent.Model{ID: p.id, EffortOptions: opts}
 	}
 	return out
-}
-
-// Backend implements agent.Backend for agy. Task MCP uses a relay-owned plugin
-// workspace without changing shared ~/.gemini settings. Prompt images are
-// written to agent.AttachmentDir and referenced by path.
-type Backend struct {
-	agent.Base
-}
-
-// New creates an Antigravity backend with its cached model inventory.
-// agy 1.5.3 accepts --settings, but its published schema has no general
-// compaction threshold: https://antigravity.google/schemas/v1/settings.json.
-// maxTokens in customModelsConfig.customModels entries describes context capacity
-// for Gemini API-authenticated custom models, not a built-in subscription model threshold.
-// Unknown settings are ignored, so no unsupported compaction override is exposed.
-// See https://antigravity.google/docs/settings?tab=cli.
-func New(cacheDir string, envVars []string) *Backend {
-	b := &Backend{
-		HarnessID:       harness.Antigravity,
-		QuotaProviderID: agent.QuotaProviderAntigravity,
-		Images:          true,
-	}
-	b.SetModelInventory(agent.CachedModelInventory(cacheDir, harness.Antigravity, envVars))
-	return b
-}
-
-// Start launches agy through the shared relay and its task-local MCP plugin.
-func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	// agy's stream-json protocol reports no version.
-	if err := agent.RecordVersion(ctx, opts, "agy"); err != nil {
-		return nil, err
-	}
-	relayArgs := []string{"--harness", "antigravity"}
-	if opts.MCP != nil {
-		relayArgs = append(relayArgs, "--caic-mcp")
-	}
-	rp, err := agent.PrepareRelay(ctx, opts, relayArgs, b.AgentArgs(agent.HarnessArgs{
-		Model: opts.Model, Effort: opts.Effort, ResumeSessionID: opts.ResumeSessionID,
-	}))
-	if err != nil {
-		return nil, err
-	}
-	c := agent.NewAttachmentConn(ctx, agent.NewConn(ctx, opts.Logger, rp.Stdin, opts.Records, opts.MCP), opts.Target)
-	return agent.StartSession(ctx, rp, c, opts)
-}
-
-// AttachRelay reconnects to a running agy process through the shared relay.
-func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	return agent.AttachRelaySession(ctx, opts, func(c agent.Conn) (agent.Conn, error) {
-		return agent.NewAttachmentConn(ctx, c, opts.Target), nil
-	})
-}
-
-// AgentArgs returns agy's persistent NDJSON print-mode command. A bare -p
-// consumes the next argument; -p= lets the prompt arrive on stdin instead.
-func (*Backend) AgentArgs(a agent.HarnessArgs) []string {
-	args := []string{"agy", "-p=", "--input-format", "stream-json", "--output-format", "stream-json", "--dangerously-skip-permissions"}
-	if a.Model != "" {
-		args = append(args, "--model", a.Model)
-	}
-	if a.Effort != "" {
-		args = append(args, "--effort", a.Effort)
-	}
-	if a.ResumeSessionID != "" {
-		// agy persists conversation history locally under ~/.gemini/antigravity-cli/.
-		// The resume guide's backend lookup does not establish a cloud-backup
-		// guarantee. Do not assume an ID can recover missing local history.
-		// --continue uses ~/.gemini/antigravity-cli/cache/last_conversations.json
-		// to look up the workspace's last ID; an explicit ID bypasses that lookup.
-		// md mounts ~/.gemini into new containers for shared harness state.
-		// https://github.com/maruel/genai/blob/v0.10.2/providers/antigravity/client.go
-		// https://www.antigravity.google/docs/cli/commands/resume
-		args = append(args, "--conversation", a.ResumeSessionID)
-	}
-	return args
-}
-
-// NewWire creates independent per-session parser state.
-func (*Backend) NewWire() agent.WireFormat {
-	return &wireFormat{steps: make(map[string]*step), textConversations: make(map[string]struct{}), accounting: newAccounting()}
-}
-
-// NewMetadataParser creates independent conversation and accounting state.
-func (*Backend) NewMetadataParser() agent.MessageParser {
-	return &metadataParser{accounting: newAccounting()}
-}
-
-// FetchModelInventory discovers models on the agent's SSH target.
-func (*Backend) FetchModelInventory(ctx context.Context, target runtime.ConnectionTarget, env []string) (agent.ModelInventory, error) {
-	if target.SSHHost == "" {
-		return agent.ModelInventory{}, errors.New("agent connection target missing SSH host")
-	}
-	var args []string
-	if len(env) != 0 {
-		args = append(args, "env")
-		args = append(args, env...)
-	}
-	args = append(args, "agy", "--output-format", "stream-json", "models")
-	out, err := agent.SSHCommand(ctx, target.SSHHost, args...).Output()
-	if err != nil {
-		return agent.ModelInventory{}, fmt.Errorf("agy models: %w", err)
-	}
-	return parseModels(out)
-}
-
-var (
-	_ agent.Backend      = (*Backend)(nil)
-	_ agent.ModelFetcher = (*Backend)(nil)
-)
-
-// step retains lifecycle state only until the result. IDs include the native
-// conversation ID because child conversations can use the same step index.
-type step struct {
-	started  bool
-	text     strings.Builder
-	overflow bool
-}
-
-// wireFormat state belongs to the single goroutine that parses ordered input
-// and output records. Writing a prompt does not mutate it, so live parsing and
-// prompt writes can run together.
-type wireFormat struct {
-	accounting
-
-	steps             map[string]*step
-	textConversations map[string]struct{}
-	// inTurn is set from a root user_input step until the root result.
-	inTurn bool
-	// queued counts prompts delivered during a root turn whose own turn has
-	// not started. agy starts one turn for each after the result; AGENTS.md
-	// holds the evidence.
-	queued int
-}
-
-// EncodePrompt encodes text and image input as one complete native record.
-// agy stream-json input accepts only text, so each image becomes a text block
-// naming its AttachmentPath; the agent opens that file with its read tool.
-// The block also carries the image so history keeps it.
-func (*wireFormat) EncodePrompt(p agent.Prompt) ([]byte, error) {
-	var blocks []antigravityv1.ContentBlock
-	if p.Text != "" {
-		blocks = append(blocks, textBlock(p.Text))
-	}
-	for _, img := range p.Images {
-		path, err := agent.AttachmentPath(img)
-		if err != nil {
-			return nil, err
-		}
-		b := textBlock("\nAttached image: " + path)
-		b.CaicImage = &antigravityv1.Image{MediaType: img.MediaType, Data: img.Data}
-		blocks = append(blocks, b)
-	}
-	if len(blocks) == 0 {
-		blocks = append(blocks, textBlock(""))
-	}
-	line, err := json.Marshal(antigravityv1.InputMessage{
-		Event:   string(antigravity.EventUser),
-		Message: antigravityv1.InputUserMessage{Content: blocks},
-	})
-	if err != nil {
-		return nil, err
-	}
-	return append(line, '\n'), nil
-}
-
-func textBlock(text string) antigravityv1.ContentBlock {
-	return antigravityv1.ContentBlock{Type: "text", Text: text}
-}
-
-// ParseInput decodes client prompts and counts those delivered during a turn.
-// Records written before path attachments carry each image as a text data URL.
-func (w *wireFormat) ParseInput(line []byte) ([]agent.Message, error) {
-	var ev antigravityv1.InputMessage
-	if err := json.Unmarshal(line, &ev); err != nil {
-		return nil, fmt.Errorf("antigravity input: %w", err)
-	}
-	switch antigravity.EventType(ev.Event) {
-	case antigravity.EventUser:
-		m := &agent.UserInputMessage{}
-		for _, c := range ev.Message.Content {
-			if c.Type != "text" {
-				return nil, fmt.Errorf("antigravity: unsupported input content %q", c.Type)
-			}
-			if c.CaicImage != nil {
-				m.Images = append(m.Images, v3.ImageData{MediaType: c.CaicImage.MediaType, Data: c.CaicImage.Data})
-			} else if mediaType, payload, ok := agent.ParseImageDataURL(c.Text); ok {
-				m.Images = append(m.Images, v3.ImageData{MediaType: mediaType, Data: payload})
-			} else {
-				m.Text += c.Text
-			}
-		}
-		if w.inTurn {
-			w.queued++
-		}
-		return []agent.Message{m}, nil
-
-	default:
-		return []agent.Message{&agent.RawMessage{MessageType: ev.Event, Raw: bytes.Clone(line)}}, nil
-	}
-}
-
-// ParseOutput converts agy stdout into neutral messages.
-// Unknown fields are accepted here; check-agent-logs owns strict DTO checks.
-func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
-	var ev antigravity.StreamEvent
-	if err := json.Unmarshal(line, &ev); err != nil {
-		return nil, fmt.Errorf("antigravity event: %w", err)
-	}
-	switch ev.Event {
-	case antigravity.EventInit:
-		w.observeInit(ev.ConversationID, ev.Init.Model)
-		return []agent.Message{&agent.InitMessage{Source: w.conversationSource(ev.ConversationID), SessionID: ev.ConversationID, Cwd: ev.Init.Cwd, Tools: ev.Init.Tools, ReportedModel: ev.Init.Model}}, nil
-	case antigravity.EventStepUpdate:
-		s := &ev.StepUpdate
-		w.observeRelationships(s)
-		source := w.conversationSource(s.ConversationID)
-		index, err := agent.JSONField(line, "step_update", "step_index")
-		if err != nil {
-			return nil, err
-		}
-		if len(index) != 0 {
-			source.ItemID = strconv.FormatInt(s.StepIndex, 10)
-		}
-		if w.foreignConversation(&source) {
-			// A different conversation is not proven to be a task child. Retain
-			// the record without applying root tool/usage effects or presenting it.
-			return []agent.Message{&agent.RawMessage{Source: source, MessageType: string(ev.Event), Raw: bytes.Clone(line)}}, nil
-		}
-		usage, accepted := w.observeStep(s)
-		if !accepted {
-			return nil, nil
-		}
-		messages := append(w.parseStep(s, !source.IsChild()), usage...)
-		for _, message := range messages {
-			*message.Provenance() = source
-		}
-		return messages, nil
-	case antigravity.EventResult:
-		r := &ev.Result
-		source := w.conversationSource(r.ConversationID)
-		if w.foreignConversation(&source) {
-			return []agent.Message{&agent.RawMessage{Source: source, MessageType: string(ev.Event), Raw: bytes.Clone(line)}}, nil
-		}
-		m := &agent.ResultMessage{Source: source, MessageType: "result", Subtype: string(r.Status), SessionID: r.ConversationID, Result: r.Response}
-		if err := r.AsError(); err != nil {
-			m.IsError = true
-			m.Result = err.Error()
-		}
-		var messages []agent.Message
-		if _, textSeen := w.textConversations[r.ConversationID]; !textSeen && r.Response != "" {
-			messages = append(messages, &agent.TextMessage{Source: source, Text: r.Response})
-		}
-		delete(w.textConversations, r.ConversationID)
-		for key := range w.steps {
-			if strings.HasPrefix(key, r.ConversationID+":") {
-				delete(w.steps, key)
-			}
-		}
-		w.finishConversation(r.ConversationID)
-		if source.IsChild() {
-			// Declared child completion cannot finish the root turn or consume
-			// its inclusive usage. No native lifecycle status is inferred; the
-			// response text above already carries a successful outcome.
-			if m.IsError {
-				messages = append(messages, &agent.SystemMessage{Source: source, MessageType: "system", Subtype: agent.SystemSubtypeError, Detail: m.Result})
-			}
-			return messages, nil
-		}
-		// Result usage, duration, and turn count are conversation-wide, including
-		// resumed processes. Only DONE steps from the task's proven conversations
-		// contribute to the neutral per-turn usage.
-		m.Usage = w.finishResult()
-		m.TurnContinues = w.queued > 0
-		w.inTurn = false
-		return append(messages, m), nil
-	default:
-		return []agent.Message{&agent.RawMessage{MessageType: string(ev.Event), Raw: bytes.Clone(line)}}, nil
-	}
-}
-
-func (w *wireFormat) parseStep(s *antigravity.StepUpdatePayload, root bool) []agent.Message {
-	id := s.ConversationID + ":" + strconv.FormatInt(s.StepIndex, 10)
-	st := w.steps[id]
-	if st == nil {
-		st = &step{}
-		w.steps[id] = st
-	}
-	var msgs []agent.Message
-	switch s.StepType {
-	case antigravity.StepAgentResponse:
-		if s.TextDelta != "" {
-			w.textConversations[s.ConversationID] = struct{}{}
-			msgs = append(msgs, &agent.TextDeltaMessage{Text: s.TextDelta})
-			// Deltas remain authoritative if a response exceeds the bounded
-			// finalization buffer. Do not retain an incomplete duplicate.
-			if st.overflow || len(s.TextDelta) > (1<<20)-st.text.Len() {
-				st.text.Reset()
-				st.overflow = true
-			} else {
-				st.text.WriteString(s.TextDelta)
-			}
-		}
-		if terminalStep(s.State) && !st.overflow && st.text.Len() != 0 {
-			msgs = append(msgs, &agent.TextMessage{Text: st.text.String()})
-			st.text.Reset()
-		}
-	case antigravity.StepTool:
-		if !st.started {
-			name := s.ToolName
-			if name == "" {
-				name = s.ToolInfo.Name
-			}
-			msgs = append(msgs, &agent.ToolUseMessage{ToolUseID: id, Name: name, Input: s.ToolInfo.Parameters})
-			st.started = true
-		}
-		if terminalStep(s.State) {
-			if s.ToolInfo.Output != "" {
-				msgs = append(msgs, &agent.ToolOutputDeltaMessage{ToolUseID: id, Delta: s.ToolInfo.Output})
-			}
-			msgs = append(msgs, &agent.ToolResultMessage{ToolUseID: id, DurationMs: int64(s.DurationSeconds * 1000), Error: s.ToolInfo.Error.Message})
-		}
-	case antigravity.StepSystemMessage:
-		if s.TextDelta != "" {
-			msgs = append(msgs, &agent.SystemMessage{MessageType: "system", Subtype: agent.SystemSubtypeNotice, Detail: s.TextDelta})
-		}
-	case antigravity.StepUserInput:
-		// agy opens every turn with this step, including one for a prompt that
-		// arrived during the previous turn. The recorded stdin retains its text.
-		if !st.started && root {
-			msgs = append(msgs, &agent.TurnStartedMessage{})
-			w.inTurn = true
-			w.queued = max(0, w.queued-1)
-		}
-		st.started = true
-	case antigravity.StepFinish, antigravity.StepErrorMessage:
-		// finish and error_message precede the result, which carries the outcome.
-	}
-	return msgs
-}
-
-// terminalStep reports whether a step ended. agy 1.5.9 moves a failed tool step
-// from ACTIVE to ERROR and never reports it DONE.
-func terminalStep(state antigravity.StepState) bool {
-	return state == antigravity.StepDone || state == antigravity.StepError
-}
-
-func convertUsage(u *antigravity.JSONUsage) agent.Usage {
-	// agy reports uncached input and cached input separately. The recorded
-	// cached-tools fixture has cache_read_tokens greater than input_tokens;
-	// subtracting cache reads produces negative input. Output includes thinking.
-	return agent.Usage{
-		InputTokens:           int(u.InputTokens),
-		CacheReadInputTokens:  int(u.CacheReadTokens),
-		OutputTokens:          int(u.OutputTokens),
-		ReasoningOutputTokens: int(u.ThinkingTokens),
-	}
 }
 
 func parseModels(out []byte) (agent.ModelInventory, error) {

@@ -1,4 +1,4 @@
-// Opt-in live harness smoke check runs one real harness through the server: model discovery, task history and MCP, relay adoption, imported recovery, revival, fork identity, and purge.
+// Opt-in live harness smoke check runs one real harness through the server: model discovery, task history and MCP, relay adoption, imported recovery, revival, compaction, fork identity, and purge.
 
 //go:build smoke
 
@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -164,6 +165,29 @@ func TestHarnessLifecycle(t *testing.T) {
 	}
 	t.Log("explicit revival resumed the conversation")
 
+	if inventory.SupportsCompact {
+		// The task UI's compact action sends no instructions. Every harness
+		// reports a finished compaction as a compact_boundary event; Pi's runs
+		// without starting a turn, so the task state alone cannot show it.
+		postJSON(t, smoke.baseURL, "/api/caic/v1/tasks/"+id+"/compact", v1.CompactReq{}, nil)
+		deadline := time.Now().Add(5 * time.Minute)
+		for smokeHistory(t, smoke, id).Compactions == resumedText.Compactions {
+			if time.Now().After(deadline) {
+				t.Fatalf("compaction reported no compact_boundary within 5m; task state %s", findTask(t, smoke, id).State)
+			}
+			time.Sleep(time.Second)
+		}
+		waitForTaskState(t, smoke, id, "waiting")
+		compactedResults := smokeHistory(t, smoke, id).Results
+		postJSON(t, smoke.baseURL, "/api/caic/v1/tasks/"+id+"/input", v1.InputReq{Prompt: v1.Prompt{Text: recallPrompt}}, nil)
+		recalled := waitForTaskState(t, smoke, id, "waiting")
+		recalledText := smokeHistory(t, smoke, id)
+		if recalled.SessionID != first.SessionID || recalledText.Results != compactedResults+1 || !strings.Contains(recalledText.Text, nonce) {
+			t.Fatalf("compaction: session=%s results before recall=%d history=%+v error=%q", recalled.SessionID, compactedResults, recalledText, recalled.Error)
+		}
+		t.Logf("compaction kept the conversation; context before %s, after recall %s", smokeTokens(resumed.ContextUsed), smokeTokens(recalled.ContextUsed))
+	}
+
 	var fork v1.Task
 	postJSON(t, smoke.baseURL, "/api/caic/v1/tasks/"+id+"/fork", v1.ForkTaskReq{Prompt: v1.Prompt{Text: "Read fork-marker.txt. Reply FORK_OK followed by its exact contents."}}, &fork)
 	forkID := fork.ID.String()
@@ -239,6 +263,14 @@ func smokeStop(t *testing.T, smoke *smokeServer, taskID string) {
 	}
 }
 
+// smokeTokens formats a reported context occupancy.
+func smokeTokens(used *int) string {
+	if used == nil {
+		return "unknown"
+	}
+	return strconv.Itoa(*used)
+}
+
 // smokeHistorySummary is what a smoke check reads from a task's history.
 type smokeHistorySummary struct {
 	// Text is the last text message.
@@ -247,6 +279,8 @@ type smokeHistorySummary struct {
 	Results int
 	// Tools lists tool-use names in order.
 	Tools []string
+	// Compactions counts compact_boundary system events.
+	Compactions int
 }
 
 // smokeHistory summarizes the task's complete projected history.
@@ -269,6 +303,9 @@ func smokeHistory(t *testing.T, smoke *smokeServer, taskID string) smokeHistoryS
 			}
 			if message.ToolUse != nil {
 				summary.Tools = append(summary.Tools, message.ToolUse.Name)
+			}
+			if message.System != nil && message.System.Subtype == v1.EventSystemSubtypeCompactBoundary {
+				summary.Compactions++
 			}
 		}
 	}

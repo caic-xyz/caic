@@ -13,6 +13,9 @@ import (
 type Config struct {
 	// ResumeMethod selects the native method for reopening persisted sessions.
 	ResumeMethod acp.Method
+	// AuthMethod is the advertised authMethods ID sent in an authenticate
+	// request before session creation; empty sends none.
+	AuthMethod string
 	// EffortID is the native reasoning-effort configuration option ID.
 	EffortID acp.ConfigOptionID
 	// Images permits image encoding when ACP also advertises image support.
@@ -21,7 +24,8 @@ type Config struct {
 	// blocks to their agent.AttachmentPath, which the session writes first.
 	ImagesByPath bool
 	// CompactPrompt is the verified native compaction command; empty disables it.
-	// Custom compaction instructions are not supported.
+	// Custom compaction instructions are not supported. A successful prompt of
+	// exactly this text ends with a compaction boundary.
 	CompactPrompt string
 	// Models translates native routes; nil leaves model IDs unchanged.
 	Models ModelCodec

@@ -450,6 +450,11 @@ func TestRun(t *testing.T) {
 				input:   `{"event":"user","message":{"content":[{"type":"text","text":"hello"}]}}`,
 			},
 			{
+				name:    "antigravity ACP",
+				harness: "antigravity",
+				input:   `{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"s","prompt":[{"type":"text","text":"hello"}]}}`,
+			},
+			{
 				name:    "antigravity image path",
 				harness: "antigravity",
 				input:   `{"event":"user","message":{"content":[{"type":"text","text":"\nAttached image: /tmp/caic-relay/attachments/a.png","caic_image":{"media_type":"image/png","data":"aW1hZ2U="}}]}}`,
@@ -496,6 +501,10 @@ func TestRun(t *testing.T) {
 			{"valid", `{"t":"agent","ts":1.000,"msg":{"event":"init","conversation_id":"s","init":{"model":"gemini-3.8-flash-low"}}}`, "", ""},
 			{"valid input", `{"t":"input","ts":1.000,"msg":{"event":"user","message":{"content":[{"type":"text","text":"hello","caic_image":{"media_type":"image/png","data":"AA=="}}]}}}`, "", ""},
 			{"output drift", `{"t":"agent","ts":1.000,"msg":{"event":"step_update","step_update":{"state":"DONE","future":true}}}`, `unknown field "future"`, "providers/antigravity/dto.go"},
+			// agy 1.5.9 ACP extensions, minimized from the antigravity testdata recordings.
+			{"ACP initialize extensions", `{"t":"input","ts":1.000,"msg":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{"terminal":false},"clientInfo":{"name":"caic","title":"caic","version":"1.0.0"}}}}` + "\n" + `{"t":"agent","ts":1.001,"msg":{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"load_session":true,"sessionCapabilities":{"load":{},"resume":{}},"session_capabilities":{"load":{},"resume":{}}},"agentInfo":{"name":"Antigravity ACP Server","version":"1.5.9"}}}}`, "", ""},
+			{"ACP tool extensions", `{"t":"agent","ts":1.000,"msg":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"c","name":"read_file","args":{"Path":"/w/main.go"},"status":"in_progress","kind":"read","title":"File main.go","rawInput":{"Path":"/w/main.go"}}}}}`, "", ""},
+			{"ACP output drift", `{"t":"agent","ts":1.000,"msg":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"usage_update","used":0,"size":1,"future":true}}}}`, `unknown field "future"`, "genai/acp/dto.go"},
 			{"input drift", `{"t":"input","ts":1.000,"msg":{"event":"user","message":{"content":[{"type":"text","text":"hello","future":true}]}}}`, `unknown field "future"`, "antigravity/data/prompt.go"},
 			{"input message drift", `{"t":"input","ts":1.000,"msg":{"event":"user","message":{"content":[{"type":"text","text":"hello"}],"future":true}}}`, `unknown field "future"`, "antigravity/data/prompt.go"},
 		} {

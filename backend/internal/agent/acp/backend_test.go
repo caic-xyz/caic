@@ -293,6 +293,38 @@ func TestHandshake(t *testing.T) {
 		}
 	}
 
+	t.Run("authenticates before session creation", func(t *testing.T) {
+		t.Parallel()
+		handshake := func(t *testing.T, initialized string) (string, error) {
+			var stdin bytes.Buffer
+			stdout := bufio.NewReader(strings.NewReader(agenttest.ACPRecords(
+				initialized + "\n" +
+					`{"jsonrpc":"2.0","id":2,"result":{}}` + "\n" +
+					`{"jsonrpc":"2.0","id":3,"result":{"sessionId":"session-1"}}`)))
+			_, owner := protocolRecords(t, t.Context(), &agenttest.LogSink{}, &agenttest.RecordHandler{})
+			b := New(harness.Antigravity, &Config{ResumeMethod: acp.MethodSessionResume, AuthMethod: "oauth-personal"})
+			_, _, err := b.handshake(t.Context(), &stdin, stdout, io.NopCloser(strings.NewReader("")), &agent.Options{Dir: "/workspace", Records: owner})
+			return stdin.String(), err
+		}
+		t.Run("valid", func(t *testing.T) {
+			t.Parallel()
+			in, err := handshake(t, `{"jsonrpc":"2.0","id":1,"result":{"authMethods":[{"id":"oauth-personal","name":"Google"}]}}`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines := strings.Split(strings.TrimSpace(in), "\n")
+			if len(lines) != 3 || lines[1] != `{"jsonrpc":"2.0","id":2,"method":"authenticate","params":{"methodId":"oauth-personal"}}` {
+				t.Fatalf("requests = %q", lines)
+			}
+		})
+		t.Run("error", func(t *testing.T) {
+			t.Parallel()
+			if _, err := handshake(t, `{"jsonrpc":"2.0","id":1,"result":{"authMethods":[{"id":"gemini-api-key","name":"Key"}]}}`); err == nil || !strings.Contains(err.Error(), "oauth-personal") {
+				t.Fatalf("unadvertised method error = %v", err)
+			}
+		})
+	})
+
 	t.Run("selects model and effort through ACP configuration", func(t *testing.T) {
 		t.Parallel()
 

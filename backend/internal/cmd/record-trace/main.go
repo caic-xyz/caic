@@ -1,4 +1,4 @@
-// Records ordered single-turn, follow-up, and resumed agent journals through relay.py and validates golden evidence.
+// Records ordered single-turn, follow-up, compaction, and resumed agent journals through relay.py and validates golden evidence.
 //
 // Usage:
 //
@@ -39,6 +39,7 @@ import (
 	claudedto "github.com/maruel/genai/providers/claudecode"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/antigravity"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/codex"
 	"github.com/caic-xyz/caic/backend/internal/agent/dsh"
@@ -55,21 +56,34 @@ const image = "ghcr.io/caic-xyz/md-user:latest"
 
 // backends is the registry of supported harnesses for record-trace.
 var backends = map[string]agent.Backend{
-	string(harness.Pi):       pi.New("", nil),
-	string(harness.Claude):   claudecode.New(),
-	string(harness.Codex):    codex.New("", nil),
-	string(harness.Dsh):      dsh.New("", nil),
-	string(harness.OpenCode): opencode.New("", nil),
+	string(harness.Antigravity): antigravity.New("", nil),
+	string(harness.Claude):      claudecode.New(),
+	string(harness.Codex):       codex.New("", nil),
+	string(harness.Dsh):         dsh.New("", nil),
+	string(harness.OpenCode):    opencode.New("", nil),
+	string(harness.Pi):          pi.New("", nil),
 }
 
 type scenario struct {
 	prompt    string
 	followup  string
 	askAnswer string
+	// compact sends the harness's native compaction command after prompt and
+	// before followup, so followup shows what the summary kept.
+	compact bool
 	// wantNative marks a scenario that must record native subagent activity, so a
 	// regeneration that lost the delegation fails instead of publishing evidence
-	// that proves nothing.
+	// that proves nothing. For a harness in unmappedDelegationTools, the
+	// delegation tool call stands in for that activity.
 	wantNative bool
+}
+
+// unmappedDelegationTools names, per harness, the tool whose call is a native
+// delegation that caic does not map onto native-subagent cards.
+var unmappedDelegationTools = map[harness.Name]string{
+	// agy reports only the spawn of an asynchronous child over ACP; see
+	// antigravity/AGENTS.md.
+	harness.Antigravity: "Run invoke_subagent",
 }
 
 var scenarios = map[string]scenario{
@@ -78,6 +92,11 @@ var scenarios = map[string]scenario{
 	},
 	"session-turns": {
 		prompt:   `Remember the marker cobalt-otter. Reply with exactly FIRST-TURN.`,
+		followup: `What marker did I ask you to remember? Reply with only that marker.`,
+	},
+	"compact": {
+		prompt:   "Remember the marker cobalt-otter. Run exactly `seq 1 3000` once with a shell command, then reply with exactly FIRST-TURN.",
+		compact:  true,
 		followup: `What marker did I ask you to remember? Reply with only that marker.`,
 	},
 	"session-resume": {
@@ -104,6 +123,9 @@ var scenarios = map[string]scenario{
 }
 
 var credentialMounts = map[harness.Name][]credentialMount{
+	harness.Antigravity: {
+		{homeRelPath: ".gemini", containerPath: "/home/user/.gemini"},
+	},
 	harness.Claude: {
 		{homeRelPath: ".claude", containerPath: "/home/user/.claude"},
 	},
@@ -129,7 +151,7 @@ type credentialMount struct {
 }
 
 func mainImpl() error {
-	harnessFlag := flag.String("harness", "", "harness to record (pi, claude, codex, dsh, opencode)")
+	harnessFlag := flag.String("harness", "", "harness to record (antigravity, claude, codex, dsh, opencode, pi)")
 	scenarioFlag := flag.String("scenario", "", "predefined scenario name")
 	modelFlag := flag.String("model", "", "model to use (e.g. xiaomi/mimo-v2.5)")
 	apiKeyEnv := flag.String("api-key-env", "", "env var name for optional API key")
@@ -158,6 +180,9 @@ func mainImpl() error {
 	}
 	if *resumeFlag != "" && *workDirFlag == "" {
 		return errors.New("--resume-session requires --work-dir to preserve workspace identity")
+	}
+	if sc.compact && !b.SupportsCompact() {
+		return fmt.Errorf("scenario %s needs compaction, which %s does not support", *scenarioFlag, b.Harness())
 	}
 	outputPath := filepath.Clean(filepath.Join("testdata", *scenarioFlag+".jsonl"))
 	if _, err := os.Stat(outputPath); err == nil {
@@ -287,7 +312,7 @@ func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv string, sc scen
 	}
 	bootstrap = false
 	conn := agent.NewConn(ctx, slog.Default(), stdin, records, nil)
-	if err := waitAndShutdown(ctx, cmd, conn, agent.ContinuedReader{Reader: stdout, Closer: stdoutPipe}, observer, ctr, localOutputPath(relayDir, local), sc.prompt, sc.followup); err != nil {
+	if err := waitAndShutdown(ctx, cmd, conn, agent.ContinuedReader{Reader: stdout, Closer: stdoutPipe}, observer, ctr, localOutputPath(relayDir, local), sc); err != nil {
 		return err
 	}
 	ownerOpen = false
@@ -484,9 +509,10 @@ func startRelayAgent(ctx context.Context, ctr, workDir, relayDir string, b agent
 	return cmd, stdin, stdout, nil
 }
 
-// waitAndShutdown runs the regular transport owner, delivers the prompt, and
-// shuts down both transport producers before its caller closes the journal.
-func waitAndShutdown(ctx context.Context, cmd *exec.Cmd, conn agent.Conn, stdout io.ReadCloser, observer *recordObserver, ctr, localOutput, prompt, followup string) error {
+// waitAndShutdown runs the regular transport owner, delivers the scenario's
+// inputs one turn at a time, and shuts down both transport producers before its
+// caller closes the journal.
+func waitAndShutdown(ctx context.Context, cmd *exec.Cmd, conn agent.Conn, stdout io.ReadCloser, observer *recordObserver, ctr, localOutput string, sc scenario) error {
 	watchCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 	stop := context.AfterFunc(watchCtx, conn.Cancel)
@@ -495,14 +521,24 @@ func waitAndShutdown(ctx context.Context, cmd *exec.Cmd, conn agent.Conn, stdout
 	var workers sync.WaitGroup
 	workers.Go(func() { readDone <- conn.ReadMessages(stdout, observer) })
 	var failure error
-	prompts := []string{prompt}
-	if followup != "" {
-		prompts = append(prompts, followup)
+	prompt := func(text string) func() error {
+		return func() error {
+			slog.InfoContext(ctx, "Sending prompt", "text", fmt.Sprintf("%.60s...", text))
+			return conn.SendPrompt(agent.Prompt{Text: text}, nil)
+		}
 	}
-	for _, text := range prompts {
-		slog.InfoContext(ctx, "Sending prompt", "text", fmt.Sprintf("%.60s...", text))
-		if err := conn.SendPrompt(agent.Prompt{Text: text}, nil); err != nil {
-			failure = err
+	inputs := []func() error{prompt(sc.prompt)}
+	if sc.compact {
+		inputs = append(inputs, func() error {
+			slog.InfoContext(ctx, "Sending compaction command")
+			return conn.SendCompact("")
+		})
+	}
+	if sc.followup != "" {
+		inputs = append(inputs, prompt(sc.followup))
+	}
+	for _, send := range inputs {
+		if failure = send(); failure != nil {
 			break
 		}
 		slog.InfoContext(ctx, "Waiting for agent to finish")
@@ -530,6 +566,16 @@ func waitAndShutdown(ctx context.Context, cmd *exec.Cmd, conn agent.Conn, stdout
 	readErr := <-readDone
 	workers.Wait()
 	if failure != nil {
+		// TODO: in --local mode this kills only the attach client. serve-attach
+		// forks a daemon that calls os.setsid (relay_v2.py), so the daemon and
+		// the harness keep running after a failed recording, and the deferred
+		// RemoveAll in the caller deletes relayDir under them. Observed: a
+		// leftover `relay.py serve-attach … agy acp` after a failed local agy
+		// recording. Container mode is unaffected because podman stop ends
+		// the container. Follow-up: on failure in local mode, read the
+		// daemon's PID from relayDir/pid and signal its process group before
+		// the caller removes relayDir. That the harness shares the daemon's
+		// process group is a hypothesis; verify before relying on it.
 		_ = cmd.Process.Kill()
 	}
 	waitErr := cmd.Wait()
@@ -754,14 +800,17 @@ func writeGoldenFile(ctx context.Context, journalPath string, b agent.Backend, s
 
 // validateGoldenRecording replays a recording through the recorder's own wire
 // and reports the native-subagent lifecycle it contains. wantNative requires the
-// recording to hold at least one native observation, so a scenario that asks the
-// harness to delegate cannot publish evidence that proves nothing.
+// recording to hold at least one native observation, or the harness's unmapped
+// delegation tool call, so a scenario that asks the harness to delegate cannot
+// publish evidence that proves nothing.
 func validateGoldenRecording(path, sanitized string, b agent.Backend, wantNative bool) error {
 	parser, err := agent.NewLogRecordParser(b.NewWire())
 	if err != nil {
 		return err
 	}
 	var statuses []string
+	delegationTool := unmappedDelegationTools[b.Harness()]
+	delegated := false
 	scanner := bufio.NewScanner(strings.NewReader(sanitized))
 	scanner.Buffer(make([]byte, 64*1024), 32<<20)
 	for scanner.Scan() {
@@ -773,16 +822,19 @@ func validateGoldenRecording(path, sanitized string, b agent.Backend, wantNative
 			return fmt.Errorf("parse recording %s: %w", path, err)
 		}
 		for _, message := range record.Messages {
-			if subagent, ok := message.Message.(*agent.NativeSubagentMessage); ok {
-				statuses = append(statuses, string(subagent.Subagent.Status))
+			switch m := message.Message.(type) {
+			case *agent.NativeSubagentMessage:
+				statuses = append(statuses, string(m.Subagent.Status))
+			case *agent.ToolUseMessage:
+				delegated = delegated || (delegationTool != "" && m.Name == delegationTool)
 			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("read recording %s: %w", path, err)
 	}
-	slog.Info("recording native activity", "path", path, "harness", b.Harness(), "observations", len(statuses), "statuses", statuses)
-	if wantNative && len(statuses) == 0 {
+	slog.Info("recording native activity", "path", path, "harness", b.Harness(), "observations", len(statuses), "statuses", statuses, "unmapped_delegation", delegated)
+	if wantNative && len(statuses) == 0 && !delegated {
 		return fmt.Errorf("%s recorded no native subagent activity for %s", path, b.Harness())
 	}
 	return nil

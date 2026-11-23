@@ -1,0 +1,337 @@
+// Tests stream-json history decoding.
+
+package antigravity
+
+import (
+	"bufio"
+	"bytes"
+	"os"
+	"reflect"
+	"strings"
+	"testing"
+
+	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
+)
+
+func TestStreamWire(t *testing.T) {
+	t.Parallel()
+	t.Run("ParseInput", func(t *testing.T) {
+		t.Parallel()
+		t.Run("path image", func(t *testing.T) {
+			t.Parallel()
+			line := `{"event":"user","message":{"content":[{"type":"text","text":"describe this"},{"type":"text","text":"\nAttached image: /tmp/caic-relay/attachments/6fd6529e1a080d633cc56dd862cc9fc4.png","caic_image":{"media_type":"image/png","data":"aW1hZ2U="}}]}}`
+			msgs, err := New("", nil).NewWire().ParseInput([]byte(line))
+			if err != nil || len(msgs) != 1 {
+				t.Fatalf("parse input = %v, %v", msgs, err)
+			}
+			m, ok := msgs[0].(*agent.UserInputMessage)
+			if !ok || m.Text != "describe this" || len(m.Images) != 1 || m.Images[0].MediaType != "image/png" || m.Images[0].Data != "aW1hZ2U=" {
+				t.Fatalf("parsed input = %+v", msgs[0])
+			}
+		})
+		t.Run("historical data URL", func(t *testing.T) {
+			t.Parallel()
+			w := New("", nil).NewWire()
+			line := `{"event":"user","message":{"content":[{"type":"text","text":"describe this"},{"type":"text","text":"data:image/png;base64,aW1hZ2U="}]}}`
+			msgs, err := w.ParseInput([]byte(line))
+			if err != nil || len(msgs) != 1 {
+				t.Fatalf("parse input = %v, %v", msgs, err)
+			}
+			m, ok := msgs[0].(*agent.UserInputMessage)
+			if !ok || m.Text != "describe this" || len(m.Images) != 1 || m.Images[0].MediaType != "image/png" || m.Images[0].Data != "aW1hZ2U=" {
+				t.Fatalf("parsed input = %+v", msgs[0])
+			}
+		})
+	})
+	t.Run("ParseMessage", func(t *testing.T) {
+		t.Parallel()
+		t.Run("recorded turn", func(t *testing.T) {
+			t.Parallel()
+			data, err := os.ReadFile("testdata/turn.ndjson")
+			if err != nil {
+				t.Fatal(err)
+			}
+			w := New("", nil).NewWire()
+			sc := bufio.NewScanner(bytes.NewReader(data))
+			var text string
+			var result *agent.ResultMessage
+			var all []agent.Message
+			for sc.Scan() {
+				msgs, err := w.ParseOutput(sc.Bytes())
+				if err != nil {
+					t.Fatal(err)
+				}
+				all = append(all, msgs...)
+				for _, msg := range msgs {
+					switch m := msg.(type) {
+					case *agent.InitMessage:
+						if m.SessionID != "session" || m.ReportedModel != "gemini-3.8-flash-low" {
+							t.Fatalf("init = %+v", m)
+						}
+					case *agent.TextDeltaMessage:
+						text += m.Text
+					case *agent.ResultMessage:
+						result = m
+					}
+				}
+			}
+			if err := sc.Err(); err != nil {
+				t.Fatal(err)
+			}
+			if text != "OK.\n" || result == nil || result.IsError || result.Result != text || result.Usage.InputTokens != 12260 || result.Usage.ReasoningOutputTokens != 38 {
+				t.Fatalf("text = %q, result = %+v", text, result)
+			}
+			if got := agenttest.TurnBoundaries(all); got != "SR" {
+				t.Errorf("boundaries = %q, want %q", got, "SR")
+			}
+		})
+		t.Run("prompt during a turn", func(t *testing.T) {
+			t.Parallel()
+			// Trimmed and anonymized from a task log: agy started a turn for
+			// the prompt delivered during the first turn 29 ms after its result.
+			const (
+				first  = `{"event":"user","message":{"content":[{"type":"text","text":"Investigate image input."}]}}`
+				second = `{"event":"user","message":{"content":[{"type":"text","text":"Clone the client library if it helps."}]}}`
+				init   = `{"event":"init","conversation_id":"conv","init":{"model":"gemini-3.8-flash-high","cwd":"/src","tools":["view_file"]}}`
+				start  = `{"event":"step_update","step_update":{"conversation_id":"conv","step_index":0,"state":"DONE","step_type":"user_input"}}`
+				result = `{"event":"result","result":{"conversation_id":"conv","status":"SUCCESS","response":"Yes."}}`
+				next   = `{"event":"step_update","step_update":{"conversation_id":"conv","step_index":154,"state":"DONE","step_type":"user_input"}}`
+			)
+			w := New("", nil).NewWire()
+			var all []agent.Message
+			for i, line := range []string{first, init, start, second, result, next, result} {
+				parse := w.ParseOutput
+				if line == first || line == second {
+					parse = w.ParseInput
+				}
+				msgs, err := parse([]byte(line))
+				if err != nil {
+					t.Fatalf("line %d: %v", i, err)
+				}
+				all = append(all, msgs...)
+			}
+			if got := agenttest.TurnBoundaries(all); got != "ISIQSR" {
+				t.Errorf("boundaries = %q, want %q", got, "ISIQSR")
+			}
+		})
+		t.Run("recorded cached usage and tool output", func(t *testing.T) {
+			t.Parallel()
+			// Session IDs and workspace paths are sanitized in this recording.
+			// Retain native cached usage, command output, task
+			// status, scheduling, streamed text, and conversation-wide result.
+			f, err := os.Open("testdata/cached-tools.ndjson")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := f.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			w := New("", nil).NewWire()
+			sc := bufio.NewScanner(f)
+			uses := make(map[string]string)
+			outputs := make(map[string]string)
+			var calls []agent.Usage
+			var result *agent.ResultMessage
+			var text strings.Builder
+			for sc.Scan() {
+				msgs, err := w.ParseOutput(sc.Bytes())
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, msg := range msgs {
+					switch m := msg.(type) {
+					case *agent.InitMessage:
+						if m.ReportedModel != "" || m.SessionID != "session" {
+							t.Fatalf("init = %+v, want unknown model", m)
+						}
+					case *agent.UsageMessage:
+						if m.ReportedModel != "" {
+							t.Fatalf("invented model: %q", m.ReportedModel)
+						}
+						if !m.PerCall {
+							t.Fatal("DONE-step usage must price as one API request")
+						}
+						calls = append(calls, m.Usage)
+					case *agent.ToolUseMessage:
+						uses[m.ToolUseID] = m.Name
+					case *agent.ToolOutputDeltaMessage:
+						if uses[m.ToolUseID] == "" {
+							t.Fatalf("output before invocation: %+v", m)
+						}
+						outputs[m.ToolUseID] += m.Delta
+					case *agent.ToolResultMessage:
+						if m.Error != "" {
+							t.Fatalf("output text invented a native error: %+v", m)
+						}
+						if outputs[m.ToolUseID] == "" {
+							t.Fatalf("completion lost output: %+v", m)
+						}
+					case *agent.TextDeltaMessage:
+						text.WriteString(m.Text)
+					case *agent.ResultMessage:
+						result = m
+					}
+				}
+			}
+			if err := sc.Err(); err != nil {
+				t.Fatal(err)
+			}
+			if len(calls) != 2 || calls[0].InputTokens != 3157 || calls[0].CacheReadInputTokens != 16275 {
+				t.Fatalf("cached usage = %+v", calls)
+			}
+			if result == nil || result.IsError || result.Usage.InputTokens != 7897 || result.Usage.CacheReadInputTokens != 191461 || result.Usage.OutputTokens != 1127 || result.Usage.ReasoningOutputTokens != 452 {
+				t.Fatalf("turn result = %+v", result)
+			}
+			if len(uses) != 4 || len(outputs) != 4 || !strings.Contains(outputs["session:12"], "undefined: typesafe.Questions") || !strings.Contains(outputs["session:160"], "Status: RUNNING") || !strings.Contains(outputs["session:162"], "Timer cancelled early") {
+				t.Fatalf("tool output lost: uses=%v outputs=%v", uses, outputs)
+			}
+			if !strings.Contains(text.String(), "Updated `github.com/maruel/genai`") || !strings.Contains(text.String(), "make verify") {
+				t.Fatalf("streamed text lost: %q", text.String())
+			}
+		})
+		t.Run("turn usage and tool correlation", func(t *testing.T) {
+			t.Parallel()
+			w := New("", nil).NewWire()
+			lines := []string{
+				`{"event":"step_update","step_update":{"conversation_id":"s","step_index":2,"state":"ACTIVE","step_type":"tool","tool_name":"view_file","tool_info":{"parameters":{"path":"README.md"}}}}`,
+				`{"event":"step_update","step_update":{"conversation_id":"s","step_index":2,"state":"ACTIVE","step_type":"tool","tool_name":"view_file"}}`,
+				`{"event":"step_update","step_update":{"conversation_id":"s","step_index":2,"state":"DONE","step_type":"tool","duration_seconds":0.25,"tool_info":{"error":{"type":"error","message":"not found"}}}}`,
+				`{"event":"step_update","step_update":{"conversation_id":"s","step_index":3,"state":"DONE","step_type":"agent_response","text_delta":"answer","usage":{"input_tokens":100,"cache_read_tokens":60,"output_tokens":20,"thinking_tokens":10}}}`,
+				`{"event":"step_update","step_update":{"conversation_id":"s","step_index":3,"state":"DONE","step_type":"agent_response","usage":{"input_tokens":100,"output_tokens":20}}}`,
+				`{"event":"result","result":{"conversation_id":"s","status":"SUCCESS","usage":{"input_tokens":5000,"output_tokens":4000},"duration_seconds":30,"num_turns":5}}`,
+				`{"event":"result","result":{"conversation_id":"s","status":"ERROR","error":"quota exhausted","usage":{"input_tokens":5000,"output_tokens":4000}}}`,
+			}
+			var uses []*agent.ToolUseMessage
+			var results []*agent.ToolResultMessage
+			var turns []*agent.ResultMessage
+			for _, line := range lines {
+				msgs, err := w.ParseOutput([]byte(line))
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, msg := range msgs {
+					switch m := msg.(type) {
+					case *agent.ToolUseMessage:
+						uses = append(uses, m)
+					case *agent.ToolResultMessage:
+						results = append(results, m)
+					case *agent.ResultMessage:
+						turns = append(turns, m)
+					}
+				}
+			}
+			if len(uses) != 1 || len(results) != 1 || uses[0].ToolUseID != results[0].ToolUseID || results[0].DurationMs != 250 || results[0].Error != "not found" {
+				t.Fatalf("tools = %+v, results = %+v", uses, results)
+			}
+			if len(turns) != 2 || turns[0].Usage.InputTokens != 100 || turns[0].Usage.CacheReadInputTokens != 60 || turns[0].Usage.OutputTokens != 20 || turns[0].DurationMs != 0 || turns[0].NumTurns != 0 {
+				t.Fatalf("turns = %+v", turns)
+			}
+			if !turns[1].IsError || !strings.Contains(turns[1].Result, "quota exhausted") || !turns[1].Usage.Equal(agent.Usage{}) {
+				t.Fatalf("second result = %+v", turns[1])
+			}
+		})
+		t.Run("tool output completes once", func(t *testing.T) {
+			t.Parallel()
+			w := New("", nil).NewWire()
+			line := []byte(`{"event":"step_update","step_update":{"conversation_id":"s","step_index":2,"state":"DONE","step_type":"tool","tool_name":"run_command","tool_info":{"output":"build failed\n","error":{"type":"error","message":"command failed"}}}}`)
+			msgs, err := w.ParseOutput(line)
+			if err != nil || len(msgs) != 3 {
+				t.Fatalf("completion = %v, %v", msgs, err)
+			}
+			use, ok := msgs[0].(*agent.ToolUseMessage)
+			if !ok {
+				t.Fatalf("first message = %T, want invocation", msgs[0])
+			}
+			out, ok := msgs[1].(*agent.ToolOutputDeltaMessage)
+			if !ok || out.ToolUseID != use.ToolUseID || out.Delta != "build failed\n" {
+				t.Fatalf("output = %+v", msgs[1])
+			}
+			result, ok := msgs[2].(*agent.ToolResultMessage)
+			if !ok || result.ToolUseID != use.ToolUseID || result.Error != "command failed" {
+				t.Fatalf("result = %+v", msgs[2])
+			}
+			if msgs, err := w.ParseOutput(line); err != nil || len(msgs) != 0 {
+				t.Fatalf("duplicate completion = %v, %v", msgs, err)
+			}
+		})
+		t.Run("failed tool ends in ERROR", func(t *testing.T) {
+			t.Parallel()
+			w := New("", nil).NewWire()
+			if _, err := w.ParseOutput([]byte(`{"event":"step_update","step_update":{"conversation_id":"s","step_index":69,"state":"ACTIVE","step_type":"tool","tool_name":"edit_file"}}`)); err != nil {
+				t.Fatal(err)
+			}
+			msgs, err := w.ParseOutput([]byte(`{"event":"step_update","step_update":{"conversation_id":"s","step_index":69,"state":"ERROR","step_type":"tool","tool_name":"edit_file","tool_info":{"name":"edit_file","error":{"type":"TOOL_ERROR","message":"target content not found"}}}}`))
+			if err != nil || len(msgs) != 1 {
+				t.Fatalf("failure = %v, %v", msgs, err)
+			}
+			if result, ok := msgs[0].(*agent.ToolResultMessage); !ok || result.Error != "target content not found" {
+				t.Fatalf("result = %+v", msgs[0])
+			}
+		})
+		t.Run("response finalization preserves tool order", func(t *testing.T) {
+			t.Parallel()
+			w := New("", nil).NewWire()
+			lines := []string{
+				`{"event":"step_update","step_update":{"step_index":1,"state":"ACTIVE","step_type":"agent_response","text_delta":"Before."}}`,
+				`{"event":"step_update","step_update":{"step_index":1,"state":"DONE","step_type":"agent_response","usage":{"input_tokens":10}}}`,
+				`{"event":"step_update","step_update":{"step_index":2,"state":"DONE","step_type":"tool","tool_name":"view_file"}}`,
+				`{"event":"step_update","step_update":{"step_index":3,"state":"DONE","step_type":"agent_response","text_delta":"After."}}`,
+				`{"event":"result","result":{"status":"SUCCESS","response":"Before.After."}}`,
+			}
+			var types, texts []string
+			for _, line := range lines {
+				msgs, err := w.ParseOutput([]byte(line))
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, msg := range msgs {
+					types = append(types, msg.Type())
+					if m, ok := msg.(*agent.TextMessage); ok {
+						texts = append(texts, m.Text)
+					}
+				}
+			}
+			want := []string{"text_delta", "text", "usage", "tool_use", "tool_result", "text_delta", "text", "result"}
+			if !reflect.DeepEqual(types, want) || !reflect.DeepEqual(texts, []string{"Before.", "After."}) {
+				t.Fatalf("types=%q texts=%q", types, texts)
+			}
+		})
+		t.Run("response fallback", func(t *testing.T) {
+			t.Parallel()
+			msgs, err := New("", nil).NewWire().ParseOutput([]byte(`{"event":"result","result":{"status":"SUCCESS","response":"answer"}}`))
+			if err != nil || len(msgs) != 2 || msgs[0].Type() != "text" || msgs[1].Type() != "result" {
+				t.Fatalf("fallback = %v, %v", msgs, err)
+			}
+		})
+		t.Run("independent state", func(t *testing.T) {
+			t.Parallel()
+			b := New("", nil)
+			first, second := b.NewWire(), b.NewWire()
+			if _, err := first.ParseOutput([]byte(`{"event":"step_update","step_update":{"state":"DONE","step_type":"agent_response","usage":{"input_tokens":123}}}`)); err != nil {
+				t.Fatal(err)
+			}
+			msgs, err := second.ParseOutput([]byte(`{"event":"result","result":{"status":"SUCCESS"}}`))
+			if err != nil || len(msgs) != 1 {
+				t.Fatalf("fresh result = %v, %v", msgs, err)
+			}
+			if m, ok := msgs[0].(*agent.ResultMessage); !ok || !m.Usage.Equal(agent.Usage{}) {
+				t.Fatalf("fresh result = %v", msgs)
+			}
+		})
+		t.Run("errors and forward fields", func(t *testing.T) {
+			t.Parallel()
+			w := New("", nil).NewWire()
+			for _, line := range []string{`{`, `{"event":"user","message":{"content":[{"type":"image"}]}}`} {
+				if _, err := w.ParseInput([]byte(line)); err == nil {
+					t.Fatalf("accepted %s", line)
+				}
+			}
+			if _, err := w.ParseOutput([]byte(`{"event":"init","future":true}`)); err != nil {
+				t.Fatal(err)
+			}
+		})
+	})
+}

@@ -25,14 +25,15 @@ changes.
 ## Harness Version
 
 Each process start records the running harness version. Claude Code
-(`system/init`), Codex (the `initialize` response's `userAgent`), and OpenCode
-(ACP `agentInfo.version`) report it natively. Pi and agy report none, and dsh's
-`agentInfo.version` is a fixed `0.0.1`; their backends call
+(`system/init`), Codex (the `initialize` response's `userAgent`), agy, and
+OpenCode (ACP `agentInfo.version`) report it natively. Pi reports none, and
+dsh's `agentInfo.version` is a fixed `0.0.1`; their backends call
 `agent.RecordVersion` before launch.
 
 ## Harness-Specific Evidence
 
 Keep provider wire fields, native subagent evidence, skill-read tools, and
 unexposed protocol capabilities in the relevant harness's `AGENTS.md`, beside
-the parser and provider DTOs: `claudecode/`, `codex/`, `dsh/`, `opencode/`, or `pi/`.
-Shared ACP mechanics belong in `acp/`; keep both ACP harness packages independent.
+the parser and provider DTOs: `antigravity/`, `claudecode/`, `codex/`, `dsh/`,
+`opencode/`, or `pi/`. Shared ACP mechanics belong in `acp/`; keep each ACP
+harness package independent.

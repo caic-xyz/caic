@@ -1,4 +1,4 @@
-// Tests ordered ACP metadata and accounting parity without persisted session controls.
+// Tests ordered ACP metadata, compaction boundaries, and accounting parity without persisted session controls.
 
 package acp
 
@@ -203,6 +203,66 @@ func TestMetadataParser(t *testing.T) {
 				}
 				if got.AgentVersion != "0.2.2-rc.1" {
 					t.Fatalf("version = %q, want the probed 0.2.2-rc.1", got.AgentVersion)
+				}
+			})
+		}
+	})
+	t.Run("CompactionBoundary", func(t *testing.T) {
+		t.Parallel()
+		const (
+			compact   = `{"type":"text","text":"/compact"}`
+			completed = `{"id":3,"result":{"stopReason":"end_turn","usage":{"inputTokens":2951,"outputTokens":299,"cachedReadTokens":14879}}}`
+		)
+		for _, tc := range []struct {
+			name, prompt, response string
+			boundary               bool
+		}{
+			{"completed", compact, completed, true},
+			{"cancelled", compact, `{"id":3,"result":{"stopReason":"cancelled"}}`, false},
+			{"failed", compact, `{"id":3,"error":{"code":-32603,"message":"compaction failed"}}`, false},
+			// "/compact <message>" compacts in agy, but caic never sends it.
+			{"trailing text", `{"type":"text","text":"/compact now"}`, completed, false},
+			{"extra block", compact + `,{"type":"text","text":"now"}`, completed, false},
+			{"other prompt", `{"type":"text","text":"hi"}`, completed, false},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				for name, parser := range map[string]agent.MessageParser{"full": testBackend().NewWire(), "metadata": testBackend().NewMetadataParser()} {
+					t.Run(name, func(t *testing.T) {
+						t.Parallel()
+						var meter agent.ContextMeter
+						var boundaries int
+						var last agent.Message
+						observe := func(msgs []agent.Message, err error) {
+							if err != nil {
+								t.Fatal(err)
+							}
+							for _, m := range msgs {
+								meter.Observe(m, "s")
+								if s, ok := m.(*agent.SystemMessage); ok && s.Subtype == agent.SystemSubtypeCompactBoundary {
+									boundaries++
+									if _, ok := last.(*agent.ResultMessage); ok || s.ContextTokensAfter != 0 {
+										t.Fatalf("boundary %+v follows %T", s, last)
+									}
+								}
+								last = m
+							}
+						}
+						observe(parser.ParseInput([]byte(`{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"s","prompt":[` + tc.prompt + `]}}`)))
+						// agy reports the summarization request's occupancy.
+						observe(parser.ParseOutput([]byte(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"usage_update","used":18129,"size":1048576}}}`)))
+						observe(parser.ParseOutput([]byte(tc.response)))
+						if _, ok := last.(*agent.ResultMessage); !ok {
+							t.Fatalf("last message = %#v, want the result", last)
+						}
+						want, wantTokens := 0, 18129
+						if tc.boundary {
+							want, wantTokens = 1, 0
+						}
+						if boundaries != want || meter.Tokens() != wantTokens {
+							t.Fatalf("boundaries = %d, context = %d; want %d, %d", boundaries, meter.Tokens(), want, wantTokens)
+						}
+					})
 				}
 			})
 		}

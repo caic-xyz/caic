@@ -1,9 +1,12 @@
-// Tests reported and estimated turn costs across task and compaction boundaries.
+// Tests reported and estimated turn costs across task and compaction boundaries, including recorded agy compaction.
 
 package task
 
 import (
+	"bytes"
 	"math"
+	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +16,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/tokens"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/antigravity"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 )
@@ -66,6 +70,85 @@ func TestCostTracker(t *testing.T) {
 			cost, ok := c.Observe(&agent.ResultMessage{Usage: agent.Usage{InputTokens: 5_000_000, OutputTokens: 5_000_000}}, at, pricer)
 			if !ok || cost.Source != CostEstimated || math.Abs(cost.USD-4.5) > 1e-9 {
 				t.Fatalf("cost = %+v/%v, want 4.5", cost, ok)
+			}
+		})
+
+		t.Run("AntigravityACPResultPricesAtBaseRates", func(t *testing.T) {
+			t.Parallel()
+			c := CostTracker{Harness: harness.Antigravity, Model: "gemini-3.8-flash"}
+			pricer := usage.NewPricer(nil)
+			// usage_update reports context occupancy only.
+			c.Observe(&agent.UsageMessage{ModelDerived: true}, at, pricer)
+			cost, ok := c.Observe(&agent.ResultMessage{Usage: agent.Usage{InputTokens: 1_000_000, OutputTokens: 1_000_000}}, at, pricer)
+			if !ok || cost.Source != CostEstimated || math.Abs(cost.USD-4.5) > 1e-9 {
+				t.Fatalf("cost = %+v/%v, want 4.5", cost, ok)
+			}
+		})
+
+		t.Run("AntigravityCompactionRecording", func(t *testing.T) {
+			t.Parallel()
+			// agy's /compact prompt result reports its summarization call;
+			// every prompt result prices its own turn once.
+			data, err := os.ReadFile("../agent/antigravity/testdata/compact.jsonl")
+			if err != nil {
+				t.Fatal(err)
+			}
+			parser, err := agent.NewLogRecordParser(antigravity.New("", nil).NewWire())
+			if err != nil {
+				t.Fatal(err)
+			}
+			c := CostTracker{Harness: harness.Antigravity}
+			pricer := fakePricer{"gemini-3.8-flash": {InputPerMTok: 1, CachedInputPerMTok: 0.1, OutputPerMTok: 10}}
+			var turns []float64
+			boundaries := 0
+			for i, line := range bytes.Split(bytes.TrimSpace(data), []byte{'\n'})[1:] {
+				record, err := parser.ParseRecord(line)
+				if err != nil {
+					t.Fatalf("record %d: %v", i+2, err)
+				}
+				for _, m := range record.Messages {
+					if s, ok := m.Message.(*agent.SystemMessage); ok && s.Subtype == agent.SystemSubtypeCompactBoundary {
+						boundaries++
+					}
+					if cost, ok := c.Observe(m.Message, at, pricer); ok {
+						turns = append(turns, cost.USD)
+					}
+				}
+			}
+			// First prompt, /compact, then the recall prompt after the
+			// compaction boundary.
+			want := []float64{0.0182773, 0.0074289, 0.009179}
+			if boundaries != 1 || len(turns) != len(want) || math.Abs(c.TotalUSD-0.0348852) > 1e-9 || !c.Complete() {
+				t.Fatalf("boundaries = %d, turns = %v, total = %v, complete = %v; want %v", boundaries, turns, c.TotalUSD, c.Complete(), want)
+			}
+			for i := range want {
+				if math.Abs(turns[i]-want[i]) > 1e-9 {
+					t.Fatalf("turns = %v, want %v", turns, want)
+				}
+			}
+		})
+
+		t.Run("ACPCompactionBoundaryKeepsTurnCosts", func(t *testing.T) {
+			t.Parallel()
+			// Shared ACP puts the boundary before the /compact result; each
+			// result still prices only its own turn.
+			pricer := fakePricer{"m": {InputPerMTok: 1}}
+			for _, h := range []harness.Name{harness.Antigravity, harness.OpenCode} {
+				c := CostTracker{Harness: h, Model: "m"}
+				var turns []float64
+				for _, m := range []agent.Message{
+					&agent.ResultMessage{Usage: agent.Usage{InputTokens: 1_000_000}},
+					&agent.SystemMessage{Subtype: agent.SystemSubtypeCompactBoundary},
+					&agent.ResultMessage{Usage: agent.Usage{InputTokens: 2_000_000}},
+					&agent.ResultMessage{Usage: agent.Usage{InputTokens: 4_000_000}},
+				} {
+					if cost, ok := c.Observe(m, at, pricer); ok {
+						turns = append(turns, cost.USD)
+					}
+				}
+				if want := []float64{1, 2, 4}; !reflect.DeepEqual(turns, want) || c.TotalUSD != 7 || !c.Complete() {
+					t.Fatalf("%s: turns = %v, total = %v, complete = %v; want %v", h, turns, c.TotalUSD, c.Complete(), want)
+				}
 			}
 		})
 

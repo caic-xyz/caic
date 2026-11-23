@@ -1,4 +1,4 @@
-// Directional ACP metadata tracks payload-free turn activity, native requests, session settings, and accounting.
+// Directional ACP metadata tracks payload-free turn activity, native requests, session settings, compaction boundaries, and accounting.
 
 package acp
 
@@ -17,6 +17,8 @@ import (
 type pendingRequest struct {
 	method    acp.Method
 	sessionID string
+	// compact marks a session/prompt that sends exactly Config.CompactPrompt.
+	compact bool
 }
 
 // metadataState is the shared response owner for transport and metadata-only replay.
@@ -60,7 +62,13 @@ func (w *metadataState) ParseInput(line []byte) ([]agent.Message, error) {
 		if len(w.requests) == 1024 {
 			return nil, errors.New("too many pending ACP metadata requests")
 		}
-		w.requests[id] = pendingRequest{method: method, sessionID: sid}
+		request := pendingRequest{method: method, sessionID: sid}
+		if method == acp.MethodSessionPrompt {
+			if request.compact, err = compactPrompt(probe.Params, w.config.CompactPrompt); err != nil {
+				return nil, err
+			}
+		}
+		w.requests[id] = request
 		if method == acp.MethodSessionPrompt && (sid == "" || w.session.SessionID == "" || sid == w.session.SessionID) {
 			// Preserve the prompt's producer-time boundary without decoding or
 			// retaining its text, images, or embedded resources.
@@ -95,6 +103,18 @@ func (w *metadataState) ParseOutput(line []byte) ([]agent.Message, error) {
 	}
 }
 
+// promptPending reports whether a session/prompt awaits its response.
+func (w *metadataState) promptPending() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, r := range w.requests {
+		if r.method == acp.MethodSessionPrompt {
+			return true
+		}
+	}
+	return false
+}
+
 func (w *metadataState) parseOutput(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, bool, error) {
 	if probe.ID != nil && string(probe.ID) != "null" && probe.Method == "" {
 		var id int64
@@ -114,6 +134,14 @@ func (w *metadataState) parseOutput(line []byte, probe *agent.JSONRPCEnvelope) (
 			result, err := promptResult(line)
 			if err != nil {
 				return nil, true, err
+			}
+			if request.compact && !result.IsError {
+				// ACP reports no compaction boundary. A completed compaction
+				// prompt replaced the context, so the boundary precedes the
+				// turn's result, as Claude, Codex, and Pi report it. The
+				// prompt's usage_update measured the summarization request, so
+				// the boundary leaves the resulting size unknown.
+				return []agent.Message{&agent.SystemMessage{MessageType: "system", Subtype: agent.SystemSubtypeCompactBoundary}, result}, true, nil
 			}
 			return []agent.Message{result}, true, nil
 		}
@@ -343,6 +371,25 @@ func usageUpdate(update []byte) ([]agent.Message, error) {
 		}
 	}
 	return []agent.Message{usage}, nil
+}
+
+// compactPrompt reports whether session/prompt params send exactly the
+// configured compaction command as one text block. An empty command matches
+// nothing.
+func compactPrompt(params []byte, command string) (bool, error) {
+	if command == "" {
+		return false, nil
+	}
+	second, err := agent.JSONField(params, "prompt", "[1]")
+	if err != nil || second != nil {
+		return false, err
+	}
+	typ, err := agent.JSONString(params, "prompt", "[0]", "type")
+	if err != nil || acp.ContentType(typ) != acp.ContentText {
+		return false, err
+	}
+	text, err := agent.JSONString(params, "prompt", "[0]", "text")
+	return text == command, err
 }
 
 func promptResult(line []byte) (*agent.ResultMessage, error) {

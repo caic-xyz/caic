@@ -411,7 +411,7 @@ def test_harness_without_caic_mcp() -> None:
             messages = [record["msg"] for record in records if record["t"] == "agent"]
             assert len(messages) == 1, (result.stdout, result.stderr)
             assert messages[0]["args"] == []
-            assert not any(name.startswith("caic-mcp") or name == "antigravity-mcp" for name in messages[0]["files"])
+            assert not any(name.startswith("caic-mcp") for name in messages[0]["files"])
         result = subprocess.run(
             [sys.executable, str(RELAY_PY), "serve-attach", "--dir", root, "--caic-mcp", "--", "true"],
             capture_output=True,
@@ -1065,95 +1065,6 @@ def test_start_failure_before_handshake() -> None:
                 proc.wait(timeout=5)
 
 
-def test_antigravity_mcp_lifecycle() -> None:
-    """Auxiliary plugins preserve HOME/worktrees and are removed on exit/retry."""
-    with tempfile.TemporaryDirectory(prefix="caic-agy-mcp-test-") as root:
-        root = os.path.realpath(root)
-        relay_dir = os.path.join(root, "relay")
-        work_dir = os.path.join(root, "work")
-        home = os.path.join(root, "home")
-        os.makedirs(work_dir)
-        os.makedirs(os.path.join(home, ".gemini", "config"))
-        settings = Path(home, ".gemini", "config", "mcp_config.json")
-        settings.write_text("user settings must survive", encoding="utf-8")
-        env = {**_make_env(relay_dir), "HOME": home}
-        auxiliary = Path(relay_dir, "antigravity-mcp")
-        names = []
-        for fail in (False, True, False):
-            command = (
-                ["caic-test-missing-executable"]
-                if fail
-                else [
-                    sys.executable,
-                    "-u",
-                    "-c",
-                    "import json, os, sys; "
-                    "data = dict(home=os.environ['HOME'], cwd=os.getcwd(), args=sys.argv[1:]); "
-                    "print(json.dumps(data), flush=True); sys.stdin.read()",
-                ]
-            )
-            proc = subprocess.Popen(
-                [
-                    sys.executable,
-                    str(RELAY_PY),
-                    "serve-attach",
-                    "--dir",
-                    work_dir,
-                    "--harness",
-                    "antigravity",
-                    "--caic-mcp",
-                    "--",
-                    *command,
-                ],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                env=env,
-            )
-            try:
-                if fail:
-                    # stdin EOF detaches the client; wait for the daemon's
-                    # terminal output before communicate closes stdin.
-                    out = _read_stdout_to_eof(proc, timeout=10)
-                    _, err = proc.communicate(timeout=10)
-                    records = _decode_records(out)
-                    exits = [record for record in records if record["t"] == "exit"]
-                    assert exits and exits[0]["exit_code"] != 0, (out, err)
-                else:
-                    assert proc.stdout is not None
-                    while True:
-                        record = json.loads(proc.stdout.readline())
-                        if record["t"] == "agent":
-                            break
-                    assert record["msg"] == {"home": home, "cwd": work_dir, "args": ["--add-dir", str(auxiliary)]}
-                    plugins = list((auxiliary / ".agents" / "plugins").iterdir())
-                    assert len(plugins) == 1
-                    plugin = plugins[0]
-                    names.append(plugin.name)
-                    assert json.loads((plugin / "plugin.json").read_text())["name"] == plugin.name
-                    config = json.loads((plugin / "mcp_config.json").read_text())
-                    assert config["mcpServers"]["caic"] == {
-                        "command": "python3",
-                        "args": [str(RELAY_PY), "caic-mcp"],
-                        "env": {"CAIC_RELAY_DIR": relay_dir},
-                    }
-                    assert auxiliary.stat().st_mode & 0o777 == 0o700
-                    assert (plugin / "mcp_config.json").stat().st_mode & 0o777 == 0o600
-                    assert not list(Path(work_dir).iterdir())
-                    assert settings.read_text() == "user settings must survive"
-                    proc.communicate(b"\x00\n", timeout=15)
-                deadline = time.monotonic() + 5
-                while auxiliary.exists() or os.path.exists(os.path.join(relay_dir, "caic-mcp.sock")):
-                    assert time.monotonic() < deadline, "task MCP config/access survived teardown"
-                    time.sleep(0.02)
-                assert settings.read_text() == "user settings must survive"
-            finally:
-                if proc.poll() is None:
-                    proc.kill()
-                    proc.wait(timeout=5)
-        assert len(set(names)) == 2, "retry reused a shared schema-cache namespace"
-
-
 def test_caic_mcp_stdio_errors() -> None:
     """Unknown requests receive protocol errors; bad JSON does not kill retries."""
     messages = [
@@ -1251,7 +1162,6 @@ def main() -> int:
         test_caic_mcp_stdio_server,
         test_caic_mcp_stdio_errors,
         test_start_failure_before_handshake,
-        test_antigravity_mcp_lifecycle,
         test_parse_numstat,
     )
     failed: list[str] = []

@@ -27,6 +27,7 @@ func TestSkillFromPath(t *testing.T) {
 			{name: "agents root", in: "/home/user/.agents/skills/code-quality/SKILL.md", want: "code-quality"},
 			{name: "tilde", in: "~/.agents/skills/go-code-quality/SKILL.md", want: "go-code-quality"},
 			{name: "claude root", in: "/home/user/.claude/skills/review/SKILL.md", want: "review"},
+			{name: "agy root", in: "/home/user/.gemini/antigravity-cli/skills/code-quality/SKILL.md", want: "code-quality"},
 			{name: "codex plugin cache", in: "/home/user/.codex/plugins/cache/openai-curated-remote/data-analytics/0.2.35-13ceeea1f599/skills/index/SKILL.md", want: "index"},
 			{name: "pi extension", in: "/home/user/.pi/agent/npm/node_modules/pi-subagents/skills/pi-subagents/SKILL.md", want: "pi-subagents"},
 			{name: "opencode home config", in: "/home/user/.config/opencode/skills/customize-opencode/SKILL.md", want: "customize-opencode"},

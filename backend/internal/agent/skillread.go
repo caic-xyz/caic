@@ -16,8 +16,9 @@ const (
 	// skillRootDir matches a directory a harness scans for installed skills.
 	// OpenCode reads ~/.claude and ~/.agents like Claude Code, and adds its
 	// own config directories: ~/.config/opencode, ~/.opencode, and any
-	// .opencode between the working directory and the worktree root.
-	skillRootDir = `(?:\.(?:agents|claude|codex|opencode|pi)|\.config/opencode)`
+	// .opencode between the working directory and the worktree root. agy
+	// reads ~/.gemini/antigravity-cli/skills.
+	skillRootDir = `(?:\.(?:agents|claude|codex|gemini|opencode|pi)|\.config/opencode)`
 	// pathChar accepts literal file paths, including spaces. Shell operands
 	// are unquoted before matching.
 	pathChar = "[^\"'`]"

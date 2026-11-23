@@ -230,6 +230,23 @@ func (b *Backend) handshake(ctx context.Context, stdin io.Writer, stdout *bufio.
 		}
 	}
 
+	if b.Config.AuthMethod != "" {
+		if !slices.ContainsFunc(initResult.AuthMethods, func(m acp.AuthMethod) bool { return m.ID == b.Config.AuthMethod }) {
+			return nil, nil, fmt.Errorf("agent does not advertise auth method %q", b.Config.AuthMethod)
+		}
+		params, err := marshalParams(acp.AuthenticateParams{MethodID: b.Config.AuthMethod})
+		if err != nil {
+			return nil, nil, fmt.Errorf("marshal authenticate params: %w", err)
+		}
+		req := acp.JSONRPCRequest{JSONRPC: "2.0", ID: res.allocID(), Method: acp.MethodAuthenticate, Params: params}
+		if err := writeJSONInput(ctx, stdin, req, opts.Records); err != nil {
+			return nil, nil, fmt.Errorf("write authenticate: %w", err)
+		}
+		if _, err := readJSONRPCResponse(ctx, records, req.ID, handleMCP, handleAgent); err != nil {
+			return nil, nil, fmt.Errorf("authenticate %s: %w", b.Config.AuthMethod, err)
+		}
+	}
+
 	// 2. Create or resume session. Use ACP's native MCP registration so user
 	// configuration, including inline JSONC, stays untouched.
 	servers := []acp.MCPServer{}
@@ -490,7 +507,8 @@ func (w *wireFormat) ParseInput(line []byte) ([]agent.Message, error) {
 // ParseOutput wraps the package-level parseMessage with interceptions:
 //
 //   - native permission requests → preserves controls for the connection interceptor.
-//   - prompt responses → emits final Text/Thinking messages and ResultMessage.
+//   - prompt responses → emits final Text/Thinking messages, a compaction
+//     boundary for a completed CompactPrompt, and ResultMessage.
 //
 // It also captures the session ID from InitMessage if present.
 func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
@@ -529,8 +547,8 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 	}
 	if handled {
 		if len(metadata) > 0 {
-			if result, ok := metadata[0].(*agent.ResultMessage); ok {
-				return w.finishPrompt(line, result)
+			if _, ok := metadata[len(metadata)-1].(*agent.ResultMessage); ok {
+				return w.finishPrompt(line, metadata)
 			}
 		}
 		return metadata, nil
@@ -542,6 +560,15 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 	msgs, toolCall, err := parseMessage(line, &probe)
 	if err != nil {
 		return nil, err
+	}
+	if w.promptPending() {
+		// agy echoes the running prompt as user_message_chunk; the recorded
+		// session/prompt input already carries it. Replayed history arrives
+		// outside a prompt.
+		msgs = slices.DeleteFunc(msgs, func(m agent.Message) bool {
+			_, ok := m.(*agent.UserInputMessage)
+			return ok
+		})
 	}
 	if w.tools != nil {
 		msgs, err = w.tools.Parse(toolCall, msgs)
@@ -619,8 +646,9 @@ func (w *wireFormat) allocIDLocked() int64 {
 }
 
 // finishPrompt emits consolidated output and the evidence the prompt response
-// settles before the normalized terminal report.
-func (w *wireFormat) finishPrompt(line []byte, rm *agent.ResultMessage) ([]agent.Message, error) {
+// settles before the response's messages: a compaction boundary, if any, then
+// the normalized terminal report.
+func (w *wireFormat) finishPrompt(line []byte, response []agent.Message) ([]agent.Message, error) {
 	var settled []agent.Message
 	if w.tools != nil {
 		// promptResult already validated the response shape.
@@ -649,7 +677,7 @@ func (w *wireFormat) finishPrompt(line []byte, rm *agent.ResultMessage) ([]agent
 	clear(w.skillReadCalls)
 	w.mu.Unlock()
 	msgs = append(msgs, settled...)
-	msgs = append(msgs, rm)
+	msgs = append(msgs, response...)
 	return msgs, nil
 }
 

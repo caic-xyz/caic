@@ -8077,6 +8077,7 @@ func TestCanRecoverImportedTask(t *testing.T) {
 		{name: "missing_session", accepted: true, harness: harness.Pi},
 		{name: "unaccepted_input", session: "saved", harness: harness.Pi},
 		{name: "agent_exit", session: "saved", accepted: true, exit: true, harness: harness.Pi, want: true},
+		{name: "antigravity_active", session: "saved", accepted: true, harness: harness.Antigravity, want: true},
 		{name: "dsh_active", session: "saved", accepted: true, harness: harness.Dsh, want: true},
 		{name: "other_harness", state: task.StateFailed, err: "revive instance: missing branch", session: "saved", accepted: true, harness: harness.Codex, want: true},
 		{name: "unknown_harness", session: "saved", accepted: true, harness: "unknown"},

@@ -203,6 +203,18 @@ func (c *CostTracker) Observe(msg agent.Message, at time.Time, pricer usage.Mode
 				if c.pendingTurnSource == "" && !m.Usage.Equal(agent.Usage{}) {
 					c.priceUsage(m.Usage, at, pricer)
 				}
+			case harness.Antigravity:
+				// ACP prompt results carry the turn's aggregate tokens, and a
+				// /compact result its summarization call; price them at base
+				// rates. Stream-json results repeat DONE-step
+				// usage that its per-call UsageMessages already priced.
+				if c.pricedUsage.Equal(agent.Usage{}) && !m.Usage.Equal(agent.Usage{}) {
+					if !c.priceUsage(m.Usage, at, pricer) {
+						c.applyResultReport(m.TotalCostUSD)
+					}
+				} else if c.sessionPricedUSD == 0 {
+					c.applyResultReport(m.TotalCostUSD)
+				}
 			case harness.Dsh:
 				// DSH ACP prompt results carry aggregate prompt tokens. Price them
 				// at base rates when the harness reports them; context occupancy is

@@ -87,7 +87,11 @@ func checkMessage(path string, line int, harness string, message []byte, input b
 	var dto, hint string
 	switch harness {
 	case "antigravity":
-		if input {
+		// agy runs in ACP mode; earlier tasks recorded stream-json.
+		if v, probeErr := agent.JSONField(message, "jsonrpc"); probeErr == nil && v != nil {
+			dto, err = checkOpenCode(message, input, openCodeRequests)
+			hint = "update: ~/src/genai/acp/dto.go"
+		} else if input {
 			// caic's record, unlike the genai DTO, has no lenient custom unmarshaler.
 			dto = "InputMessage"
 			hint = "update: backend/internal/agent/antigravity/data/prompt.go"

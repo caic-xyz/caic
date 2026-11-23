@@ -183,8 +183,9 @@ func TestAnswerClaudeControlRequest(t *testing.T) {
 }
 
 // TestValidateGoldenRecording pins the recorder's evidence check: a scenario that
-// must delegate is rejected when its recording carries no native subagent
-// observation, while a scenario that does not delegate accepts one.
+// must delegate is rejected when its recording carries neither a native subagent
+// observation nor the harness's unmapped delegation call, while a scenario that
+// does not delegate accepts one.
 func TestValidateGoldenRecording(t *testing.T) {
 	t.Parallel()
 	claude, ok := backends[string(harness.Claude)]
@@ -213,6 +214,22 @@ func TestValidateGoldenRecording(t *testing.T) {
 		err := validateGoldenRecording("recording.jsonl", record(header, unrelated, footer), claude, true)
 		if err == nil || !strings.Contains(err.Error(), "no native subagent activity") {
 			t.Fatalf("validateGoldenRecording = %v, want a missing-delegation failure", err)
+		}
+	})
+	t.Run("UnmappedDelegation", func(t *testing.T) {
+		t.Parallel()
+		agy, ok := backends[string(harness.Antigravity)]
+		if !ok {
+			t.Fatalf("no %s backend registered", harness.Antigravity)
+		}
+		// Minimized from the agy 1.5.14 native-subagent-joke recording.
+		const spawn = `{"t":"agent","ts":1.000,"msg":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"c1","name":"invoke_subagent","status":"in_progress","kind":"other","title":"Run invoke_subagent","rawInput":{"Prompt":"Tell a joke about README.md","Role":"Comedian"}}}}}`
+		const read = `{"t":"agent","ts":1.000,"msg":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"c1","name":"read_file","status":"in_progress","kind":"read","title":"File README.md","rawInput":{"Path":"/w/README.md"}}}}}`
+		if err := validateGoldenRecording("recording.jsonl", record(header, spawn, footer), agy, true); err != nil {
+			t.Fatalf("validateGoldenRecording = %v, want the spawn accepted", err)
+		}
+		if err := validateGoldenRecording("recording.jsonl", record(header, read, footer), agy, true); err == nil {
+			t.Fatal("validateGoldenRecording accepted a recording without the spawn")
 		}
 	})
 	t.Run("ScenarioWithoutNativeEvidence", func(t *testing.T) {

@@ -108,6 +108,26 @@ func TestParseMessage(t *testing.T) {
 		}
 	})
 
+	t.Run("ToolCallAnnouncedFailed", func(t *testing.T) {
+		t.Parallel()
+		// Minimized from an agy 1.5.14 read of a missing file: no
+		// tool_call_update follows this announcement.
+		input := []byte(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"tool_call","toolCallId":"call_1","status":"failed","kind":"read","title":"File mcp.json","rawInput":{"Path":"/w/mcp.json"}}}}`)
+		msgs, err := parseTestMessage(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 2 {
+			t.Fatalf("msgs = %d, want 2", len(msgs))
+		}
+		if tu, ok := msgs[0].(*agent.ToolUseMessage); !ok || tu.ToolUseID != "call_1" || tu.Name != "Read" {
+			t.Fatalf("msgs[0] = %#v, want Read tool use call_1", msgs[0])
+		}
+		if tr, ok := msgs[1].(*agent.ToolResultMessage); !ok || tr.ToolUseID != "call_1" || tr.Error != "tool call failed" {
+			t.Fatalf("msgs[1] = %#v, want failed result call_1", msgs[1])
+		}
+	})
+
 	t.Run("ToolCallUpdateCompleted", func(t *testing.T) {
 		t.Parallel()
 		input := mustJSON(t, map[string]any{
@@ -1078,7 +1098,7 @@ func TestAddEditInputView(t *testing.T) {
 			Name:  "Edit",
 			Input: json.RawMessage(`{"filePath":"src/main.ts","oldString":"before","newString":"after"}`),
 		}
-		addEditInputView(use)
+		AddEditInputView(use)
 		if use.Detail != "main.ts" {
 			t.Fatalf("detail = %q, want main.ts", use.Detail)
 		}

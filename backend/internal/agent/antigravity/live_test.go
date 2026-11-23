@@ -29,7 +29,8 @@ import (
 )
 
 // TestLiveRelay spends subscription quota. CAIC_AGY_SSH names a disposable md
-// container with agy installed and authenticated. It must have no running relay.
+// container with agy installed. It must have no running relay, and must satisfy
+// liveHost.
 // The test owns /tmp/caic-relay and creates an isolated workspace. agy stores
 // conversation state in the container's ~/.gemini, which md mounts from the
 // host. CAIC_AGY_MODEL optionally selects a model.
@@ -38,10 +39,7 @@ import (
 //
 //nolint:paralleltest // The relay owns /tmp/caic-relay on the shared CAIC_AGY_SSH container.
 func TestLiveRelay(t *testing.T) {
-	host := os.Getenv("CAIC_AGY_SSH")
-	if host == "" {
-		t.Skip("set CAIC_AGY_SSH to an authenticated disposable md container")
-	}
+	host := liveHost(t)
 	// Keep SSH alive until cleanup sends the relay shutdown sentinel.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), 8*time.Minute)
 	t.Cleanup(cancel)
@@ -117,7 +115,7 @@ func TestLiveRelay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, tools := liveResult(t, ctx, session, ch)
+	first, tools := liveResult(t, ctx, session, ch, "")
 	if first.SessionID == "" || tools == 0 {
 		t.Fatalf("first turn: session ID=%q, completed tools=%d", first.SessionID, tools)
 	}
@@ -129,7 +127,7 @@ func TestLiveRelay(t *testing.T) {
 	if err := session.SendPrompt(agent.Prompt{Text: "Reply SECOND_OK. Do not use tools."}); err != nil {
 		t.Fatal(err)
 	}
-	second, tools := liveResult(t, ctx, session, ch)
+	second, tools := liveResult(t, ctx, session, ch, first.SessionID)
 	if tools != 0 || second.SessionID != first.SessionID || !strings.Contains(second.Result, "SECOND_OK") {
 		t.Fatalf("second turn: tools=%d, result=%+v", tools, second)
 	}
@@ -156,7 +154,7 @@ func TestLiveRelay(t *testing.T) {
 	if err := session.SendPrompt(agent.Prompt{Text: "What is the conversation-only token from the first turn? Reply with the token only. Do not use tools."}); err != nil {
 		t.Fatal(err)
 	}
-	third, tools := liveResult(t, ctx, session, ch)
+	third, tools := liveResult(t, ctx, session, ch, first.SessionID)
 	if tools != 0 || third.SessionID != first.SessionID || !strings.Contains(third.Result, nonce) {
 		t.Fatalf("reconnect lost conversation context: tools=%d, result=%+v", tools, third)
 	}
@@ -182,7 +180,7 @@ func TestLiveRelay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fourth, tools := liveResult(t, ctx, session, ch)
+	fourth, tools := liveResult(t, ctx, session, ch, "")
 	if tools != 0 || fourth.SessionID != first.SessionID || !strings.Contains(fourth.Result, nonce) {
 		t.Fatalf("resume lost conversation context: tools=%d, result=%+v", tools, fourth)
 	}
@@ -195,10 +193,7 @@ func TestLiveRelay(t *testing.T) {
 //
 //nolint:paralleltest // The relay owns /tmp/caic-relay on the shared CAIC_AGY_SSH container.
 func TestLiveTaskMCP(t *testing.T) {
-	host := os.Getenv("CAIC_AGY_SSH")
-	if host == "" {
-		t.Skip("set CAIC_AGY_SSH to an authenticated disposable md container")
-	}
+	host := liveHost(t)
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), 8*time.Minute)
 	t.Cleanup(cancel)
 	if alive, err := agent.IsRelayRunning(ctx, host); err != nil || alive {
@@ -270,13 +265,13 @@ func TestLiveTaskMCP(t *testing.T) {
 				Target: runtime.ConnectionTarget{SSHHost: host}, Dir: dir, Model: model, Records: records,
 				Logger: slog.Default(), MCP: registry,
 			}
-			opts.InitialPrompt.Text = "Call the current caic task MCP echo tool exactly once with empty arguments. Reply with its returned result only. Do not use shell or write files."
+			opts.InitialPrompt.Text = "Call the caic MCP echo tool exactly once. Reply with its returned result only. Do not run commands or read or write files."
 			registry.setToken()
 			session, err = b.Start(ctx, &opts)
 			if err != nil {
 				t.Fatal(err)
 			}
-			first, _ := liveResult(t, ctx, session, ch)
+			first, _ := liveResult(t, ctx, session, ch, "")
 			registry.verify(t, first, 1)
 			t.Log("initial task-scoped MCP call verified")
 			offset, err := agent.RelayOutputSize(ctx, host)
@@ -295,10 +290,10 @@ func TestLiveTaskMCP(t *testing.T) {
 				t.Fatal(err)
 			}
 			registry.setToken()
-			if err := session.SendPrompt(agent.Prompt{Text: "Call the current caic task MCP echo tool again exactly once, with empty arguments; return the fresh result only."}); err != nil {
+			if err := session.SendPrompt(agent.Prompt{Text: "Call the caic MCP echo tool again, exactly once. Reply with its fresh result only. Do not run commands or read or write files."}); err != nil {
 				t.Fatal(err)
 			}
-			second, _ := liveResult(t, ctx, session, ch)
+			second, _ := liveResult(t, ctx, session, ch, first.SessionID)
 			registry.verify(t, second, 2)
 			if second.SessionID != first.SessionID {
 				t.Fatal("MCP reconnect changed conversation")
@@ -318,13 +313,13 @@ func TestLiveTaskMCP(t *testing.T) {
 			}
 			opts.RelayOffset = 0
 			opts.ResumeSessionID = first.SessionID
-			opts.InitialPrompt.Text = "Call the current caic task MCP echo tool exactly once, with empty arguments. Discover the current server namespace rather than using obsolete names. Return its fresh result only; do not use shell or write files."
+			opts.InitialPrompt.Text = "Call the caic MCP echo tool exactly once. Discover the current server namespace rather than using obsolete names. Reply with its fresh result only. Do not run commands or read or write files."
 			registry.setToken()
 			session, err = b.Start(ctx, &opts)
 			if err != nil {
 				t.Fatal(err)
 			}
-			third, _ := liveResult(t, ctx, session, ch)
+			third, _ := liveResult(t, ctx, session, ch, "")
 			registry.verify(t, third, 3)
 			if third.SessionID != first.SessionID {
 				t.Fatal("MCP resume changed conversation")
@@ -383,6 +378,21 @@ func (r *liveTaskRegistry) verify(t *testing.T, result *agent.ResultMessage, cal
 	}
 }
 
+// liveHost returns the CAIC_AGY_SSH container. Its ~/.gemini must hold the agy
+// Google sign-in token, and its environment must set GEMINI_API_KEY, so a
+// passing run proves the sign-in wins over the API key.
+func liveHost(t *testing.T) string {
+	host := os.Getenv("CAIC_AGY_SSH")
+	if host == "" {
+		t.Skip("set CAIC_AGY_SSH to an authenticated disposable md container")
+	}
+	script := `test -n "$GEMINI_API_KEY" && test -s ~/.gemini/antigravity-cli/antigravity-oauth-token`
+	if err := liveSSH(t.Context(), host, script).Run(); err != nil {
+		t.Fatalf("%s needs GEMINI_API_KEY and the agy sign-in token: %v", host, err)
+	}
+	return host
+}
+
 // liveSSH runs script on the operator's disposable CAIC_AGY_SSH container.
 func liveSSH(ctx context.Context, host, script string) *exec.Cmd {
 	return exec.CommandContext(ctx, "ssh", host, script) //nolint:gosec // The operator names the disposable container.
@@ -399,7 +409,7 @@ func liveGlobalSettingsHash(t *testing.T, ctx context.Context, host string) stri
 
 func liveMCPRemoved(t *testing.T, ctx context.Context, host string) {
 	// Client EOF can precede daemon cleanup briefly; wait for its owned files.
-	cmd := `for i in $(seq 1 50); do if [ ! -e /tmp/caic-relay/antigravity-mcp ] && [ ! -e /tmp/caic-relay/caic-mcp.sock ]; then exit 0; fi; sleep 0.1; done; exit 1`
+	cmd := `for i in $(seq 1 50); do if [ ! -e /tmp/caic-relay/caic-mcp.sock ]; then exit 0; fi; sleep 0.1; done; exit 1`
 	if err := liveSSH(ctx, host, cmd).Run(); err != nil {
 		t.Fatalf("task MCP config/access survived shutdown: %v", err)
 	}
@@ -412,9 +422,14 @@ func liveMCPRemoved(t *testing.T, ctx context.Context, host string) {
 	}
 }
 
-func liveResult(t *testing.T, ctx context.Context, s *agent.Session, ch <-chan agent.TimedMessage) (result *agent.ResultMessage, toolCalls int) {
+// liveResult waits for the turn's result. Shared ACP reports the session ID
+// in InitMessage and the answer as text deltas, not in ResultMessage, so the
+// returned copy carries both. sessionID is the ID known before the turn; a
+// relay reattachment replays no InitMessage.
+func liveResult(t *testing.T, ctx context.Context, s *agent.Session, ch <-chan agent.TimedMessage, sessionID string) (result *agent.ResultMessage, toolCalls int) {
 	tools := make(map[string]string)
 	started := 0
+	var text strings.Builder
 	for {
 		select {
 		case <-ctx.Done():
@@ -423,12 +438,23 @@ func liveResult(t *testing.T, ctx context.Context, s *agent.Session, ch <-chan a
 			t.Fatalf("session exited before result: %v", s.Wait())
 		case event := <-ch:
 			switch m := event.Message.(type) {
+			case *agent.InitMessage:
+				sessionID = m.SessionID
+			case *agent.TextDeltaMessage:
+				text.WriteString(m.Text)
 			case *agent.ToolUseMessage:
 				tools[m.ToolUseID] = m.Name
 				started++
 			case *agent.ToolResultMessage:
-				if tools[m.ToolUseID] == "" || m.Error != "" {
-					t.Fatalf("unmatched or failed tool result: %+v", m)
+				name := tools[m.ToolUseID]
+				if name == "" {
+					t.Fatalf("unmatched tool result: %+v", m)
+				}
+				if m.Error != "" {
+					// The mounted ~/.gemini/AGENTS.md can make the model read a
+					// workspace AGENTS.md that does not exist. Callers check
+					// each turn's effects instead.
+					t.Logf("tool %s failed: %s", name, m.Error)
 				}
 				delete(tools, m.ToolUseID)
 			case *agent.ResultMessage:
@@ -438,7 +464,10 @@ func liveResult(t *testing.T, ctx context.Context, s *agent.Session, ch <-chan a
 				if len(tools) != 0 {
 					t.Fatalf("result arrived with %d unfinished tools", len(tools))
 				}
-				return m, started
+				r := *m
+				r.SessionID = sessionID
+				r.Result = text.String()
+				return &r, started
 			}
 		}
 	}
