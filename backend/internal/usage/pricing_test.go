@@ -229,6 +229,26 @@ func TestPricer(t *testing.T) {
 				ModelPrice{InputPerMTok: 4, CachedInputPerMTok: 0.2, OutputPerMTok: 20},
 			},
 			{
+				"Carbon introductory", "gemini-4-carbon-high",
+				time.Date(2026, 11, 30, 23, 59, 59, 0, time.UTC),
+				ModelPrice{InputPerMTok: 2, CachedInputPerMTok: 0.1, OutputPerMTok: 10},
+			},
+			{
+				"Carbon increase", "gemini-4-carbon-high",
+				time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC),
+				ModelPrice{InputPerMTok: 4, CachedInputPerMTok: 0.2, OutputPerMTok: 20},
+			},
+			{
+				"Hydrogen standard", "gemini-4-hydrogen-xhigh",
+				time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC),
+				ModelPrice{InputPerMTok: 1.5, CachedInputPerMTok: 0.075, OutputPerMTok: 7.5},
+			},
+			{
+				"Neon standard", "gemini-4-neon-xhigh",
+				time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC),
+				ModelPrice{InputPerMTok: 3, CachedInputPerMTok: 0.15, OutputPerMTok: 15},
+			},
+			{
 				"Flash standard", "gemini-3.8-flash-low",
 				time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC),
 				ModelPrice{InputPerMTok: 0.75, CachedInputPerMTok: 0.075, OutputPerMTok: 3.75},
@@ -545,7 +565,11 @@ func TestPricer(t *testing.T) {
 			model    string
 			want     ModelPrice
 		}{
+			{agent.QuotaProviderAnthropic, "claude-fable-5-2", ModelPrice{InputPerMTok: 8, CachedInputPerMTok: 0.2, CacheWritePerMTok: 10, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 3600, PerMTok: 16}}, OutputPerMTok: 40}},
+			{agent.QuotaProviderAnthropic, "claude-mythos-5-2", ModelPrice{InputPerMTok: 8, CachedInputPerMTok: 0.2, CacheWritePerMTok: 10, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 3600, PerMTok: 16}}, OutputPerMTok: 40}},
 			{agent.QuotaProviderAnthropic, "claude-opus-5-5", ModelPrice{InputPerMTok: 4, CachedInputPerMTok: 0.2, CacheWritePerMTok: 5, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 3600, PerMTok: 8}}, OutputPerMTok: 20}},
+			{agent.QuotaProviderCodex, "gpt-6.2-astra", ModelPrice{InputPerMTok: 8, CachedInputPerMTok: 0.4, CacheWritePerMTok: 10, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 43200, PerMTok: 20}}, OutputPerMTok: 40, LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}},
+			{agent.QuotaProviderCodex, "gpt-6.2-sol", ModelPrice{InputPerMTok: 2, CachedInputPerMTok: 0.1, CacheWritePerMTok: 2.5, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 43200, PerMTok: 5}}, OutputPerMTok: 10, LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}},
 			{agent.QuotaProviderCodex, "gpt-6-astra", ModelPrice{InputPerMTok: 10, CachedInputPerMTok: 1, CacheWritePerMTok: 12.5, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 43200, PerMTok: 25.0}}, OutputPerMTok: 50, LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}},
 			{agent.QuotaProviderCodex, "gpt-6-luna", ModelPrice{InputPerMTok: 0.1, CachedInputPerMTok: 0.01, CacheWritePerMTok: 0.125, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 43200, PerMTok: 0.25}}, OutputPerMTok: 0.5, LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}},
 			{agent.QuotaProviderCodex, "gpt-6-sol", ModelPrice{InputPerMTok: 2, CachedInputPerMTok: 0.2, CacheWritePerMTok: 2.5, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 43200, PerMTok: 5}}, OutputPerMTok: 10, LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}},
