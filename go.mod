@@ -9,14 +9,14 @@ require (
 	github.com/coder/websocket v1.8.15
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/gofrs/flock v0.13.1
-	github.com/gomodedev/gomode v0.4.1-0.20261123132916-c16f7777a335
+	github.com/gomodedev/gomode v0.4.1-0.20261123143935-fcdc9d2a94e4
 	github.com/google/go-cmp v0.7.0
 	github.com/huin/goupnp v1.3.0
 	github.com/invopop/jsonschema v0.14.0
 	github.com/klauspost/compress v1.20.3
 	github.com/lmittmann/tint v1.2.1
 	github.com/maruel/apisdkgen v0.3.1
-	github.com/maruel/genai v0.11.5-0.20261123013544-12b48934cc3e
+	github.com/maruel/genai v0.11.5
 	github.com/maruel/ksid v0.1.2
 	github.com/maruel/roundtrippers v0.5.1
 	github.com/mattn/go-colorable v0.1.16
@@ -159,7 +159,7 @@ require (
 	github.com/manuelarte/funcorder v0.6.0 // indirect
 	github.com/maratori/testableexamples v1.0.1 // indirect
 	github.com/maratori/testpackage v1.1.2 // indirect
-	github.com/maruel/genaipy v0.2.1-0.20261119180042-0af87659f4b4 // indirect
+	github.com/maruel/genaipy v0.2.1 // indirect
 	github.com/maruel/httpjson v0.5.3 // indirect
 	github.com/matoous/godox v1.1.0 // indirect
 	github.com/mattn/go-runewidth v0.0.31 // indirect
