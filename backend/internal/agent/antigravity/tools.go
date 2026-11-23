@@ -35,7 +35,7 @@ type tools struct {
 
 // Parse canonicalizes the announced input and adds the output that agy
 // reports only on completion. An invoke_subagent call becomes a native card.
-func (t *tools) Parse(tool *acp.ToolCallUpdateUpdate, messages []agent.Message) ([]agent.Message, error) {
+func (t *tools) Parse(_ string, tool *acp.ToolCallUpdateUpdate, messages []agent.Message) ([]agent.Message, error) {
 	if tool == nil {
 		return messages, nil
 	}

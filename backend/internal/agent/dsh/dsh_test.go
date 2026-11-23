@@ -353,7 +353,8 @@ func TestSubagentTool(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixture := bytes.Split(bytes.TrimSpace(data), []byte{'\n'})
-	const id = "dsh:subagent:77c5125c-db9e-4bb0-8bfe-97ac042d25c5"
+	// This dsh predates names: the spawn output carries the child's Session ID.
+	const id = "dsh:subagent:00000000-0000-4000-8000-000000000001/77c5125c-db9e-4bb0-8bfe-97ac042d25c5"
 	spawn := agent.NativeSubagent{
 		ToolUseID: "call_00_WcW8QyRo4dqT8fFtimbd4993", Scope: agent.NativeSubagentScopeAgent, ID: id,
 		Label: "Silly duck task", Prompt: "act as a rubber duck", Status: agent.NativeSubagentStatusRunning,
@@ -369,7 +370,7 @@ func TestSubagentTool(t *testing.T) {
 		want     agent.Message
 	}{
 		{"EndTurn", `{"jsonrpc":"2.0","id":8,"result":{"stopReason":"end_turn"}}`, settled(agent.NativeSubagentStatusCompleted)},
-		{"Cancelled", `{"jsonrpc":"2.0","id":8,"result":{"stopReason":"cancelled"}}`, settled(agent.NativeSubagentStatusInterrupted)},
+		{"Cancelled", `{"jsonrpc":"2.0","id":8,"result":{"stopReason":"cancelled"}}`, &agent.BackgroundRetiredMessage{ID: id}},
 		{"MaxTokens", `{"jsonrpc":"2.0","id":8,"result":{"stopReason":"max_tokens"}}`, &agent.BackgroundRetiredMessage{ID: id}},
 		{"Error", `{"jsonrpc":"2.0","id":8,"error":{"code":-32603,"message":"turn failed"}}`, &agent.BackgroundRetiredMessage{ID: id}},
 	} {
@@ -419,6 +420,42 @@ func TestSubagentTool(t *testing.T) {
 				t.Fatalf("replay lifecycle = %s, want live %s", lifecycleString(replay), lifecycleString(live))
 			}
 		})
+	}
+}
+
+// TestWaitAgentTool replays the recorded delegation, in which the parent waits
+// for its child with wait_agent. The wait reports only {"timedOut":false}, so
+// no tool card remains for it, and the prompt response still settles the card.
+func TestWaitAgentTool(t *testing.T) {
+	t.Parallel()
+	const wait = "call_00_x59S6yNKUB3XSD8TepDQ7757"
+	data, err := os.ReadFile("testdata/native-subagent-joke.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(data, []byte(`"toolCallId":"`+wait+`","title":"wait_agent"`)) {
+		t.Fatal("recording has no wait_agent call")
+	}
+	parser, err := agent.NewLogRecordParser(New("", nil).NewWire())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lifecycle []agent.Message
+	for line := range bytes.SplitSeq(bytes.TrimSpace(data), []byte{'\n'}) {
+		record, err := parser.ParseRecord(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, event := range record.Messages {
+			if len(agentacp.DropToolMessages([]agent.Message{event.Message}, wait)) == 0 {
+				t.Fatalf("wait_agent left %#v", event.Message)
+			}
+			lifecycle = append(lifecycle, subagentLifecycle([]agent.Message{event.Message})...)
+		}
+	}
+	last, ok := lifecycle[len(lifecycle)-1].(*agent.NativeSubagentMessage)
+	if len(lifecycle) != 2 || !ok || last.Subagent.Status != agent.NativeSubagentStatusCompleted {
+		t.Fatalf("lifecycle = %s, want the card running then completed", lifecycleString(lifecycle))
 	}
 }
 

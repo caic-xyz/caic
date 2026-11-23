@@ -107,6 +107,8 @@ func (modelCodec) Select(requested, current string, options []acp.ConfigOptionVa
 }
 func (modelCodec) Decode(route string) (string, error) { return decodeDSHModel(route) }
 
+// startedSubagentPrefix starts the subagent tool's output; the child's name
+// follows. See packages/subagent/tool-subagent/src/index.ts.
 const startedSubagentPrefix = "started subagent "
 
 type subagentCall struct {
@@ -116,13 +118,21 @@ type subagentCall struct {
 
 type toolParser struct {
 	subagents map[string]subagentCall
+	// waits holds the active wait_agent calls.
+	waits map[string]struct{}
 	// running holds the cards spawned during the current prompt.
 	running []agent.NativeSubagent
 }
 
-func (p *toolParser) Parse(tool *acp.ToolCallUpdateUpdate, messages []agent.Message) ([]agent.Message, error) {
+func (p *toolParser) Parse(sessionID string, tool *acp.ToolCallUpdateUpdate, messages []agent.Message) ([]agent.Message, error) {
 	if tool == nil || tool.ToolCallID == "" {
 		return messages, nil
+	}
+	if _, ok := p.waits[tool.ToolCallID]; ok {
+		if tool.Status == acp.StatusCompleted || tool.Status == acp.StatusFailed {
+			delete(p.waits, tool.ToolCallID)
+		}
+		return agentacp.DropToolMessages(messages, tool.ToolCallID), nil
 	}
 	if pending, ok := p.subagents[tool.ToolCallID]; ok {
 		switch tool.Status {
@@ -131,15 +141,18 @@ func (p *toolParser) Parse(tool *acp.ToolCallUpdateUpdate, messages []agent.Mess
 			messages = agentacp.DropToolMessages(messages, tool.ToolCallID)
 			// TODO: Attach the child's final message once dsh exposes it
 			// through ACP. The parent receives the child result internally, so
-			// the journal keeps only the spawn identity, label, and prompt.
-			if id, ok := startedSubagentID(agentacp.ToolOutput(tool)); ok {
+			// the journal keeps only the child's name, label, and prompt.
+			if name, ok := startedSubagentName(agentacp.ToolOutput(tool)); ok {
 				s := agent.NativeSubagent{
 					ToolUseID: tool.ToolCallID,
 					Scope:     agent.NativeSubagentScopeAgent,
-					ID:        "dsh:subagent:" + id,
-					Label:     pending.label,
-					Prompt:    pending.prompt,
-					Status:    agent.NativeSubagentStatusRunning,
+					// A name is unique only among one session's children. A
+					// cleared context starts a new session, whose first child
+					// is agent-1 again.
+					ID:     "dsh:subagent:" + sessionID + "/" + name,
+					Label:  pending.label,
+					Prompt: pending.prompt,
+					Status: agent.NativeSubagentStatusRunning,
 				}
 				p.running = append(p.running, s)
 				messages = append(messages, &agent.NativeSubagentMessage{Subagent: s})
@@ -178,7 +191,7 @@ func (p *toolParser) Parse(tool *acp.ToolCallUpdateUpdate, messages []agent.Mess
 				}
 			case strings.EqualFold(use.Name, "subagent"):
 				// The native subagent tool names the delegated task and returns
-				// the child identity on completion. Wait for that identity before
+				// the child's name on completion. Wait for that name before
 				// projecting a native card; the generic tool call is machinery.
 				var in struct {
 					Description string `json:"description"`
@@ -187,6 +200,13 @@ func (p *toolParser) Parse(tool *acp.ToolCallUpdateUpdate, messages []agent.Mess
 				if err := json.Unmarshal(tool.RawInput, &in); err == nil {
 					p.subagents[tool.ToolCallID] = subagentCall{label: in.Description, prompt: in.Prompt}
 				}
+				return agentacp.DropToolMessages(messages, tool.ToolCallID), nil
+			case strings.EqualFold(use.Name, "wait_agent"):
+				// wait_agent blocks until the caller's inbox has input, such as a
+				// child's completion notice, and returns only whether it timed
+				// out. It names no child and settles no card, so it is machinery
+				// of the running cards.
+				p.waits[tool.ToolCallID] = struct{}{}
 				return agentacp.DropToolMessages(messages, tool.ToolCallID), nil
 			default:
 				continue
@@ -203,50 +223,56 @@ func (p *toolParser) Parse(tool *acp.ToolCallUpdateUpdate, messages []agent.Mess
 }
 
 // SettlePrompt ends the cards spawned during the prompt. dsh emits no child
-// start or end update; it answers session/prompt only after the root agent
-// and its subagent tree go idle, or after cancelling them. end_turn therefore
-// proves each child ended, not that it succeeded, and cancelled proves it was
-// interrupted. Other stop reasons and JSON-RPC errors prove neither outcome,
-// so their cards are retired as unknown.
+// start or end update. It answers session/prompt with end_turn only after the
+// root agent and its subagent tree go idle, so end_turn proves each child
+// ended, not that it succeeded. session/cancel stops only the root's activity,
+// and the cancelled response does not wait for the tree: a child keeps
+// running and reports no end. Cancelled, other stop reasons, and JSON-RPC
+// errors therefore retire their cards as unknown. See settleAfterQuiescence
+// in packages/acp/acp/src/session.ts and the prompt lifecycle in
+// packages/acp/acp/README.md.
 //
 // TODO: Settled cards report the prompt's end, not each child's. dsh's ACP
-// bridge (deepseek-harness packages/acp/acp) projects only the root session;
-// the child's start and end stay internal to its subagent lifecycle. Once dsh
-// emits child start and end session updates, map them in Parse and keep this
-// settlement as the fallback for children without an end update.
+// bridge projects only the root session; the child's start and end stay
+// internal to its subagent lifecycle. Once dsh emits child start and end
+// session updates, map them in Parse and keep this settlement as the fallback
+// for children without an end update.
 func (p *toolParser) SettlePrompt(stop acp.StopReason) []agent.Message {
 	clear(p.subagents)
+	clear(p.waits)
 	messages := make([]agent.Message, 0, len(p.running))
 	for i := range p.running {
 		s := &p.running[i]
-		switch stop {
-		case acp.StopReasonEndTurn:
-			s.Status = agent.NativeSubagentStatusCompleted
-		case acp.StopReasonCancelled:
-			s.Status = agent.NativeSubagentStatusInterrupted
-		default:
+		if stop != acp.StopReasonEndTurn {
 			messages = append(messages, &agent.BackgroundRetiredMessage{ID: s.ID})
 			continue
 		}
+		s.Status = agent.NativeSubagentStatusCompleted
 		messages = append(messages, &agent.NativeSubagentMessage{Subagent: *s})
 	}
 	p.running = p.running[:0]
 	return messages
 }
 
-func startedSubagentID(output string) (string, bool) {
-	id, ok := strings.CutPrefix(strings.TrimSpace(output), startedSubagentPrefix)
+// startedSubagentName returns the child's name from the subagent tool's
+// output. dsh names a root child agent-N or the name the model chose; a child
+// from a session that predates names reports its Session ID instead. See
+// agentAddress in packages/subagent/subagent/src/names.ts.
+func startedSubagentName(output string) (string, bool) {
+	name, ok := strings.CutPrefix(strings.TrimSpace(output), startedSubagentPrefix)
 	if !ok {
 		return "", false
 	}
-	id = strings.TrimSpace(id)
-	if id == "" || strings.ContainsAny(id, " \t\r\n") {
+	name = strings.TrimSpace(name)
+	if name == "" || strings.ContainsAny(name, " \t\r\n") {
 		return "", false
 	}
-	return id, true
+	return name, true
 }
 
-func newTools() agentacp.ToolParser { return &toolParser{subagents: make(map[string]subagentCall)} }
+func newTools() agentacp.ToolParser {
+	return &toolParser{subagents: make(map[string]subagentCall), waits: make(map[string]struct{})}
+}
 
 func fetchDSHModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv []string) (inventory agent.ModelInventory, err error) {
 	if target.SSHHost == "" {

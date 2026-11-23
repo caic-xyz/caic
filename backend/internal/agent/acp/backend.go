@@ -568,7 +568,14 @@ func (w *wireFormat) parseOutputRecord(line []byte) ([]agent.Message, error) {
 		})
 	}
 	if w.tools != nil {
-		msgs, err = w.tools.Parse(toolCall, msgs)
+		var sessionID string
+		if toolCall != nil {
+			// A harness may scope its native identities by session.
+			if sessionID, err = agent.JSONString(probe.Params, "sessionId"); err != nil {
+				return nil, fmt.Errorf("session/update sessionId: %w", err)
+			}
+		}
+		msgs, err = w.tools.Parse(sessionID, toolCall, msgs)
 		if err != nil {
 			return nil, err
 		}

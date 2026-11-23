@@ -38,18 +38,23 @@ a successful completion confirms the inferred load. The `read-edit-bash`
 recording retains that tool call and its completion content.
 
 The native `subagent` tool names a delegated task in `description` and
-`prompt`, then returns `started subagent <id>` on completion. Project that as a
-running foreground native card; the generic tool call is machinery. dsh emits
+`prompt`, then returns `started subagent <name>` on completion. Project that as
+a running foreground native card; the generic tool call is machinery. dsh emits
 no child start or end update and projects only the root session over ACP. The
-prompt response settles the prompt's cards: `end_turn` completes them,
-`cancelled` interrupts them, and other stop reasons or errors retire them as
-unknown. The child's result is not an ACP record, so it cannot be attached to
-the card. The parent model sees that result, but the journal does not.
-The card ID is `dsh:subagent:` followed by the spawned ID. `testdata/subagent.jsonl`
-trims and anonymizes records of a local dsh task (not a `record-trace`
-recording). `testdata/native-subagent-joke.jsonl` records the standardized
-delegation with dsh 0.2.2-rc.5, which then waits with `wait_agent`; that tool
-returns only `{"timedOut":false}`, not the child's result.
+prompt response settles the prompt's cards: `end_turn` completes them, and any
+other stop reason, including `cancelled`, or an error retires them as unknown.
+A child outlives a cancelled prompt and its end reaches no ACP record. The
+child's result is not an ACP record either, so it cannot be attached to the
+card. The parent model sees that result, but the journal does not.
+The card ID is `dsh:subagent:<sessionId>/<name>`. A name is unique only within
+one dsh session, and a cleared context starts a new session whose first child
+is `agent-1` again. `testdata/subagent.jsonl` trims and anonymizes records of
+a local dsh task (not a `record-trace` recording) from a dsh that predates
+names, so its spawn output carries the child's Session ID.
+`testdata/native-subagent-joke.jsonl` records the standardized delegation with
+dsh 0.2.2-rc.5, which then waits with `wait_agent`. That tool
+waits for any input to the caller's inbox, names no child, and returns only
+`{"timedOut":false}`, so the parser drops it like the spawn call.
 `testdata/evidence/native-subagent-joke-v3.jsonl` minimizes it to the
 `session/prompt` request, the spawn, and the prompt response. The request lets
 the wire correlate the response; the smoke replay sends it as the task's prompt.
@@ -84,12 +89,12 @@ through the server with `CAIC_SMOKE_HARNESS=dsh` and
 
 No dsh work outlives a turn in the local logs. The 3 local dsh logs hold 24
 prompts, all answered with `end_turn`, and no `session/update` outside a
-prompt. The ACP prompt settles only after the root agent and its subagent tree
-are idle:
-https://github.com/deepseek-ai/deepseek-harness/blob/39163dd30f703a79079e2d2446545cff3c453738/packages/acp/acp/src/session.ts.
-In one local task, the `subagent` call started the child at record 1142,
-the parent reported its completion at 1147, and the prompt response followed
-at 1152.
+prompt. An `end_turn` prompt settles only after the root agent and its
+subagent tree are idle. A cancelled prompt does not wait for the tree; a
+child's later completion can start root work outside any prompt, which no
+recording shows yet. In one local task, the `subagent` call started the child
+at record 1142, the parent reported its completion at 1147, and the prompt
+response followed at 1152.
 
 `bash` with `run_in_background` (1 call) returns `started background job
 <id>`, and dsh moves a foreground command past its timeout to a background
@@ -97,6 +102,31 @@ job. `job_kill` (1 call) returns only `requested cancellation of job <id>`.
 No ACP record reports a job's end, so caic does not map jobs. The recorded job
 started and was killed inside one prompt.
 
-Authoritative protocol sources:
-- https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/acp/acp
-- https://github.com/maruel/genai/tree/main/providers/dsh
+## Ground every native DTO in dsh source
+
+Each dsh record shape, field, tool name, output string, and lifecycle rule
+that this package reads must cite the dsh source of the recorded version.
+Recordings show one run; the source states the contract, such as which
+values a field can take and when an update is sent. Clone the source and
+check out the tag of the version under test, outside this repository:
+
+```bash
+git clone https://github.com/deepseek-ai/deepseek-harness
+git -C deepseek-harness checkout dsh-v0.2.2-rc.5
+```
+
+Cite the file path, relative to the deepseek-harness root, in the code comment
+or in this file. Do not infer a field's meaning from recordings, documentation
+summaries, or another harness. The facts below are from `dsh-v0.2.2-rc.5`:
+
+| Fact | Source |
+| --- | --- |
+| `tool_call` title is the tool name, `kind` is `other`, `rawInput` is the parsed arguments | `packages/acp/acp/src/updates.ts` |
+| `subagent` takes `description`, `prompt`, and an optional `name`; it outputs `started subagent <name>` | `packages/subagent/tool-subagent/src/index.ts` |
+| A name is `agent-N` or the model's choice, unique among one parent session's children | `packages/subagent/subagent/src/names.ts`, `catalog.ts` |
+| A child from before names reports its Session ID as its name | `agentAddress` in `packages/subagent/subagent/src/names.ts` |
+| `wait_agent` waits for any inbox input and returns only `{"timedOut":…}` | `packages/subagent/tool-subagent-control/src/wait-agent.ts` |
+| `end_turn` waits for the subagent tree; `cancelled` stops only the root | `settleAfterQuiescence` in `packages/acp/acp/src/session.ts`, `packages/acp/acp/README.md` |
+
+The genai DTOs in https://github.com/maruel/genai/tree/main/providers/dsh
+must agree with that source.

@@ -17,12 +17,6 @@ Use a native subagent to tell a joke about README.md. Do not perform the task yo
 
 ### 🤖 Native agent: Tell README.md joke — running
 
-### 🔧 Tool: `wait_agent`
-
-```json
-{"timeout_ms":120000}
-```
-
 <details><summary>💭 Thinking</summary>
 
 The user wants me to delegate to a subagent to tell a joke about README.md. Simple single delegation. No skill needed really. Let me use the subagent tool.

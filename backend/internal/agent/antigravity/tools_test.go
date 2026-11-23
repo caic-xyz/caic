@@ -42,7 +42,7 @@ func TestTools(t *testing.T) {
 		// turn, each acknowledged at once, and its prompt response ends them.
 		spawn := func(p *tools, id string, status acp.ToolStatus) []agent.Message {
 			t.Helper()
-			msgs, err := p.Parse(&acp.ToolCallUpdateUpdate{ToolCallID: id, Name: invokeSubagent, Status: status, RawInput: json.RawMessage(`{"Prompt":"joke","Role":"` + id + `","TypeName":"self"}`)}, nil)
+			msgs, err := p.Parse("", &acp.ToolCallUpdateUpdate{ToolCallID: id, Name: invokeSubagent, Status: status, RawInput: json.RawMessage(`{"Prompt":"joke","Role":"` + id + `","TypeName":"self"}`)}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
