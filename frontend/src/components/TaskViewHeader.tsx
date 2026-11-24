@@ -1,4 +1,4 @@
-// Shared task-view controls handle immersive documents, pane closing, URL-backed full screen, focus, and Escape.
+// Shared task-view controls handle immersive documents, desktop pane closing, URL-backed full screen, focus, and Escape.
 import { Show, onCleanup, onMount, type JSX } from "solid-js";
 import { useLocation, useNavigate, useSearchParams } from "@solidjs/router";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
@@ -30,7 +30,10 @@ export default function TaskViewHeader(props: {
   }
 
   onMount(() => {
-    (fullscreen() ? fullscreenButton : closeButton)?.focus({ preventScroll: true });
+    // Mobile hides the close button in favor of the back button, so focus
+    // falls through to full screen when the close button cannot take it.
+    if (!fullscreen()) closeButton?.focus({ preventScroll: true });
+    if (document.activeElement !== closeButton) fullscreenButton?.focus({ preventScroll: true });
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented || document.querySelector("dialog[open]")) return;
       const target = event.target instanceof Element ? event.target : null;
@@ -70,7 +73,7 @@ export default function TaskViewHeader(props: {
             <FullscreenExitIcon width={20} height={20} aria-hidden="true" />
           </Show>
         </ActionButton>
-        <ActionButton ref={closeButton} onClick={close} label="Close view">
+        <ActionButton ref={closeButton} class={styles.closeButton} onClick={close} label="Close view">
           <CloseIcon width={20} height={20} aria-hidden="true" />
         </ActionButton>
       </div>

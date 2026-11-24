@@ -1,6 +1,6 @@
 // Browser coverage for deferred optional pages, scoped loading, retained conversations, and failed-chunk recovery.
 
-import { createTaskAPI, expect, test, waitForTaskState } from "../helpers";
+import { closeView, createTaskAPI, expect, test, waitForTaskState } from "../helpers";
 
 // Chunk gates must exercise the production loader rather than a service-worker cache.
 test.use({ serviceWorkers: "block" });
@@ -69,7 +69,7 @@ for (const width of [390, 1280]) {
       await expect(page.getByRole("progressbar", { name: "Loading page" })).toHaveCount(0);
       if (width > 768) await expect(conversation).toBeVisible();
       else await expect(conversation).toBeHidden();
-      await page.getByRole("button", { name: "Close view", exact: true }).click();
+      await closeView(page, width);
       await expect(page).toHaveURL(taskURL);
       await expect(prompt).toBeVisible();
       await expect(prompt).toHaveText("Keep this draft while the view loads");

@@ -81,10 +81,13 @@ test("prompt input layout screenshots", async ({ page, api }) => {
   await prompt.fill("");
   const id = await createTaskAPI(api, "Fix token expiry bug in auth middleware");
   await waitForTaskState(api, id, "waiting", 30_000);
+  // The fake CI walks its checks after the task settles; capture its final state.
+  await waitForCISettle(api, [id]);
 
   await page.goto("/");
   const taskCard = page.locator(`[data-task-id="${id}"]`);
   await expect(taskCard).toBeVisible({ timeout: 10_000 });
+  await expect(taskCard.getByTestId("ci-status")).toHaveAttribute("data-status", "success");
   await taskCard.click();
 
   const detailInput = page.getByTestId("task-detail-form").locator("[role='textbox']");

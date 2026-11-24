@@ -1,5 +1,5 @@
 // Browser coverage for queued prompt appending, keyboard recall, attachment restoration, steering, and delivery.
-import { test, expect, createTaskAPI, waitForTaskState, recentHistoryPage } from "../helpers";
+import { test, expect, closeView, createTaskAPI, waitForTaskState, recentHistoryPage } from "../helpers";
 import type { ErrorResponse } from "../../sdk/caic/ts/v1/types.gen";
 
 for (const mobile of [false, true]) {
@@ -82,7 +82,7 @@ for (const mobile of [false, true]) {
     await page.screenshot({ path: testInfo.outputPath("queued-image.png") });
     await page.reload();
     await expect(page.getByRole("img", { name: "attachment", exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Close view" }).click();
+    await closeView(page, mobile ? 390 : 1280);
     await expect(queue).toBeVisible();
     const prompt = page.getByTestId("task-detail-prompt");
     const composer = page.getByTestId("task-detail-form");

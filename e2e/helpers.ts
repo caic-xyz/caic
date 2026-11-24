@@ -259,6 +259,13 @@ export type { Page } from "@playwright/test";
 
 export const STEP_IMPORT_TIMEOUT = 30_000;
 
+// Leave a task subview the way a user does at this viewport width: mobile has
+// no close button and relies on the back button.
+export async function closeView(page: Page, width: number): Promise<void> {
+  if (width <= 768) await page.goBack();
+  else await page.getByRole("button", { name: "Close view", exact: true }).click();
+}
+
 // ---------------------------------------------------------------------------
 // Utility: create a task via API and return its ID.
 // ---------------------------------------------------------------------------

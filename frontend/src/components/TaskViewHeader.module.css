@@ -1,4 +1,4 @@
-/* Task-view toolbar layout; full-screen documents hide the entire toolbar. */
+/* Task-view toolbar layout; full-screen documents hide the entire toolbar and mobile relies on back instead of close. */
 .header {
   display: flex;
   flex-wrap: wrap;
@@ -17,4 +17,10 @@
 
 .header[hidden] {
   display: none;
+}
+
+@media (width <= 768px) {
+  button.closeButton {
+    display: none;
+  }
 }

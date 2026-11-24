@@ -4,7 +4,7 @@ import { ok } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { strToU8, unzipSync, zipSync } from "three/addons/libs/fflate.module.js";
 import { create3mfFixture } from "../../frontend/tests/cad-fixture";
-import { test, expect, createTaskAPI, waitForTaskState, STEP_IMPORT_TIMEOUT } from "../helpers";
+import { test, expect, closeView, createTaskAPI, waitForTaskState, STEP_IMPORT_TIMEOUT } from "../helpers";
 
 function depthFixture(): Buffer {
   const files = unzipSync(create3mfFixture());
@@ -177,8 +177,8 @@ for (const width of [390, 1280]) {
     await expect(mode).toBeHidden();
     await page.goBack();
     await expect(mode).toHaveAccessibleName("Display mode: Translucent. Switch to solid");
-    // A hovered server warning can consume Escape before the document pane.
-    if (width === 390) await page.getByRole("button", { name: "Close view", exact: true }).click();
+    // Mobile shows the document in place of the conversation that holds the next link.
+    if (width === 390) await closeView(page, width);
     await page.getByRole("link", { name: "Other", exact: true }).click();
     await expect(page.getByText("4 triangles", { exact: true })).toBeVisible();
     // Display modes belong to each document; a new file starts solid.

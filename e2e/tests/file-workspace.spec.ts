@@ -58,7 +58,9 @@ for (const width of [390, 1280]) {
     await expect(page).toHaveURL(guideURL);
     await page.goForward();
     await expect(page).toHaveURL(notesURL);
-    await page.getByRole("button", { name: "Close view", exact: true }).click();
+    // Mobile has no close button; Escape runs the same close action.
+    if (width === 390) await page.keyboard.press("Escape");
+    else await page.getByRole("button", { name: "Close view", exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/task/@${id}(?:\\+[^/]+)?$`));
     await expect(page.getByTestId("task-detail-prompt")).toBeVisible();
     await expect(page.getByRole("link", { name: "Guide", exact: true })).toBeFocused();
@@ -77,7 +79,8 @@ for (const width of [390, 1280]) {
     await expect(page.getByRole("heading", { name: "Guide", exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page).toHaveURL(guideURL);
-    await page.getByRole("button", { name: "Close view", exact: true }).click();
+    if (width === 390) await page.keyboard.press("Escape");
+    else await page.getByRole("button", { name: "Close view", exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/task/@${id}(?:\\+[^/]+)?$`));
     await expect(page.getByTestId("task-detail-prompt")).toBeVisible();
   });
@@ -260,8 +263,12 @@ for (const width of [390, 1000, 1440]) {
     await mode.focus();
     await page.keyboard.press("Tab");
     await expect(page.getByRole("button", { name: "Full screen", exact: true })).toBeFocused();
-    await page.keyboard.press("Tab");
-    await expect(page.getByRole("button", { name: "Close view", exact: true })).toBeFocused();
+    if (width === 390) {
+      await expect(page.getByRole("button", { name: "Close view", exact: true })).toBeHidden();
+    } else {
+      await page.keyboard.press("Tab");
+      await expect(page.getByRole("button", { name: "Close view", exact: true })).toBeFocused();
+    }
     await page.keyboard.press("Tab");
     const viewControls = page.getByRole("button", { name: "View controls", exact: true });
     await expect(viewControls).toBeFocused();

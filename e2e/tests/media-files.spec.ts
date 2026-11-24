@@ -1,5 +1,5 @@
 // Browser coverage for document audio/video autoplay, responsive native controls, failures, and cleanup.
-import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
+import { test, expect, closeView, createTaskAPI, waitForTaskState } from "../helpers";
 import { createWebmFixture } from "../../frontend/tests/media-fixture";
 
 // Five seconds of mono PCM silence, with a standard WAV header.
@@ -70,7 +70,7 @@ for (const width of [390, 1280]) {
         expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
 
         const playing = await media.elementHandle();
-        await page.getByRole("button", { name: "Close view", exact: true }).click();
+        await closeView(page, width);
         await expect(page).toHaveURL(new RegExp(`/task/@${id}(?:\\+[^/]+)?$`));
         expect(await playing!.evaluate((el: HTMLMediaElement) => el.paused && !el.hasAttribute("src"))).toBe(true);
       });
@@ -81,7 +81,7 @@ for (const width of [390, 1280]) {
           "href",
           `/api/caic/v1/tasks/${id}/raw?path=${encodeURIComponent(broken)}`,
         );
-        await page.getByRole("button", { name: "Close view", exact: true }).click();
+        await closeView(page, width);
       });
     }
     expect(errors).toEqual([]);
