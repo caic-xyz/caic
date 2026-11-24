@@ -415,7 +415,7 @@ for (const width of [1280, 390]) {
     const live = page.getByTestId("performance-transient-status");
     await expect(live).toHaveText("Updating cost estimates…");
     const busy = pane.getByTestId("turn-summary-line").locator('[aria-busy="true"]');
-    await expect(busy).toHaveText("$0.01");
+    await expect(busy).toHaveText("$0.12");
     // Italic, not underlined like an actionable duration, and readable text.
     const style = await busy.evaluate((el) => {
       const rgb = (value: string) => (value.match(/[\d.]+/g) ?? []).map(Number);

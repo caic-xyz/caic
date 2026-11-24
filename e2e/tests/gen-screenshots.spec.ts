@@ -11,7 +11,7 @@ import {
   screenshotRoot,
   waitForVisualReadiness,
 } from "../visual";
-import { visualPositionTime } from "../visual-fixtures";
+import { visualEpoch, visualPositionTime } from "../visual-fixtures";
 import { formatTimingDuration } from "../../frontend/src/timing";
 import type { Locator } from "@playwright/test";
 import type { ErrorResponse } from "../../sdk/caic/ts/v1/types.gen";
@@ -178,7 +178,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   });
   const id2 = runningTask.id;
   // Its unfinished verification reads live time instead of the fixed clock's 0ms.
-  visual.startHistoryBefore(id2, 48_000);
+  visual.startHistoryAt(id2, visualEpoch - 48_000);
   await waitForTaskState(api, id2, "running", 30_000);
 
   const widgetTask = await api.createTask({
@@ -719,12 +719,12 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await captureScreenshotPair(page, "mobile", "usage");
 
   // Screenshot 11: Background work keeps a task running after its result; the
-  // card's model line counts it and the strip above the input names it. It runs last so its task
-  // card stays out of every earlier capture. Its running work shows 75s
-  // elapsed instead of the fixed clock's 0ms.
+  // card's model line counts it and the strip above the input names it. It and
+  // the turn scene run last so their task cards stay out of every earlier
+  // capture. Its running work shows 75s elapsed instead of the fixed clock's 0ms.
   await page.setViewportSize({ width: 1280, height: 800 });
   const backgroundId = await createTask("Run the checks as background commands and watch the results");
-  visual.startHistoryBefore(backgroundId, 75_000);
+  visual.startHistoryAt(backgroundId, visualEpoch - 75_000);
   await expect
     .poll(async () => (await api.getTask(backgroundId)).background)
     .toEqual({ commands: 1, watches: 1, agents: 1 });
@@ -743,5 +743,37 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await captureScreenshotPair(page, "desktop", "task-background");
   await page.setViewportSize({ width: 390, height: 844 });
   await captureScreenshotPair(page, "mobile", "task-background");
+
+  // Screenshot 12: A turn's Performance view lays model, tool, subagent, and
+  // background spans on one timeline above per-call tokens. Re-timing ends the
+  // first turn at its record position, so starting the history after the fixed
+  // clock places the whole turn among the fixture resource samples, which begin
+  // there.
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const turnId = await createTask("Limit request rates and run the race tests");
+  visual.startHistoryAt(turnId, visualEpoch + 25_000);
+  // The race tests end after the result and wake a second turn.
+  await expect.poll(async () => (await api.getTask(turnId)).numTurns, { timeout: 30_000 }).toBe(2);
+  await waitForTaskState(api, turnId, "waiting", 30_000);
+  await waitForCISettle(api, [turnId]);
+  await page.goto(`/task/@${turnId}/perf/turns/1`);
+  const turnView = page.getByTestId("task-view-pane");
+  await expect(turnView.getByTestId("turn-timeline").getByTestId("turn-timeline-lane")).toHaveText([
+    /^Model \(inferred\) /,
+    /^Tools 24 calls · /,
+    /^Subagents 1$/,
+    /^Subagent tools 4 calls$/,
+    /^Background 1$/,
+  ]);
+  await expect(turnView.getByTestId("turn-resource-lane")).toHaveCount(2);
+  await expect(turnView.getByTestId("turn-resources-note")).toHaveCount(0);
+  await expect(turnView.getByTestId("turn-calls").getByTestId("turn-call")).toHaveCount(29);
+  await expect(page.locator(`[data-task-id="${turnId}"]`).getByTestId("ci-status")).toHaveAttribute(
+    "data-status",
+    "success",
+  );
+  await captureScreenshotPair(page, "desktop", "task-turn");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await captureScreenshotPair(page, "mobile", "task-turn");
   await convertPngsToWebp(screenshotRoot);
 });

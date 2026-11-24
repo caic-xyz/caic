@@ -45,6 +45,7 @@ FRONTEND_SCENES = frozenset(
         "desktop/task-resources",
         "desktop/task-running",
         "desktop/task-stats",
+        "desktop/task-turn",
         "desktop/task-vnc",
         "desktop/task-widget",
         "desktop/usage",
@@ -60,6 +61,7 @@ FRONTEND_SCENES = frozenset(
         "mobile/task-repository-changes",
         "mobile/task-resources",
         "mobile/task-stats",
+        "mobile/task-turn",
         "mobile/usage",
     },
 )

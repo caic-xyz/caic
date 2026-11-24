@@ -443,6 +443,9 @@ DEMO_SCENARIOS = [
 
 
 last_timestamp_ms = 0
+# While set, timestamps follow only the fixture clock, so a scenario's offsets
+# from its turn start never pick up real-time jitter.
+fixture_clock = False
 
 
 def emit(obj: dict) -> None:
@@ -451,7 +454,7 @@ def emit(obj: dict) -> None:
     global last_timestamp_ms
     # Distinct fixture timestamps preserve transcript anchors even when the
     # entire scenario is written in one batch without real-time delays.
-    timestamp_ms = max(int(time.time() * 1000), last_timestamp_ms + 1)
+    timestamp_ms = last_timestamp_ms + 1 if fixture_clock else max(int(time.time() * 1000), last_timestamp_ms + 1)
     last_timestamp_ms = timestamp_ms
     envelope = '{{"t":"agent","ts":{}.{:03d},"msg":{}}}'.format(
         timestamp_ms // 1000, timestamp_ms % 1000, json.dumps(obj, separators=(",", ":"))
@@ -463,7 +466,8 @@ def emit(obj: dict) -> None:
 def advance_clock(ms: int) -> None:
     """Move the timestamps of later messages forward without waiting."""
     global last_timestamp_ms
-    last_timestamp_ms = max(int(time.time() * 1000), last_timestamp_ms) + ms
+    base = last_timestamp_ms if fixture_clock else max(int(time.time() * 1000), last_timestamp_ms)
+    last_timestamp_ms = base + ms
 
 
 def emit_text(text: str) -> None:
@@ -937,8 +941,18 @@ def emit_turn_timeline_turn(turns: int) -> None:
     its own tools, an edit fails, and a background command outlives the result.
     Eleven tool names, three of them concurrent, fill the tool-time breakdown.
     Every API call reports its own usage. A harness-queued turn without a prompt
-    reports the command's end.
+    reports the command's end. The fixture clock alone times the scenario, so
+    every offset from the turn start repeats exactly.
     """
+    global fixture_clock
+    fixture_clock = True
+    try:
+        emit_turn_timeline_records(turns)
+    finally:
+        fixture_clock = False
+
+
+def emit_turn_timeline_records(turns: int) -> None:
     started = last_timestamp_ms
     root = TimelineCalls("claude-opus-5-5", 14000, 200000, None)
     emit({"type": "thinking", "text": "Finding where requests enter the server before adding rate limits."})
@@ -1062,7 +1076,7 @@ def emit_turn_timeline_turn(turns: int) -> None:
             "subtype": "success",
             "result": "Rate limits added",
             "num_turns": turns,
-            "total_cost_usd": 0.01,
+            "total_cost_usd": 0.12,
             "duration_ms": last_timestamp_ms - started,
             "duration_api_ms": 0,
             "context_window": 200000,
@@ -1473,6 +1487,9 @@ def main() -> None:
         if os.environ.get("CAIC_E2E_VISUALS") == "1" and lower == "implement rate limiting for api endpoints":
             emit_capture_running()
             break
+        if os.environ.get("CAIC_E2E_VISUALS") == "1" and lower == "limit request rates and run the race tests":
+            emit_turn_timeline_turn(turns)
+            continue
         if NATURAL_NATIVE_RE.search(lower):
             emit_native_subagents_turn(turns)
             continue

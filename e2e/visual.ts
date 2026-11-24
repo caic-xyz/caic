@@ -5,18 +5,23 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { validateHistoryEvent, validateHistoryManifest, validateTask } from "../sdk/caic/ts/v1/validate.gen";
 import { createApiClient } from "../sdk/caic/ts/v1/api.gen";
-import type { HistoryManifest, HistoryStats, ImageRefreshStatus, ISOTimestamp } from "../sdk/caic/ts/v1/types.gen";
+import type {
+  HistoryManifest,
+  HistoryStats,
+  ImageRefreshStatus,
+  ISOTimestamp,
+  Task,
+} from "../sdk/caic/ts/v1/types.gen";
 import {
   resourceHistory,
   serverHealth,
   systemStats,
   usageHistory,
+  visualEpoch,
   visualPositionTime,
   visualRecordStrideMs,
 } from "./visual-fixtures";
 import { historyArray } from "../frontend/tests/history";
-
-const visualTime = "2026-09-02T12:00:00.000Z";
 
 export const screenshotRoot =
   process.env.CAIC_SCREENSHOT_DIR ?? path.join(path.dirname(fileURLToPath(import.meta.url)), "screenshots", "frontend");
@@ -29,18 +34,23 @@ export function screenshotDir(layout: FrontendScreenshotLayout): string {
 
 /** Scene controls over the deterministic page that prepareVisualPage sets up. */
 export interface VisualPage {
-  /** Places a task's whole history as if the task started elapsedMs before the
-   *  fixed clock, so its running tool calls read live times while completed
-   *  durations keep their values. Call before the page first loads the task's
-   *  history. */
-  startHistoryBefore(id: string, elapsedMs: number): void;
+  /** Places a task's whole history from startMs instead of the real task
+   *  start. Completed durations keep their values; a history placed before the
+   *  fixed clock shows its running tool calls with live times. Call before the
+   *  page first loads the task's history. */
+  startHistoryAt(id: string, startMs: number): void;
 }
 
 export async function prepareVisualPage(page: Page): Promise<VisualPage> {
-  await page.clock.setFixedTime(visualTime);
+  await page.clock.setFixedTime(visualEpoch);
   // Histories are re-timed from the real task start, which is later than the
   // fixed clock: running work reads 0ms unless its scene moves the history.
   const historyStartByTask = new Map<string, number>();
+  const historyClock = (task: Task) => {
+    const taskStart = Date.parse(task.startedAt ?? "");
+    if (!Number.isFinite(taskStart)) throw new Error("Visual task has no start timestamp");
+    return { taskStart, start: historyStartByTask.get(task.id) ?? taskStart };
+  };
   // Freeze demonstration inputs at the API seam. The product keeps its real
   // corners, icons, timing controls, and full native-activity content.
   await page.route("**/api/caic/v1/server/cache-sizes", (route) =>
@@ -73,9 +83,7 @@ export async function prepareVisualPage(page: Page): Promise<VisualPage> {
     const taskResponse = await route.fetch({ url: taskURL });
     if (!taskResponse.ok()) throw new Error(`Visual task fetch failed: ${taskResponse.status()}`);
     const task = validateTask(await taskResponse.json());
-    const taskStart = Date.parse(task.startedAt ?? "");
-    if (!Number.isFinite(taskStart)) throw new Error("Visual task has no start timestamp");
-    const start = historyStartByTask.get(task.id) ?? taskStart;
+    const { taskStart, start } = historyClock(task);
     const values: unknown = await response.json();
     if (new URL(route.request().url()).pathname.endsWith("/manifest")) {
       const manifest = validateHistoryManifest(values);
@@ -132,6 +140,30 @@ export async function prepareVisualPage(page: Page): Promise<VisualPage> {
   await page.route("**/api/caic/v1/tasks/*/history/**/slice/*/*/*/*", historyResponse);
   await page.route("**/api/caic/v1/tasks/*/history/**/setup/*", historyResponse);
   await page.route("**/api/caic/v1/tasks/*/history/**/activity/*/*?*", historyResponse);
+  // A turn timeline holds its spans and calls as offsets from the turn start.
+  // Move that start as the manifest moves the turn, so the turn's resource
+  // lanes read the fixture samples on the same clock.
+  await page.route("**/api/caic/v1/tasks/*/history/turns/*?*", async (route) => {
+    const url = new URL(route.request().url());
+    const match = /\/tasks\/([^/]+)\/history\/turns\/(\d+)$/.exec(url.pathname);
+    const id = match?.[1];
+    const number = match?.[2];
+    const generation = url.searchParams.get("generation");
+    if (!id || !number || generation === null) throw new Error(`Unexpected visual turn URL: ${url.pathname}`);
+    const client = createApiClient((path, init) => fetch(new URL(path, url), init));
+    const [task, manifest, timeline] = await Promise.all([
+      client.getTask(id),
+      client.getHistoryManifest(id),
+      client.getHistoryTurn(id, number, generation),
+    ]);
+    const turn = manifest.metadata.turns?.find((entry) => entry.number === timeline.number);
+    if (!turn) throw new Error(`Visual manifest has no turn ${number}`);
+    const shift = visualPositionTime(historyClock(task).start, turn) - Date.parse(turn.at);
+    const move = (at: ISOTimestamp) => new Date(Date.parse(at) + shift).toISOString() as ISOTimestamp;
+    timeline.startedAt = move(timeline.startedAt);
+    if (timeline.endedAt) timeline.endedAt = move(timeline.endedAt);
+    await route.fulfill({ json: timeline });
+  });
   // Preserve real SSE ordering and checkpoints while matching finite fixture
   // bodies and payload-free metadata to the same deterministic raw positions.
   // The health events are replaced too: the server samples the real host, so a
@@ -278,8 +310,8 @@ export async function prepareVisualPage(page: Page): Promise<VisualPage> {
   }, fixtures);
   await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" });
   return {
-    startHistoryBefore(id, elapsedMs) {
-      historyStartByTask.set(id, Date.parse(visualTime) - elapsedMs);
+    startHistoryAt(id, startMs) {
+      historyStartByTask.set(id, startMs);
     },
   };
 }
