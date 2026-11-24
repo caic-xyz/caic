@@ -139,9 +139,14 @@ command with `Command exited with code 0.` in `rawOutput.output`. agy then ran
 model calls without a `session/prompt`: one ran `git status`, one streamed the
 report, and no prompt response followed.
 
-`tools.go` therefore turns each `run_command` still running at `end_turn` into
-a background command bound to its tool call, whose end wakes the agent unless
-`IsDaemon` is set. Its completion settles the card with the reported exit code
+In another task log, such a woken model call started `make fix && make build
+&& make verify && make test` with `WaitMsBeforeAsync` 10000, streamed "waiting
+for completion", and ended with a `usage_update` 14 s later while the command
+still ran.
+
+`tools.go` therefore turns each `run_command` still running at `end_turn`, or
+at the end of a woken turn, into a background command bound to its tool call,
+whose end wakes the agent unless `IsDaemon` is set. Its completion settles the card with the reported exit code
 and attaches the tool output and result to the launching row, using the
 session and call ID. After another prompt end, no card is kept.
 

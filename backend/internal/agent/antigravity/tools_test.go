@@ -119,7 +119,10 @@ func TestTools(t *testing.T) {
 		// Minimized from a task log: the model ends its turn while a command it
 		// started runs past WaitMsBeforeAsync. When the command ends, agy runs
 		// a model call that checks the result with a second command, and a
-		// final call that reports in text. No prompt response follows.
+		// final call that reports in text. No prompt response follows. Minimized
+		// from another task log: a woken model call starts a command that runs
+		// past WaitMsBeforeAsync and reports in text, which ends the woken turn
+		// while the command continues in the background.
 		update := func(u string) string {
 			return `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":` + u + `}}`
 		}
@@ -150,6 +153,12 @@ func TestTools(t *testing.T) {
 			{false, command("c2", "tool_call", "in_progress", "git status", ""), "tool_use"},
 			{false, command("c2", "tool_call_update", "completed", "git status", `Command exited with code 0.`), "tool_output_delta tool_result"},
 			{false, chunk("Tests passed."), "text_delta"},
+			{false, usage, "text usage turn_ended"},
+			{false, command("c3", "tool_call", "in_progress", "make verify", ""), "turn_started tool_use"},
+			{false, chunk("Verifying; waiting for completion."), "text_delta"},
+			{false, usage, "text usage background_command(running c3 wakes) turn_ended"},
+			{false, command("c3", "tool_call_update", "completed", "make verify", `Command exited with code 2.`), "turn_started tool_output_delta tool_result background_command(failed exit 2)"},
+			{false, chunk("Verification failed."), "text_delta"},
 			{false, usage, "text usage turn_ended"},
 		} {
 			parse := w.ParseOutput

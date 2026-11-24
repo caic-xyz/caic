@@ -569,6 +569,13 @@ func (w *wireFormat) parseOutputRecord(line []byte) ([]agent.Message, error) {
 	if err != nil {
 		return nil, err
 	}
+	var sessionID string
+	if w.tools != nil && acp.Method(probe.Method) == acp.MethodSessionUpdate {
+		// A harness may scope its native identities by session.
+		if sessionID, err = agent.JSONString(probe.Params, "sessionId"); err != nil {
+			return nil, fmt.Errorf("session/update sessionId: %w", err)
+		}
+	}
 	if handled {
 		if len(metadata) > 0 {
 			if r, ok := metadata[len(metadata)-1].(*agent.ResultMessage); ok {
@@ -577,7 +584,7 @@ func (w *wireFormat) parseOutputRecord(line []byte) ([]agent.Message, error) {
 		}
 		if w.tools != nil {
 			// Usage reports reach the harness, which may bound its own steps by them.
-			return w.tools.Parse("", w.promptPending(), nil, metadata)
+			return w.tools.Parse(sessionID, w.promptPending(), nil, metadata)
 		}
 		return metadata, nil
 	}
@@ -600,13 +607,6 @@ func (w *wireFormat) parseOutputRecord(line []byte) ([]agent.Message, error) {
 		})
 	}
 	if w.tools != nil {
-		var sessionID string
-		if toolCall != nil {
-			// A harness may scope its native identities by session.
-			if sessionID, err = agent.JSONString(probe.Params, "sessionId"); err != nil {
-				return nil, fmt.Errorf("session/update sessionId: %w", err)
-			}
-		}
 		msgs, err = w.tools.Parse(sessionID, prompted, toolCall, msgs)
 		if err != nil {
 			return nil, err

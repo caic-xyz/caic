@@ -93,7 +93,7 @@ func (t *tools) Parse(sid string, prompted bool, tool *acp.ToolCallUpdateUpdate,
 		}
 	}
 	if !prompted {
-		messages = t.wake(messages)
+		messages = t.wake(sid, messages)
 	}
 	return messages, nil
 }
@@ -124,18 +124,29 @@ func (t *tools) SettlePrompt(sid string, stop acp.StopReason, r *agent.ResultMes
 		messages = append(messages, &agent.NativeSubagentMessage{Subagent: *s})
 	}
 	t.running = t.running[:0]
+	if stop == acp.StopReasonEndTurn {
+		detached := t.detach(sid)
+		for i := range detached {
+			messages = append(messages, detached[i].message())
+			r.PendingToolUseIDs = append(r.PendingToolUseIDs, detached[i].ToolUseID)
+		}
+	}
+	t.commands = slices.DeleteFunc(t.commands, func(c commandCall) bool { return c.sessionID == sid })
+	return messages
+}
+
+// detach moves the session's running commands to the background, where agy
+// reports their end later, and returns them.
+func (t *tools) detach(sid string) []commandCall {
+	n := len(t.detached)
 	t.commands = slices.DeleteFunc(t.commands, func(c commandCall) bool {
 		if c.sessionID != sid {
 			return false
 		}
-		if stop == acp.StopReasonEndTurn {
-			t.detached = append(t.detached, c)
-			messages = append(messages, c.message())
-			r.PendingToolUseIDs = append(r.PendingToolUseIDs, c.ToolUseID)
-		}
+		t.detached = append(t.detached, c)
 		return true
 	})
-	return messages
+	return t.detached[n:]
 }
 
 // project canonicalizes a generic tool call and tracks a running run_command.
@@ -250,8 +261,10 @@ func (t *tools) settleDetached(i int, tool *acp.ToolCallUpdateUpdate, messages [
 // command ends or a child reports, as a turn. The turn starts before its first
 // activity. Each model call ends with a usage_update, which tool calls follow
 // when the model requested any; the turn ends at the usage_update of a call
-// that streamed text. See AGENTS.md.
-func (t *tools) wake(messages []agent.Message) []agent.Message {
+// that streamed text. A command still running then continues in the
+// background, as at a prompt's end_turn, and its card precedes the turn's end
+// so the task stays running until agy wakes again. See AGENTS.md.
+func (t *tools) wake(sid string, messages []agent.Message) []agent.Message {
 	for i := 0; i < len(messages); i++ {
 		switch messages[i].(type) {
 		case *agent.TextDeltaMessage:
@@ -259,8 +272,14 @@ func (t *tools) wake(messages []agent.Message) []agent.Message {
 		case *agent.UsageMessage:
 			if t.woken && t.stepText {
 				t.woken, t.stepText = false, false
-				messages = slices.Insert(messages, i+1, agent.Message(&agent.TurnEndedMessage{}))
-				i++
+				detached := t.detach(sid)
+				end := make([]agent.Message, 0, len(detached)+1)
+				for j := range detached {
+					end = append(end, detached[j].message())
+				}
+				end = append(end, &agent.TurnEndedMessage{})
+				messages = slices.Insert(messages, i+1, end...)
+				i += len(end)
 			}
 			continue
 		case *agent.ToolUseMessage, *agent.ToolResultMessage:
