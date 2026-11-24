@@ -91,8 +91,11 @@ export default defineConfig({
   // runs never wait on these limits.
   timeout: 120_000,
   expect: { timeout: 15_000 },
-  // Keep browser processes within a predictable memory budget on large hosts.
-  workers: includeVisuals ? 1 : 4,
+  // Cap workers at half the available CPUs (at most 4) so concurrent Chromium
+  // renderers, SwiftShader WebGL, and OCCT workers do not starve one another on
+  // 4-core CI runners while keeping large local hosts within a predictable
+  // memory budget.
+  workers: includeVisuals ? 1 : Math.min(4, Math.max(1, Math.floor(os.availableParallelism() / 2))),
   outputDir: process.env.CAIC_E2E_OUTPUT_DIR,
   // The dot reporter keeps progress to one line; failures still print in full at the end.
   reporter: "dot",

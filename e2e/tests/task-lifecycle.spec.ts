@@ -37,9 +37,9 @@ test("create task, verify streaming text and result, then purge", async ({ page,
   expect(task).toBeTruthy();
   await waitForTaskState(api, task!.id, "waiting");
 
-  // The Stop button (trash can) appears on hover over the task card in the sidebar.
-  // Scope to the specific card to avoid strict-mode violations from parallel tests.
-  const taskCard = page.locator("[data-task-id]", { hasText: prompt });
+  // The Stop button appears on hover over the task card in the sidebar.
+  // Scope to the specific card ID to avoid scanning every card's text or colliding with parallel tests.
+  const taskCard = page.locator(`[data-task-id="${task!.id}"]`);
   await taskCard.hover();
   const stopBtn = taskCard.getByTestId("stop-task");
   await expect(stopBtn).toBeVisible({ timeout: 15_000 });

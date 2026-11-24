@@ -142,6 +142,33 @@ export type APIClient = ReturnType<typeof createClient>;
 type UniquePrompt = (prefix: string) => string;
 type TaskPreferences = Pick<PreferencesResp, "repositories" | "harness" | "models" | "efforts">;
 
+async function purgeTasks(api: APIClient, taskIDs: Iterable<string>) {
+  await Promise.all(
+    Array.from(taskIDs, async (id) => {
+      let task: Task;
+      try {
+        task = await api.getTask(id);
+      } catch {
+        return;
+      }
+      // Purge rejects transient startup and sync states; let them settle.
+      // Failed and purged tasks need no further cleanup.
+      await expect
+        .poll(
+          async () => {
+            task = await api.getTask(id);
+            return ["branching", "pending", "provisioning", "starting"].includes(task.state);
+          },
+          { timeout: 30_000 },
+        )
+        .toBe(false);
+      if (task.state === "failed" || task.state === "purged") return;
+      if (task.state !== "purging") await api.purgeTask(id);
+      await waitForTaskState(api, id, "purged");
+    }),
+  );
+}
+
 export const test = base.extend<{
   api: APIClient;
   uniquePrompt: UniquePrompt;
@@ -174,7 +201,24 @@ export const test = base.extend<{
     await page.unrouteAll({ behavior: "wait" });
   },
   api: async ({ request }, use) => {
-    await use(createClient(request));
+    const client = createClient(request);
+    const createdTaskIDs = new Set<string>();
+    const tracked: APIClient = {
+      ...client,
+      async createTask(...args) {
+        const resp = await client.createTask(...args);
+        createdTaskIDs.add(resp.id);
+        return resp;
+      },
+    };
+    try {
+      await use(tracked);
+    } finally {
+      // Visual specs share seeded tasks across serial captures.
+      if (process.env.CAIC_E2E_VISUALS !== "1" && createdTaskIDs.size > 0) {
+        await purgeTasks(client, createdTaskIDs);
+      }
+    }
   },
   uniquePrompt: async ({ api }, use, testInfo) => {
     const seed = process.env.CAIC_E2E_SEED;
@@ -191,23 +235,9 @@ export const test = base.extend<{
       // tasks so later pages and trace snapshots do not accumulate every
       // earlier conversation's active sidebar card and resource updates.
       const tasks = ((await api.listTasks()) ?? []).filter((task) => task.initialPrompt.includes(testTag));
-      await Promise.all(
-        tasks.map(async (task) => {
-          // Purge rejects transient startup and sync states; let them settle.
-          // Failed and purged tasks need no further cleanup.
-          await expect
-            .poll(
-              async () => {
-                task = await api.getTask(task.id);
-                return ["branching", "pending", "provisioning", "starting"].includes(task.state);
-              },
-              { timeout: 30_000 },
-            )
-            .toBe(false);
-          if (task.state === "failed" || task.state === "purged") return;
-          if (task.state !== "purging") await api.purgeTask(task.id);
-          await waitForTaskState(api, task.id, "purged");
-        }),
+      await purgeTasks(
+        api,
+        tasks.map((task) => task.id),
       );
     }
   },
