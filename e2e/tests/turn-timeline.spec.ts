@@ -583,11 +583,12 @@ test.describe("touch", () => {
     await expect(page).toHaveURL(new RegExp(`/task/@${id}[^/]*$`));
     const tapped = await page.evaluate(() => document.documentElement.dataset.tappedSpan ?? "");
     expect(again.covering).toContain(tapped);
-    // The revealed row is the tapped span's: its text holds the span's name.
+    // The revealed row is the tapped span's: its summary holds the span's tool
+    // name and target (the transcript may show a relative path before the basename).
     const focused = page.getByTestId("conversation-pane").locator('[data-testid="tool-call"]:has(> summary:focus)');
     await expect(focused).toHaveCount(1);
     const name = tapped.replace(/^[^:]+: /, "").replace(/, (at|from) .*$/, "");
-    const squeeze = (text: string) => text.replace(/\s+/g, "");
-    expect(squeeze((await focused.locator("summary").first().textContent()) ?? "")).toContain(squeeze(name));
+    const summary = (await focused.locator("summary").first().textContent()) ?? "";
+    for (const part of name.split(/\s+/)) expect(summary).toContain(part);
   });
 });
