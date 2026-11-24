@@ -36,12 +36,13 @@ for (const width of [390, 1280]) {
       const subviewURL = page.url();
       expect(await taskNode?.evaluate((node) => node.isConnected)).toBe(true);
       const pane = page.getByTestId("task-view-pane");
+      const mobile = width <= 768;
       await expect(pane).toBeVisible();
       if (subview === "perf") {
         await expect(pane.getByText("Performance", { exact: true })).toBeVisible();
         await expect(pane.getByRole("heading", { name: "Resources" })).toBeVisible();
       }
-      if (width <= 768) await expect(conversation).toBeHidden();
+      if (mobile) await expect(conversation).toBeHidden();
       else {
         await expect(conversation).toBeVisible();
         const taskBox = await conversation.boundingBox();
@@ -52,9 +53,11 @@ for (const width of [390, 1280]) {
           `${new URL(taskURL).pathname}/perf`,
         );
       }
-      await expect(page.getByRole("button", { name: "Full screen", exact: true })).toBeVisible();
+      const fullScreen = pane.getByRole("button", { name: "Full screen", exact: true });
+      const closeView = pane.getByRole("button", { name: "Close view", exact: true });
+      await expect(fullScreen).toBeVisible();
       const paneNode = await pane.locator('[data-testid="detail-pane"] > div').first().elementHandle();
-      await page.getByRole("button", { name: "Full screen", exact: true }).click();
+      await fullScreen.click();
       await expect(page).toHaveURL(/fullscreen=1/);
       await expect(conversation).toBeHidden();
       await expect(page.getByTestId("summary-pane")).toBeHidden();
@@ -85,13 +88,17 @@ for (const width of [390, 1280]) {
       await expect(page).toHaveURL(subviewURL);
       expect(await paneNode?.evaluate((node) => node.isConnected)).toBe(true);
 
-      await page.getByRole("button", { name: "Close view", exact: true }).click();
+      // Escape closes the mobile subview and leaves it in browser history.
+      if (mobile) await page.keyboard.press("Escape");
+      else await closeView.click();
       await expect(page).toHaveURL(new RegExp(`/task/@${id}(?:\\+[^/]+)?$`));
       await expect(prompt).toHaveText("Keep this draft");
       await expect(link).toBeFocused();
       await page.goBack();
       await expect(page).toHaveURL(subviewURL);
-      await expect(page.getByRole("button", { name: "Close view", exact: true })).toBeVisible();
+      await expect(fullScreen).toBeVisible();
+      if (mobile) await expect(closeView).toBeHidden();
+      else await expect(closeView).toBeVisible();
       await page.goBack();
       await expect(page).toHaveURL(taskURL);
       expect(await taskNode?.evaluate((node) => node.isConnected)).toBe(true);
