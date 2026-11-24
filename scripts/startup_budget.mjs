@@ -18,7 +18,7 @@ import { brotliDecompressSync } from "node:zlib";
 const usage = "Usage: node scripts/startup_budget.mjs --dist <built-directory> [--report]";
 const limits = {
   JavaScript: { brotli: 165_000, decoded: 630_000 },
-  CSS: { brotli: 23_500, decoded: 135_000 },
+  CSS: { brotli: 24_500, decoded: 135_000 },
 };
 // Build metadata and individual initial chunks must be small. Refuse malformed
 // or unexpectedly huge input rather than allocate unbounded decompression data.

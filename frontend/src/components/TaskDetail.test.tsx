@@ -1616,7 +1616,7 @@ describe("TaskDetail", () => {
     const { getAllByText, getByText } = await renderTaskDetail({ harness: "codex" });
 
     expect(getAllByText("100ms")).toHaveLength(1);
-    expect(getByText("/workspace/main.go")).toBeInTheDocument();
+    expect(getAllByText("/workspace/main.go")).toHaveLength(2);
     const added = getByText((_, element) => element?.textContent === '+\tfmt.Println("Hi, World!")');
     const deleted = getByText((_, element) => element?.textContent === '-\tfmt.Println("Hello, World!")');
     expect(added.className).toMatch(/lineAdded/);
@@ -1954,7 +1954,7 @@ describe("TaskDetail", () => {
     expect(getByText("Provider request failed.")).toBeInTheDocument();
   });
 
-  it("shows a neutral prompt outcome when a command continues", async () => {
+  it("hides the result card when a command continues in the background", async () => {
     taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
       emit(handlers, { kind: "textDelta", ts: 1_000, textDelta: { text: "Tests are running." } });
       emit(handlers, { kind: "text", ts: 1_500, text: { text: "Tests are running." } });
@@ -1970,10 +1970,10 @@ describe("TaskDetail", () => {
       } as unknown as EventSource;
     });
 
-    const { getAllByText, getByText, queryByText } = await renderTaskDetail();
+    const { getAllByText, queryByText } = await renderTaskDetail();
 
     expect(getAllByText("Tests are running.")).toHaveLength(1);
-    expect(getByText("Work continued in background")).toBeInTheDocument();
+    expect(queryByText("Work continued in background")).not.toBeInTheDocument();
     expect(queryByText("Done")).not.toBeInTheDocument();
   });
 
@@ -3305,6 +3305,73 @@ it("marks a call the server interrupted as finished without an error", async () 
   expect(within(row).getByRole("img", { name: "Interrupted" })).toBeInTheDocument();
   expect(within(row).queryByText("error")).not.toBeInTheDocument();
   expect(within(toolRow("read-tool")).queryByRole("img", { name: "Interrupted" })).not.toBeInTheDocument();
+});
+
+it("shows Read and Edit paths trimmed by the harness start directory with start-elision markup", async () => {
+  const inside = "/home/user/src/caic/frontend/src/components/TaskDetail.tsx";
+  const outside = "/home/user/.gemini/antigravity-cli/skills/code-quality/SKILL.md";
+  taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+    for (const message of [
+      {
+        kind: "init",
+        ts: 900,
+        init: {
+          sessionID: "s1",
+          reportedModel: "m",
+          agentVersion: "1",
+          cwd: "/home/user/src/caic",
+          harness: "antigravity",
+        },
+      },
+      { kind: "toolUse", ts: 1000, toolUse: { toolUseID: "read-in", name: "Read", input: { filePath: inside } } },
+      { kind: "toolResult", ts: 1100, toolResult: { toolUseID: "read-in", duration: 0.1 } },
+      {
+        kind: "toolUse",
+        ts: 1200,
+        toolUse: {
+          toolUseID: "edit-in",
+          name: "Edit",
+          detail: "TaskDetail.tsx",
+          input: {},
+          inputTruncated: true,
+          inputView: { kind: "fileChanges", files: [{ path: inside, patch: "@@ -1 +1 @@\n-a\n+b\n" }] },
+        },
+      },
+      { kind: "toolResult", ts: 1300, toolResult: { toolUseID: "edit-in", duration: 0.1 } },
+      { kind: "toolUse", ts: 1400, toolUse: { toolUseID: "read-out", name: "Read", input: { filePath: outside } } },
+      { kind: "toolResult", ts: 1500, toolResult: { toolUseID: "read-out", duration: 0.1 } },
+      {
+        kind: "toolUse",
+        ts: 1600,
+        toolUse: {
+          toolUseID: "codex-fc",
+          name: "FileChange",
+          detail: "TaskDetail.tsx",
+          input: {},
+          inputView: { kind: "fileChanges", files: [{ path: inside, patch: "@@ -1 +1 @@\n-a\n+b\n" }] },
+        },
+      },
+      { kind: "toolResult", ts: 1700, toolResult: { toolUseID: "codex-fc", duration: 0.1 } },
+    ] satisfies EventMessage[])
+      emit(handlers, message);
+    return { close: vi.fn() } as unknown as EventSource;
+  });
+  await renderTaskDetail({ taskId: "read-path", taskState: "stopped" });
+  const relative = "frontend/src/components/TaskDetail.tsx";
+  for (const [id, name, want] of [
+    ["read-in", "Read", relative],
+    ["edit-in", "Edit", relative],
+    ["read-out", "Read", outside],
+    ["codex-fc", "FileChange", relative],
+  ] as const) {
+    const row = toolRow(id);
+    expect(row).not.toHaveAttribute("open");
+    const summary = row.querySelector("summary");
+    expect(summary).toHaveTextContent(`${name}${want}`);
+    const detail = summary?.querySelector(`[title="${want}"]`);
+    expect(detail).toBeInTheDocument();
+    expect(detail?.querySelector('bdi[dir="ltr"]')).toHaveTextContent(want);
+  }
 });
 
 it("counts a tool call as unfinished while its background command runs", async () => {

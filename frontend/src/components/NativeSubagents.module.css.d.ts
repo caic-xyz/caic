@@ -9,5 +9,6 @@ declare const classes: {
   readonly "status": string;
   readonly "statusIcon": string;
   readonly "summaryContent": string;
+  readonly "toolChip": string;
 };
 export default classes;

@@ -106,7 +106,8 @@
 
 /* Inline status chips in tool rows keep their margins; the card uses gap. */
 .summaryContent > .status,
-.summaryContent > .statusIcon {
+.summaryContent > .statusIcon,
+.toolChip {
   flex-shrink: 0;
   margin-inline: 0;
 }

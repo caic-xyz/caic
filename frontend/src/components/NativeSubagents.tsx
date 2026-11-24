@@ -210,14 +210,19 @@ export default function NativeAgents(props: {
 }
 
 // BackgroundCommandStatusChip is the compact tool-row indicator: it resolves a
-// detached shell's outcome instead of leaving a perpetual "running in
-// background" badge on the tool call that spawned it. A running watch only
-// relays events, so it says "watching".
+// detached shell's outcome instead of leaving a perpetual "background" badge on
+// the tool call that spawned it. A running watch only relays events, so it says
+// "watching".
 export function BackgroundCommandStatusChip(props: { command: HistoryBackgroundCommand; settled: boolean }) {
+  const running = () => props.command.status === "running" && !props.settled;
   return (
-    <span class={styles.status} data-state={props.command.status} data-testid="background-command-chip">
+    <span
+      class={running() && !props.command.watch ? styles.background : `${styles.status} ${styles.toolChip}`}
+      data-state={props.command.status}
+      data-testid="background-command-chip"
+    >
       <Show
-        when={props.command.status === "running" && !props.settled}
+        when={running()}
         fallback={
           <Show
             when={props.command.exitCode !== undefined && props.command.exitCode !== null}
@@ -227,7 +232,7 @@ export function BackgroundCommandStatusChip(props: { command: HistoryBackgroundC
           </Show>
         }
       >
-        {props.command.watch ? "watching" : "running in background"}
+        {props.command.watch ? "watching" : "background"}
       </Show>
     </span>
   );

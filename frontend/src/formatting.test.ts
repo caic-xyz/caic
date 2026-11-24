@@ -12,6 +12,7 @@ import {
   staleStateColor,
   stateColor,
   toolCallDetail,
+  trimPathPrefix,
 } from "./formatting";
 
 describe("formatTokens", () => {
@@ -131,13 +132,40 @@ describe("toolCallDetail", () => {
     expect(toolCallDetail("Monitor", { command: "  tail -f log" })).toBe("tail -f log");
   });
 
-  it("summarises Pi path-based file tools", () => {
-    expect(toolCallDetail("read", { path: "gomode/docs/SERVER_LIBRARY.md" })).toBe("SERVER_LIBRARY.md");
+  it("summarises file tools across harness input keys", () => {
+    expect(toolCallDetail("Read", { filePath: "/home/user/src/caic/frontend/src/formatting.ts" })).toBe(
+      "/home/user/src/caic/frontend/src/formatting.ts",
+    );
+    expect(toolCallDetail("Read", { file_path: "/workspace/main.go" })).toBe("/workspace/main.go");
+    expect(toolCallDetail("read", { path: "gomode/docs/SERVER_LIBRARY.md" })).toBe("gomode/docs/SERVER_LIBRARY.md");
+    expect(toolCallDetail("Write", { filePath: "/workspace/out.txt" })).toBe("/workspace/out.txt");
+    expect(toolCallDetail("NotebookEdit", { notebook_path: "/workspace/analysis.ipynb" })).toBe(
+      "/workspace/analysis.ipynb",
+    );
     expect(
       toolCallDetail("edit", {
         path: "gomode/docs/SERVER_LIBRARY.md",
         edits: [{ oldText: "a", newText: "b" }],
       }),
-    ).toBe("SERVER_LIBRARY.md");
+    ).toBe("gomode/docs/SERVER_LIBRARY.md");
+  });
+});
+
+describe("trimPathPrefix", () => {
+  it("strips a matching start directory on a path boundary", () => {
+    expect(trimPathPrefix("/home/user/src/caic/frontend/src/formatting.ts", "/home/user/src/caic")).toBe(
+      "frontend/src/formatting.ts",
+    );
+    expect(trimPathPrefix("/home/user/src/caic/main.go", "/home/user/src/caic/")).toBe("main.go");
+  });
+
+  it("keeps paths outside the start directory, root paths, and relative paths", () => {
+    expect(trimPathPrefix("/home/user/src/caic-other/main.go", "/home/user/src/caic")).toBe(
+      "/home/user/src/caic-other/main.go",
+    );
+    expect(trimPathPrefix("/home/user/src/caic/", "/home/user/src/caic")).toBe("/home/user/src/caic/");
+    expect(trimPathPrefix("/etc/hosts", "/")).toBe("/etc/hosts");
+    expect(trimPathPrefix("/etc/hosts", "")).toBe("/etc/hosts");
+    expect(trimPathPrefix("frontend/src/formatting.ts", "/home/user/src/caic")).toBe("frontend/src/formatting.ts");
   });
 });

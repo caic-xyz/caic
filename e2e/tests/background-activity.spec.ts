@@ -155,7 +155,7 @@ for (const width of [390, 1280]) {
         await page.keyboard.press("Enter");
         await expect(checks).toBeInViewport({ ratio: mobile ? 0 : 1 });
         await expect(checks.locator("summary")).toBeFocused();
-        await expect(checks.getByTestId("background-command-chip")).toHaveText("running in background");
+        await expect(checks.getByTestId("background-command-chip")).toHaveText("background");
         await expect(toolCall(page, "toolu_bg_watch").getByTestId("background-command-chip")).toHaveText("watching");
         const agent = page.locator(`[data-testid="native-subagent-card"][data-background="true"]`);
         await chips.nth(1).click();

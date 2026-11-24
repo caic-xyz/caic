@@ -171,21 +171,42 @@ export function staleStateColor(state: TaskState): string {
 }
 
 function pathFromInput(input: Record<string, unknown>): string {
-  const path = input.file_path ?? input.path;
-  return typeof path === "string" ? path : "";
+  for (const key of ["file_path", "filePath", "path", "notebook_path"]) {
+    const value = input[key];
+    if (typeof value === "string" && value) return value;
+  }
+  return "";
 }
 
-function basename(path: string): string {
-  return path.replace(/^.*\//, "");
+/** True for file-path tools whose summary shows the path and elides from the start. */
+export function isPathTool(name: string): boolean {
+  switch (name.toLowerCase()) {
+    case "read":
+    case "write":
+    case "edit":
+    case "multiedit":
+    case "notebookedit":
+      return true;
+    default:
+      return false;
+  }
+}
+
+/** Trims a leading harness working directory from path, keeping a non-empty relative path. */
+export function trimPathPrefix(path: string, startDir: string): string {
+  const base = startDir.replace(/\/+$/, "");
+  if (!base) return path;
+  const prefix = `${base}/`;
+  return path.startsWith(prefix) && path.length > prefix.length ? path.slice(prefix.length) : path;
 }
 
 export function toolCallDetail(name: string, input: Record<string, unknown>): string {
   switch (name.toLowerCase()) {
     case "read":
     case "write":
-      return basename(pathFromInput(input));
     case "edit":
-      return basename(pathFromInput(input));
+    case "multiedit":
+      return pathFromInput(input);
     case "bash":
       return typeof input.command === "string" ? input.command.trimStart() : "";
     case "grep":
@@ -205,7 +226,7 @@ export function toolCallDetail(name: string, input: Record<string, unknown>): st
     case "websearch":
       return typeof input.query === "string" ? input.query : "";
     case "notebookedit":
-      return typeof input.notebook_path === "string" ? input.notebook_path.replace(/^.*\//, "") : "";
+      return pathFromInput(input);
     default:
       return "";
   }

@@ -295,7 +295,7 @@ describe("background summaries", () => {
     const [settled, setSettled] = createSignal(false);
     render(() => <BackgroundCommandStatusChip command={activity()} settled={settled()} />);
     const chip = screen.getByTestId("background-command-chip");
-    expect(chip).toHaveTextContent("running in background");
+    expect(chip).toHaveTextContent(/^background$/);
     setSettled(true);
     expect(chip).toHaveTextContent("Last observed running · outcome unknown");
     setActivity({ ...command, status: "completed", exitCode: 0 });

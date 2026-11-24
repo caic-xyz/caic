@@ -807,9 +807,10 @@ a.ciStatus:hover {
 }
 
 .toolSummaryMain {
+  display: flex;
+  align-items: baseline;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .toolBlockPre {
@@ -1053,6 +1054,7 @@ a.ciStatus:hover {
 }
 
 .toolDetail {
+  min-width: 0;
   margin-left: 0.5em;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1061,12 +1063,18 @@ a.ciStatus:hover {
   white-space: nowrap;
 }
 
+.toolDetailStart {
+  text-align: left;
+  direction: rtl;
+}
+
 .toolDuration {
   flex-shrink: 0;
   margin-left: auto;
 }
 
 .toolError {
+  flex-shrink: 0;
   margin-left: 0.5em;
   font-size: 0.75rem;
   font-weight: bold;

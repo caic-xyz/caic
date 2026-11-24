@@ -95,13 +95,14 @@ func TestMetadataParser(t *testing.T) {
 				t.Parallel()
 				var metadata agent.SessionMetadata
 				var starts []agent.SessionMetadata
+				var cwds []string
 				for _, record := range []struct{ input, output, kind string }{
 					{`{"id":1,"method":"initialize","params":{}}`, `{"id":1,"result":{"agentInfo":{"version":"1.18.31"}}}`, "session_metadata"},
-					{`{"id":2,"method":"session/new","params":{}}`, `{"id":2,"result":{"sessionId":"root","models":{"currentModelId":"native-default"}}}`, "init"},
+					{`{"id":2,"method":"session/new","params":{"cwd":"/home/user/src/caic"}}`, `{"id":2,"result":{"sessionId":"root","models":{"currentModelId":"native-default"}}}`, "init"},
 					{`{"id":3,"method":"session/set_config_option","params":{"sessionId":"root","configId":"model","value":"requested"}}`, `{"id":3,"result":{"configOptions":[{"id":"model","currentValue":"served-model"},{"id":"effort","currentValue":"high"}]}}`, "session_metadata"},
 					{"", `{"method":"session/update","params":{"sessionId":"root","update":{"sessionUpdate":"config_option_update","configOptions":[{"id":"effort","currentValue":"low"}]}}}`, "session_metadata"},
 					{`{"id":1,"method":"initialize","params":{}}`, `{"id":1,"result":{"agentInfo":{"version":"1.18.32"}}}`, "session_metadata"},
-					{`{"id":2,"method":"session/load","params":{"sessionId":"root"}}`, `{"id":2,"result":{}}`, "init"},
+					{`{"id":2,"method":"session/load","params":{"sessionId":"root","cwd":"/home/user/src/caic"}}`, `{"id":2,"result":{}}`, "init"},
 				} {
 					if record.input != "" {
 						if _, err := parser.ParseInput([]byte(record.input)); err != nil {
@@ -119,6 +120,7 @@ func TestMetadataParser(t *testing.T) {
 						metadata.Apply(message)
 						if init, ok := message.(*agent.InitMessage); ok {
 							starts = append(starts, agent.SessionMetadata{SessionID: init.SessionID, ReportedModel: init.ReportedModel, ReportedEffort: init.ReportedEffort, AgentVersion: init.Version})
+							cwds = append(cwds, init.Cwd)
 						}
 					}
 				}
@@ -133,6 +135,9 @@ func TestMetadataParser(t *testing.T) {
 				}
 				if !reflect.DeepEqual(starts, wantStarts) {
 					t.Fatalf("proven session starts = %+v, want %+v", starts, wantStarts)
+				}
+				if wantCwds := []string{"/home/user/src/caic", "/home/user/src/caic"}; !reflect.DeepEqual(cwds, wantCwds) {
+					t.Fatalf("proven session cwds = %+v, want %+v", cwds, wantCwds)
 				}
 			})
 		}

@@ -17,6 +17,7 @@ import (
 type pendingRequest struct {
 	method    acp.Method
 	sessionID string
+	cwd       string
 	// compact marks a session/prompt that sends exactly Config.CompactPrompt.
 	compact bool
 }
@@ -63,10 +64,16 @@ func (w *metadataState) ParseInput(line []byte) ([]agent.Message, error) {
 			return nil, errors.New("too many pending ACP metadata requests")
 		}
 		request := pendingRequest{method: method, sessionID: sid}
-		if method == acp.MethodSessionPrompt {
+		switch method {
+		case acp.MethodSessionPrompt:
 			if request.compact, err = compactPrompt(probe.Params, w.config.CompactPrompt); err != nil {
 				return nil, err
 			}
+		case acp.MethodSessionNew, acp.MethodSessionLoad, acp.MethodSessionResume:
+			if request.cwd, err = agent.JSONString(probe.Params, "cwd"); err != nil {
+				return nil, err
+			}
+		default:
 		}
 		w.requests[id] = request
 		if method == acp.MethodSessionPrompt && (sid == "" || w.session.SessionID == "" || sid == w.session.SessionID) {
@@ -174,7 +181,7 @@ func (w *metadataState) parseOutput(line []byte, probe *agent.JSONRPCEnvelope) (
 		known := w.session
 		w.mu.Unlock()
 		if request.method == acp.MethodSessionNew || request.method == acp.MethodSessionLoad || request.method == acp.MethodSessionResume {
-			return []agent.Message{&agent.InitMessage{SessionID: known.SessionID, ReportedModel: known.ReportedModel, ReportedEffort: known.ReportedEffort, Version: known.AgentVersion}}, true, nil
+			return []agent.Message{&agent.InitMessage{SessionID: known.SessionID, Cwd: request.cwd, ReportedModel: known.ReportedModel, ReportedEffort: known.ReportedEffort, Version: known.AgentVersion}}, true, nil
 		}
 		report := &agent.SessionMetadataMessage{SessionMetadata: metadata}
 		report.Source.ThreadID = request.sessionID
