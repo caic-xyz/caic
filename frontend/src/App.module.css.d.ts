@@ -21,6 +21,7 @@ declare const classes: {
   readonly "subviewOpen": string;
   readonly "title": string;
   readonly "titleButton": string;
+  readonly "viewport": string;
   readonly "visuallyHidden": string;
   readonly "voiceHidden": string;
   readonly "voiceShell": string;

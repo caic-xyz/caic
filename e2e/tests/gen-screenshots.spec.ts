@@ -620,18 +620,18 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
   await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
-  // Mobile never nests scrolling inside the task list: the app shell scrolls so
+  // Mobile never nests scrolling inside the task list: the app viewport scrolls so
   // the header can scroll away and the cards use the viewport.
   const mobileTaskList = page.getByTestId("task-list");
   await expect.poll(async () => mobileTaskList.evaluate((el) => getComputedStyle(el).overflowY)).toBe("visible");
-  const mobileAppShell = page.getByTestId("app-shell");
-  await expect.poll(async () => mobileAppShell.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(0);
-  await mobileAppShell.evaluate((el) => {
+  const mobileViewport = page.getByTestId("app-viewport");
+  await expect.poll(async () => mobileViewport.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(0);
+  await mobileViewport.evaluate((el) => {
     el.scrollTop = Math.min(280, el.scrollHeight - el.clientHeight);
   });
-  await expect.poll(async () => mobileAppShell.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  await expect.poll(async () => mobileViewport.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
   await expect
-    .poll(async () => mobileAppShell.getByRole("banner").evaluate((el) => el.getBoundingClientRect().bottom))
+    .poll(async () => mobileViewport.getByRole("banner").evaluate((el) => el.getBoundingClientRect().bottom))
     .toBeLessThanOrEqual(0);
   await captureScreenshotPair(page, "mobile", "task-list-scrolled-mobile");
 

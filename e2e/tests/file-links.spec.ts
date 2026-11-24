@@ -204,7 +204,7 @@ for (const width of [390, 1280]) {
           )
           .toBeLessThanOrEqual(0);
         await page.mouse.wheel(0, -10000);
-        await expect.poll(() => page.getByTestId("app-shell").evaluate((el) => el.scrollTop)).toBe(0);
+        await expect.poll(() => page.getByTestId("app-viewport").evaluate((el) => el.scrollTop)).toBe(0);
         await page.setViewportSize({ width, height: 900 });
       }
       await page.goBack();

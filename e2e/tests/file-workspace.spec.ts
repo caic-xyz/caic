@@ -12,7 +12,7 @@ async function conversationPosition(page: Page) {
   return link.evaluate((element) => {
     const area = element.closest<HTMLElement>(
       window.matchMedia("(max-width: 768px)").matches
-        ? '[data-testid="app-shell"]'
+        ? '[data-testid="app-viewport"]'
         : '[data-testid="task-message-area"]',
     );
     if (!area) throw new Error("Guide link is outside the conversation");
@@ -134,7 +134,7 @@ for (const width of [390, 1000, 1440]) {
     // Read older output through user input before recording its position, so
     // initial live-tail placement cannot overwrite a programmatic scroll.
     const messages = page.getByTestId("task-message-area");
-    const viewport = width === 390 ? page.getByTestId("app-shell") : messages;
+    const viewport = width === 390 ? page.getByTestId("app-viewport") : messages;
     await expect(messages).toHaveAttribute("aria-busy", "false");
     await expect
       .poll(() =>
@@ -177,10 +177,10 @@ for (const width of [390, 1000, 1440]) {
 
     await expect(page.getByTestId("voice-overlay")).toBeVisible();
     if (width === 390) {
-      const shell = page.getByTestId("app-shell");
+      const viewport = page.getByTestId("app-viewport");
       const document = page.getByTestId("document-pane");
       const header = document.locator("header");
-      await expect.poll(() => shell.evaluate((el) => el.scrollTop)).toBe(0);
+      await expect.poll(() => viewport.evaluate((el) => el.scrollTop)).toBe(0);
       await document.getByRole("heading", { name: "Guide", exact: true }).hover();
       await page.mouse.wheel(0, 600);
       await expect.poll(() => header.evaluate((el) => el.getBoundingClientRect().bottom)).toBeLessThanOrEqual(0);
@@ -188,7 +188,7 @@ for (const width of [390, 1000, 1440]) {
         .poll(() => page.getByTestId("new-task-button").evaluate((el) => el.getBoundingClientRect().bottom))
         .toBeLessThanOrEqual(0);
       await page.mouse.wheel(0, -10000);
-      await expect.poll(() => shell.evaluate((el) => el.scrollTop)).toBe(0);
+      await expect.poll(() => viewport.evaluate((el) => el.scrollTop)).toBe(0);
       await expect(header.getByRole("button", { name: "Full screen", exact: true })).toBeInViewport();
     }
     if (width > 768) {

@@ -143,7 +143,7 @@ function Shell(props: { children?: JSX.Element }) {
   const [mobile, setMobile] = createSignal(mobileQuery.matches);
   const mobileVoice = () => mobile() && voiceConnected() && location.pathname === "/";
   const taskView = () => taskViewMode(location.pathname, location.search);
-  const [shell, setShell] = createSignal<HTMLDivElement>();
+  const [viewport, setViewport] = createSignal<HTMLDivElement>();
   const scrollingConversation = createMemo(() => mobile() && s.selectedId() !== null && taskView() === "closed");
   const scrollingDocument = createMemo(
     () => mobile() && taskView() === "docked" && location.pathname.endsWith("/view"),
@@ -151,10 +151,10 @@ function Shell(props: { children?: JSX.Element }) {
   const documentNavigation = createMemo(() => (scrollingDocument() ? location.pathname + location.search : null));
   createEffect(() => {
     if (!documentNavigation()) return;
-    const element = shell();
+    const element = viewport();
     if (element) element.scrollTop = 0;
   });
-  const conversationViewport = createMemo(() => (scrollingConversation() ? shell() : undefined));
+  const conversationViewport = createMemo(() => (scrollingConversation() ? viewport() : undefined));
 
   onMount(() => {
     const onViewportChange = (event: MediaQueryListEvent) => setMobile(event.matches);
@@ -167,60 +167,60 @@ function Shell(props: { children?: JSX.Element }) {
       <Show when={auth.providers().length === 0 || auth.user()} fallback={<LoginPage />}>
         <div
           class={`${styles.app} ${taskView() !== "closed" ? styles.subviewOpen : ""} ${taskView() === "fullscreen" ? styles.subviewFullscreen : ""}`}
-
-          ref={setShell}
           data-testid="app-shell"
         >
-          <div
-            class={`${styles.normalContent} ${scrollingConversation() || scrollingDocument() ? styles.scrollingPage : ""} ${mobileVoice() ? styles.voiceHidden : ""}`}
-            aria-hidden={mobileVoice()}
-            data-testid="normal-content"
-          >
-            <header class={`${styles.navbar} ${taskView() === "fullscreen" ? styles.chromeHidden : ""}`}>
-              <h1 class={styles.title}>
-                <button
-                  class={styles.titleButton}
-                  type="button"
-                  onClick={() => s.navigate("/")}
-                  title={`New task — ${statusLabel()}`}
-                  aria-describedby="connection-status"
-                  data-status={status()}
-                  data-testid="new-task-button"
-                >
-                  caic
-                </button>
-              </h1>
-              <span id="connection-status" class={styles.visuallyHidden} aria-live="polite">
-                {statusLabel()}
-              </span>
-              <span class={styles.subtitle}>Coding Agents in Containers</span>
-              <UsageBadges usage={s.usage} now={s.now} />
-              <div class={styles.headerActions}>
-                <ServerHealthIndicator health={s.serverHealth()} connected={s.connected()} />
-                <AccountMenu onKeyboardShortcuts={() => setShortcutsOpen(true)} />
-              </div>
-              <Show when={routing()}>
-                <progress class={styles.routeLoading} aria-label="Loading page" title="Loading page" />
-              </Show>
-            </header>
+          <div class={styles.viewport} ref={setViewport} data-testid="app-viewport">
+            <div
+              class={`${styles.normalContent} ${scrollingConversation() || scrollingDocument() ? styles.scrollingPage : ""} ${mobileVoice() ? styles.voiceHidden : ""}`}
+              aria-hidden={mobileVoice()}
+              data-testid="normal-content"
+            >
+              <header class={`${styles.navbar} ${taskView() === "fullscreen" ? styles.chromeHidden : ""}`}>
+                <h1 class={styles.title}>
+                  <button
+                    class={styles.titleButton}
+                    type="button"
+                    onClick={() => s.navigate("/")}
+                    title={`New task — ${statusLabel()}`}
+                    aria-describedby="connection-status"
+                    data-status={status()}
+                    data-testid="new-task-button"
+                  >
+                    caic
+                  </button>
+                </h1>
+                <span id="connection-status" class={styles.visuallyHidden} aria-live="polite">
+                  {statusLabel()}
+                </span>
+                <span class={styles.subtitle}>Coding Agents in Containers</span>
+                <UsageBadges usage={s.usage} now={s.now} />
+                <div class={styles.headerActions}>
+                  <ServerHealthIndicator health={s.serverHealth()} connected={s.connected()} />
+                  <AccountMenu onKeyboardShortcuts={() => setShortcutsOpen(true)} />
+                </div>
+                <Show when={routing()}>
+                  <progress class={styles.routeLoading} aria-label="Loading page" title="Loading page" />
+                </Show>
+              </header>
 
-            <ErrorBoundary fallback={(error: unknown, reset) => <ErrorFallback error={error} reset={reset} />}>
-              <ConversationViewportContext.Provider value={conversationViewport}>
-                <MarkdownConversationContext.Provider value={s.resolveConversationHref}>
-                  <Suspense fallback={<p role="status">Loading page…</p>}>{props.children}</Suspense>
-                </MarkdownConversationContext.Provider>
-              </ConversationViewportContext.Provider>
-            </ErrorBoundary>
+              <ErrorBoundary fallback={(error: unknown, reset) => <ErrorFallback error={error} reset={reset} />}>
+                <ConversationViewportContext.Provider value={conversationViewport}>
+                  <MarkdownConversationContext.Provider value={s.resolveConversationHref}>
+                    <Suspense fallback={<p role="status">Loading page…</p>}>{props.children}</Suspense>
+                  </MarkdownConversationContext.Provider>
+                </ConversationViewportContext.Provider>
+              </ErrorBoundary>
+            </div>
+
+            <Show when={mobileVoice()}>
+              <MobileVoiceTasks
+                tasks={s.tasks}
+                tasksLoading={s.tasksLoading}
+                settledLoading={s.settledLoading}
+                getTaskNumber={getVoiceTaskNumber}
+              />
+            </Show>
           </div>
-
-          <Show when={mobileVoice()}>
-            <MobileVoiceTasks
-              tasks={s.tasks}
-              tasksLoading={s.tasksLoading}
-              settledLoading={s.settledLoading}
-              getTaskNumber={getVoiceTaskNumber}
-            />
-          </Show>
 
           <Show when={s.cloneOpen()}>
             <CloneRepoDialog

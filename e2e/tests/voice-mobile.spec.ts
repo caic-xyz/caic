@@ -1,4 +1,4 @@
-// Browser coverage for voice setup focus, choices, microphone recovery, native focus, and mobile task navigation.
+// Browser coverage for voice setup focus, choices, microphone recovery, native focus, mobile task navigation, and the mobile prompt above the voice panel.
 
 import {
   createTaskAPI,
@@ -279,4 +279,32 @@ test("six long task titles fit above voice controls on a Pixel 6", async ({ page
   expect(titleMetrics.fullTitle).toBe(tasks[0]?.title);
   expect(titleMetrics.fullTitle).toHaveLength(80);
   expect(titleMetrics.height).toBeLessThanOrEqual(titleMetrics.lineHeight * 2 + 1);
+});
+
+test("mobile task prompt stays above the browser voice panel while reading older output", async ({
+  page,
+  api,
+  uniquePrompt,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await enableBrowserVoice(page);
+  // A single long line makes the conversation overflow without rendering one turn per line.
+  const prompt = uniquePrompt("Long prompt") + " Describe the change and its expected behavior.".repeat(250);
+  const id = await createTaskAPI(api, prompt);
+  await waitForTaskState(api, id, "waiting", 30_000);
+
+  await page.goto(`/task/@${id}`);
+  const voice = page.getByTestId("voice-overlay");
+  await expect(voice).toBeVisible();
+  await expect(page.getByTestId("task-message-area")).toHaveAttribute("aria-busy", "false");
+  const viewport = page.getByTestId("app-viewport");
+  const form = page.getByTestId("task-detail-form");
+  await form.hover();
+  await page.mouse.wheel(0, -400);
+  await expect
+    .poll(() => viewport.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop))
+    .toBeGreaterThan(0);
+
+  const voiceTop = await voice.evaluate((el) => el.getBoundingClientRect().top);
+  expect(await form.evaluate((el) => el.getBoundingClientRect().bottom)).toBeLessThanOrEqual(voiceTop);
 });

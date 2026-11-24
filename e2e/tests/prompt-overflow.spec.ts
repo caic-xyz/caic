@@ -32,7 +32,7 @@ for (const width of [390, 1280]) {
         await expect(input).toBeInViewport();
         expect(await input.evaluate((el) => el.getBoundingClientRect().bottom)).toBeLessThanOrEqual(844);
         expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
-        const viewport = width === 390 ? page.getByTestId("app-shell") : messages;
+        const viewport = width === 390 ? page.getByTestId("app-viewport") : messages;
         expect(await viewport.evaluate((el) => el.scrollHeight)).toBeGreaterThan(
           await viewport.evaluate((el) => el.clientHeight),
         );

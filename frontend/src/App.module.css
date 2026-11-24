@@ -26,6 +26,14 @@
   display: none;
 }
 
+/* Scrolls on mobile and ends above the voice shell, whose spacer reserves the fixed voice panel's height. */
+.viewport {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .normalContent {
   display: flex;
   flex: 1;
@@ -255,6 +263,10 @@
 /* Mobile: <=768px */
 @media (width <= 768px) {
   .app {
+    padding: 0;
+  }
+
+  .viewport {
     padding: 0.5rem 0.5rem 0;
     overflow-y: auto;
   }

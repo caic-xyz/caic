@@ -87,7 +87,7 @@ for (const width of [390, 1280]) {
     await waitForTaskState(api, other, "waiting");
     await page.goto(`/task/@${other}`);
     const area = page.getByTestId("task-message-area");
-    const viewport = width === 390 ? page.getByTestId("app-shell") : area;
+    const viewport = width === 390 ? page.getByTestId("app-viewport") : area;
     const atBottom = async () => {
       await expect(area).toHaveAttribute("aria-busy", "false");
       await expect
@@ -123,7 +123,7 @@ for (const width of [390, 1280]) {
       }
       if (cycle === 0) {
         await page.setViewportSize({ width: width === 390 ? 1280 : 390, height: 700 });
-        const resizedViewport = width === 390 ? area : page.getByTestId("app-shell");
+        const resizedViewport = width === 390 ? area : page.getByTestId("app-viewport");
         await expect
           .poll(() => resizedViewport.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight))
           .toBeLessThan(2);
