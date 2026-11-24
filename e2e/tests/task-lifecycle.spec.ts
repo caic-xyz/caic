@@ -1,6 +1,6 @@
 // End-to-end tests for the task lifecycle using a fake backend.
 import { ok } from "node:assert/strict";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import type { Config } from "../../sdk/caic/ts/v1/types.gen";
 import { test, expect, waitForTaskState, createTaskAPI } from "../helpers";
 
@@ -310,37 +310,40 @@ test("task detail desktop layout wraps timed controls and avoids pane overflow",
   await expect(messageArea).toBeVisible();
 
   await test.step("timing and Raw controls wrap message content", async () => {
-    const rawButton = page.getByRole("button", { name: "raw", exact: true }).nth(1);
+    const message = messageArea.locator("[data-anchor-key]").filter({ hasText: "Found the bug." });
+    const rawButton = message.getByRole("button", { name: "raw", exact: true });
     await expect(rawButton).toBeAttached();
-    // Measures the Raw toolbar against the floated time of its message group.
-    const layout = () =>
-      rawButton.evaluate((button) => {
+    const layout = (toggle: Locator) =>
+      toggle.evaluate((button) => {
         const toolbar = button.parentElement;
         const anchor = toolbar?.parentElement;
-        const message = button.closest("[data-markdown-wrap]")?.parentElement ?? null;
-        let content: HTMLElement | null = message;
-        while (content && !content.querySelector("[data-testid='timing-duration']")) content = content.parentElement;
-        const timing = content?.querySelector("[data-testid='timing-duration']")?.parentElement?.parentElement;
-        if (!toolbar || !anchor || !message || !timing) return null;
-        const raw = toolbar.getBoundingClientRect();
+        const markdown = button.closest("[data-markdown-wrap]");
+        const timing = button.closest("[data-anchor-key]")?.querySelector("[data-testid='timing-duration']");
+        if (!toolbar || !anchor || !markdown || !timing) return null;
+        const controls = toolbar.getBoundingClientRect();
         const time = timing.getBoundingClientRect();
+        const bounds = markdown.getBoundingClientRect();
+        const source = markdown.querySelector("pre")?.getBoundingClientRect();
         return {
-          messagePadding: getComputedStyle(message).paddingRight,
           // The hidden toolbar must not shorten the first line of text.
           anchorWidth: getComputedStyle(anchor).width,
-          timingFloat: getComputedStyle(timing).float,
-          timingOpacity: getComputedStyle(timing).opacity,
-          clear: raw.right <= time.left || raw.top >= time.bottom,
+          besideTime: controls.top < time.bottom && controls.bottom > time.top && controls.right <= time.left,
+          fullWidthSource: source && source.left === bounds.left && source.right === bounds.right,
         };
       });
-    await expect
-      .poll(layout)
-      .toMatchObject({ messagePadding: "0px", anchorWidth: "0px", timingFloat: "right", timingOpacity: "1" });
-
-    // The timing stays visible on hover; the Raw toolbar sits left of it, or
-    // below it when the timing belongs to an earlier line of the group.
+    const timing = message.getByTestId("timing-duration");
+    await expect(timing).toBeVisible();
     await rawButton.hover();
-    await expect.poll(layout).toMatchObject({ timingOpacity: "1", clear: true });
+    await expect.poll(() => layout(rawButton)).toMatchObject({ anchorWidth: "0px", besideTime: true });
+
+    await rawButton.click();
+    const renderedButton = message.getByRole("button", { name: "rendered", exact: true });
+    await expect(renderedButton).toBeFocused();
+    await expect(timing).toBeVisible();
+    await expect.poll(() => layout(renderedButton)).toMatchObject({ besideTime: true, fullWidthSource: true });
+
+    await renderedButton.press("Enter");
+    await expect(rawButton).toBeFocused();
   });
 
   await test.step("detail pane has no extra gutters or horizontal overflow", async () => {

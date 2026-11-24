@@ -4,14 +4,20 @@
   position: relative;
 }
 
-/* A zero-size float keeps the hidden toolbar from shortening the first line.
-   The revealed toolbar overlays the end of that line, left of a floated time. */
+/* Keep the rendered preview's overlay beside the time. In raw mode the
+   toolbar takes up space so source text wraps around the controls. */
 .rawAnchor {
   position: relative;
   z-index: 1;
   float: right;
   width: 0;
   height: 0;
+}
+
+.rawAnchor:has(> [data-raw-active]) {
+  width: auto;
+  height: auto;
+  margin-inline: 0.35rem;
 }
 
 .rawToolbar {
@@ -23,15 +29,16 @@
   transition: opacity 0.15s;
 }
 
-.rawAnchor > .rawToolbar {
+.rawToolbar:focus-within,
+.rawToolbar[data-raw-active],
+[data-raw-scope]:hover .rawToolbar {
+  opacity: 1;
+}
+
+.rawAnchor > .rawToolbar:not([data-raw-active]) {
   position: absolute;
   top: 0;
   right: 0;
-}
-
-.rawToolbar:focus-within,
-[data-raw-scope]:hover .rawToolbar {
-  opacity: 1;
 }
 
 .rawToolbarBtn {
@@ -107,10 +114,9 @@
 .rawText {
   padding: 0.5em;
   margin: 0;
-  overflow-x: auto;
   font-size: 0.82rem;
   line-height: 1.5;
-  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
   white-space: pre-wrap;
   background: var(--color-bg-code);
   border-radius: var(--radius-md);

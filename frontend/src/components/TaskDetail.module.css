@@ -247,6 +247,10 @@ a.headerPR:hover {
   margin: 0.15rem 0.5rem 0;
 }
 
+.messageTiming:empty {
+  display: none;
+}
+
 .inputForm {
   display: flex;
   flex-wrap: wrap;

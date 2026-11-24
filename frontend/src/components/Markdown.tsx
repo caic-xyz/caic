@@ -150,13 +150,13 @@ function isLocalPath(dest: string): boolean {
  * and images resolve against it; without it the task checkout owns them.
  */
 // MarkdownRawToolbar switches a Markdown between rendered and raw text and
-// copies the raw text. A hovered or focused ancestor marked data-raw-scope
-// reveals it.
+// copies the raw text. It stays visible while raw mode is active, when it has
+// keyboard focus, or when a hovered ancestor is marked data-raw-scope.
 export function MarkdownRawToolbar(props: { text: string; raw: boolean; onToggle: () => void }) {
   const [copied, setCopied] = createSignal(false);
   const [copyError, setCopyError] = createSignal(false);
   return (
-    <div class={styles.rawToolbar}>
+    <div class={styles.rawToolbar} data-raw-active={props.raw ? "" : undefined}>
       <Show when={props.raw}>
         <span role="status">{copyError() ? "Copy failed" : ""}</span>
       </Show>
