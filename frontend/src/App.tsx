@@ -14,6 +14,7 @@ import {
 import { useIsRouting, useLocation } from "@solidjs/router";
 
 import { ConversationViewportContext } from "./ConversationViewportContext";
+import { MarkdownConversationContext } from "./MarkdownConversationContext";
 import VoiceTaskFocus from "./VoiceTaskFocus";
 import BrowserVoiceShell from "./BrowserVoiceShell";
 import { HostModeProvider, useHostMode } from "@gomodedev/gomode/web/HostMode";
@@ -205,7 +206,9 @@ function Shell(props: { children?: JSX.Element }) {
 
             <ErrorBoundary fallback={(error: unknown, reset) => <ErrorFallback error={error} reset={reset} />}>
               <ConversationViewportContext.Provider value={conversationViewport}>
-                <Suspense fallback={<p role="status">Loading page…</p>}>{props.children}</Suspense>
+                <MarkdownConversationContext.Provider value={s.resolveConversationHref}>
+                  <Suspense fallback={<p role="status">Loading page…</p>}>{props.children}</Suspense>
+                </MarkdownConversationContext.Provider>
               </ConversationViewportContext.Provider>
             </ErrorBoundary>
           </div>

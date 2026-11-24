@@ -5,6 +5,7 @@ import {
   batch,
   createContext,
   createEffect,
+  createMemo,
   createSignal,
   on,
   onCleanup,
@@ -53,6 +54,7 @@ import { notifications } from "@gomodedev/gomode/web/notifications";
 import { QuotaRecoveryTracker, quotaDismissalKey } from "./quota";
 import { quotaRecoveryTargets } from "./quotaTargets";
 import { taskPath, taskIdFromPath, taskPathForTask } from "./taskPath";
+import { antigravityConversationTranscriptPath, taskViewURL } from "./runtimePath";
 import { evictTaskDiff, invalidateTaskDiff, taskDiffCache } from "./diffCache";
 import { api } from "./api";
 import { ImageDraftOwner, type DraftImage } from "./images";
@@ -453,6 +455,65 @@ function createAppStore() {
     tasks().find((t) => t.id === id) ??
     (selectedId() === id && detailTask()?.id === id ? (detailTask() ?? undefined) : undefined);
   const taskIntroduced = (id: string) => tasks().some((task) => task.id === id);
+  // Map harness session IDs to task routes, preferring non-purged tasks and
+  // then the most recently started task. Equality keeps unrelated task updates
+  // from re-parsing rendered Markdown blocks.
+  const sessionTaskPaths = createMemo<ReadonlyMap<string, string>>(
+    () => {
+      const best = new Map<string, Task>();
+      const prefer = (candidate: Task, current: Task): boolean => {
+        const candidateActive = candidate.state !== "purged";
+        const currentActive = current.state !== "purged";
+        if (candidateActive !== currentActive) return candidateActive;
+        return (Date.parse(candidate.startedAt ?? "") || 0) > (Date.parse(current.startedAt ?? "") || 0);
+      };
+      const consider = (task: Task | null | undefined) => {
+        if (!task?.sessionID) return;
+        const existing = best.get(task.sessionID);
+        if (!existing || prefer(task, existing)) best.set(task.sessionID, task);
+      };
+      for (const task of tasks()) consider(task);
+      consider(detailTask());
+      const out = new Map<string, string>();
+      for (const [sessionID, task] of best) out.set(sessionID, taskPathForTask(task));
+      return out;
+    },
+    new Map(),
+    {
+      equals: (prev, next) => {
+        if (prev.size !== next.size) return false;
+        for (const [key, value] of prev) if (next.get(key) !== value) return false;
+        return true;
+      },
+    },
+  );
+  const activeAntigravityTaskIds = createMemo<ReadonlySet<string>>(
+    () => {
+      const ids = new Set<string>();
+      for (const task of tasks()) {
+        if (task.harness === "antigravity" && task.state !== "purged") ids.add(task.id);
+      }
+      const detail = detailTask();
+      if (detail && detail.harness === "antigravity" && detail.state !== "purged") ids.add(detail.id);
+      return ids;
+    },
+    new Set(),
+    {
+      equals: (prev, next) => {
+        if (prev.size !== next.size) return false;
+        for (const id of prev) if (!next.has(id)) return false;
+        return true;
+      },
+    },
+  );
+  function resolveConversationHref(conversationId: string, taskId: string | null): string | null {
+    const matchedTaskPath = sessionTaskPaths().get(conversationId);
+    if (matchedTaskPath !== undefined) return matchedTaskPath;
+    if (taskId !== null && activeAntigravityTaskIds().has(taskId)) {
+      return taskViewURL(taskId, antigravityConversationTranscriptPath(conversationId));
+    }
+    return null;
+  }
   createEffect(() => {
     const id = selectedId();
     if (detailTask()?.id !== id) setDetailTask(null);
@@ -1771,6 +1832,7 @@ function createAppStore() {
     selectedTask,
     taskById,
     taskIntroduced,
+    resolveConversationHref,
     dismissSelectedTaskOnNotFound,
     claimInitialTaskFocus,
     // new-task form

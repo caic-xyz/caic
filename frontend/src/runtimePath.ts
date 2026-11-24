@@ -1,4 +1,4 @@
-// Resolves task files and prompt images and builds viewer and resource URLs.
+// Resolves task files, conversation links, and prompt images and builds viewer and resource URLs.
 
 const markdownExtension = /\.(md|markdown)$/i;
 const stlExtension = /\.stl$/i;
@@ -36,6 +36,32 @@ export function runtimeFileTarget(href: string, baseDir: string | null): { path:
 /** Returns the runtime file path a markdown destination names, ignoring its line. */
 export function runtimeFilePath(href: string, baseDir: string | null): string | null {
   return runtimeFileTarget(href, baseDir)?.path ?? null;
+}
+
+/**
+ * Returns the conversation/session ID named by a `conversation://<id>` destination,
+ * or null for any other URL or malformed identifier.
+ */
+export function conversationIdFromHref(href: string): string | null {
+  if (!/^conversation:\/\//i.test(href)) return null;
+  const raw = href
+    .slice("conversation://".length)
+    .replace(/[#?].*$/, "")
+    .replace(/\/+$/, "");
+  if (!raw) return null;
+  let id: string;
+  try {
+    id = decodeURIComponent(raw);
+  } catch {
+    return null;
+  }
+  if (!id || id.includes("/") || id.includes("\\") || id === "." || id === ".." || /\s/.test(id)) return null;
+  return id;
+}
+
+/** Returns the Antigravity container path for a conversation's compact transcript. */
+export function antigravityConversationTranscriptPath(conversationId: string): string {
+  return `~/.gemini/antigravity-cli/brain/${conversationId}/.system_generated/logs/transcript.jsonl`;
 }
 
 function lineSuffix(href: string, filePath: string): number | null {

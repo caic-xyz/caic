@@ -4,6 +4,8 @@ import { describe, it } from "node:test";
 import { expect } from "@tests/expect";
 
 import {
+  antigravityConversationTranscriptPath,
+  conversationIdFromHref,
   dirname,
   isCadPath,
   isMarkdownPath,
@@ -78,6 +80,42 @@ describe("runtimeFilePath", () => {
 
   it("treats a malformed escape as an ordinary link", () => {
     expect(runtimeFilePath("/a%zz.md", null)).toBeNull();
+  });
+});
+
+describe("conversationIdFromHref", () => {
+  it("extracts a conversation ID and strips trailing slashes, queries, and fragments", () => {
+    expect(conversationIdFromHref("conversation://35f8af4b-257b-476b-acdc-d183a2fd5779")).toBe(
+      "35f8af4b-257b-476b-acdc-d183a2fd5779",
+    );
+    expect(conversationIdFromHref("CONVERSATION://abc-123/")).toBe("abc-123");
+    expect(conversationIdFromHref("conversation://abc-123#turn-2")).toBe("abc-123");
+    expect(conversationIdFromHref("conversation://abc-123?foo=bar")).toBe("abc-123");
+  });
+
+  it("rejects non-conversation URLs, empty IDs, traversal, and malformed escapes", () => {
+    for (const href of [
+      "https://example.com/abc",
+      "file:///tmp/a.md",
+      "conversation://",
+      "conversation:///",
+      "conversation://.",
+      "conversation://..",
+      "conversation://../secret",
+      "conversation://a/b",
+      "conversation://a%2Fb",
+      "conversation://a\\b",
+      "conversation://has space",
+      "conversation://%zz",
+    ]) {
+      expect(conversationIdFromHref(href)).toBeNull();
+    }
+  });
+
+  it("builds the Antigravity compact transcript path", () => {
+    expect(antigravityConversationTranscriptPath("35f8af4b-257b-476b-acdc-d183a2fd5779")).toBe(
+      "~/.gemini/antigravity-cli/brain/35f8af4b-257b-476b-acdc-d183a2fd5779/.system_generated/logs/transcript.jsonl",
+    );
   });
 });
 

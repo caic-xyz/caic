@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { historyManifest } from "@tests/history";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { createSignal, Show } from "solid-js";
+import { createSignal, Show, useContext } from "solid-js";
 import { expect, vi } from "@tests/expect";
 import { fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
@@ -4777,6 +4777,89 @@ it("retries an ordinary component-render failure without replacing the document"
     await userEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Recovered routed content")).toBeVisible();
     expect(screen.queryByTestId("error-fallback")).toBeNull();
+  } finally {
+    view.unmount();
+  }
+});
+
+it("resolves conversation:// URLs to matching tasks or active Antigravity transcripts", async () => {
+  const { MarkdownConversationContext } = await import("./MarkdownConversationContext");
+  let resolveConversation: ((conversationId: string, taskId: string | null) => string | null) | undefined;
+  function Probe() {
+    resolveConversation = useContext(MarkdownConversationContext);
+    return <p>Probe mounted</p>;
+  }
+  const view = render(() => (
+    <AuthProvider>
+      <MemoryRouter>
+        <Route path="/" component={App}>
+          <Route path="/" component={Probe} />
+        </Route>
+      </MemoryRouter>
+    </AuthProvider>
+  ));
+  try {
+    await screen.findByText("Probe mounted");
+    await waitForTaskEventsSubscription();
+    dispatchSSE({
+      kind: "snapshot",
+      snapshot: [
+        makeTask({
+          id: "purgedOld",
+          title: "old purged",
+          state: "purged",
+          harness: "antigravity",
+          sessionID: "shared-conv",
+          startedAt: "2026-01-03T00:00:00Z" as ISOTimestamp,
+        }),
+        makeTask({
+          id: "activeOlder",
+          title: "older active",
+          state: "waiting",
+          harness: "antigravity",
+          sessionID: "shared-conv",
+          startedAt: "2026-01-01T00:00:00Z" as ISOTimestamp,
+        }),
+        makeTask({
+          id: "activeNewer",
+          title: "newer active",
+          state: "waiting",
+          harness: "antigravity",
+          sessionID: "shared-conv",
+          startedAt: "2026-01-02T00:00:00Z" as ISOTimestamp,
+        }),
+        makeTask({
+          id: "purgedOnly",
+          title: "purged only",
+          state: "purged",
+          harness: "antigravity",
+          sessionID: "purged-conv",
+          startedAt: "2026-01-01T00:00:00Z" as ISOTimestamp,
+        }),
+        makeTask({
+          id: "claudeTask",
+          title: "claude task",
+          state: "waiting",
+          harness: "claude",
+          sessionID: "claude-conv",
+          startedAt: "2026-01-01T00:00:00Z" as ISOTimestamp,
+        }),
+      ],
+    });
+
+    await waitFor(() =>
+      expect(resolveConversation?.("shared-conv", "activeNewer")).toBe("/task/@activeNewer+newer-active"),
+    );
+    // Purged tasks are still reachable by sessionID.
+    expect(resolveConversation?.("purged-conv", "activeNewer")).toBe("/task/@purgedOnly+purged-only");
+    // Unmatched conversation IDs inside an active Antigravity task fall back to the compact transcript viewer.
+    expect(resolveConversation?.("subagent-uuid", "activeNewer")).toBe(
+      "/task/@activeNewer/view?path=%7E%2F.gemini%2Fantigravity-cli%2Fbrain%2Fsubagent-uuid%2F.system_generated%2Flogs%2Ftranscript.jsonl",
+    );
+    // Purged Antigravity tasks, non-Antigravity tasks, and taskless contexts do not fabricate broken viewer links.
+    expect(resolveConversation?.("subagent-uuid", "purgedOnly")).toBeNull();
+    expect(resolveConversation?.("subagent-uuid", "claudeTask")).toBeNull();
+    expect(resolveConversation?.("subagent-uuid", null)).toBeNull();
   } finally {
     view.unmount();
   }

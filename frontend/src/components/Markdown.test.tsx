@@ -8,22 +8,35 @@ import userEvent from "@testing-library/user-event";
 import { createSignal, type Accessor } from "solid-js";
 
 import Markdown, { MarkdownTaskContext } from "./Markdown";
+import { MarkdownConversationContext } from "../MarkdownConversationContext";
 import { clearMermaidCache, renderMermaidDiagram } from "../mermaid";
 
-function renderMarkdown(text: string, taskContext?: Accessor<string>) {
+function renderMarkdown(
+  text: string,
+  taskContext?: Accessor<string>,
+  resolveConversation?: (conversationId: string, taskId: string | null) => string | null,
+) {
   return render(() => (
     <Router>
       <Route
         path="/*"
-        component={() =>
-          taskContext ? (
-            <MarkdownTaskContext.Provider value={taskContext}>
+        component={() => {
+          const content = () =>
+            taskContext ? (
+              <MarkdownTaskContext.Provider value={taskContext}>
+                <Markdown text={text} />
+              </MarkdownTaskContext.Provider>
+            ) : (
               <Markdown text={text} />
-            </MarkdownTaskContext.Provider>
+            );
+          return resolveConversation ? (
+            <MarkdownConversationContext.Provider value={resolveConversation}>
+              {content()}
+            </MarkdownConversationContext.Provider>
           ) : (
-            <Markdown text={text} />
-          )
-        }
+            content()
+          );
+        }}
       />
     </Router>
   ));
@@ -355,5 +368,37 @@ describe("Markdown", () => {
     expect(screen.getByText("[Guide](/code span.md)")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Guide" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Web" })).not.toBeInTheDocument();
+  });
+
+  it("rewrites resolvable conversation:// links and autolinks to in-app routes", () => {
+    const resolvedCalls: Array<[string, string | null]> = [];
+    renderMarkdown(
+      "See [Other task](conversation://conv-task), <conversation://conv-subagent>, and [Missing](conversation://conv-missing).",
+      () => "task123",
+      (conversationId, taskId) => {
+        resolvedCalls.push([conversationId, taskId]);
+        if (conversationId === "conv-task") return "/task/@other1+fix";
+        if (conversationId === "conv-subagent") return "/task/@task123/view?path=transcript.jsonl";
+        return null;
+      },
+    );
+
+    const taskLink = screen.getByRole("link", { name: "Other task" });
+    expect(taskLink).toHaveAttribute("href", "/task/@other1+fix");
+    expect(taskLink).toHaveAttribute("data-app-link");
+    expect(taskLink).not.toHaveAttribute("target");
+
+    const subagentLink = screen.getByRole("link", { name: "conversation://conv-subagent" });
+    expect(subagentLink).toHaveAttribute("href", "/task/@task123/view?path=transcript.jsonl");
+    expect(subagentLink).toHaveAttribute("data-app-link");
+
+    // Unresolvable conversation:// hrefs are stripped by DOMPurify so they do not become dead protocol links.
+    expect(screen.queryByRole("link", { name: "Missing" })).not.toBeInTheDocument();
+    expect(screen.getByText("Missing")).toBeInTheDocument();
+    expect(resolvedCalls).toEqual([
+      ["conv-task", "task123"],
+      ["conv-subagent", "task123"],
+      ["conv-missing", "task123"],
+    ]);
   });
 });

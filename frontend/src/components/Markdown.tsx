@@ -18,7 +18,8 @@ import CopyIcon from "@material-symbols/svg-400/outlined/content_copy.svg?solid"
 import CheckIcon from "@material-symbols/svg-400/outlined/check.svg?solid";
 
 import styles from "./Markdown.module.css";
-import { runtimeFilePath, runtimeFileTarget, taskRawURL, taskViewURL } from "../runtimePath";
+import { MarkdownConversationContext } from "../MarkdownConversationContext";
+import { conversationIdFromHref, runtimeFilePath, runtimeFileTarget, taskRawURL, taskViewURL } from "../runtimePath";
 import { getMermaidCachedSvg, renderMermaidBlocks, toggleMermaidView } from "../mermaid";
 
 /** The task whose runtime files markdown paths name. Without it, links stay ordinary. */
@@ -207,6 +208,7 @@ export default function Markdown(props: {
   raw?: boolean;
 }) {
   const taskId = useContext(MarkdownTaskContext);
+  const resolveConversation = useContext(MarkdownConversationContext);
   const navigate = useNavigate();
   const runtimePath = (href: string) => (taskId ? runtimeFilePath(href, props.baseDir ?? null) : null);
   const runtimeTarget = (href: string) => (taskId ? runtimeFileTarget(href, props.baseDir ?? null) : null);
@@ -235,6 +237,17 @@ export default function Markdown(props: {
     renderer: {
       ...markdownRenderer,
       link(this: Renderer, token: Tokens.Link): string {
+        const conversationId = conversationIdFromHref(token.href);
+        if (conversationId !== null) {
+          const resolved = resolveConversation?.(conversationId, taskId ? taskId() : null) ?? null;
+          if (resolved === null) return Renderer.prototype.link.call(this, token) as string;
+          return (
+            Renderer.prototype.link.call(this, {
+              ...token,
+              href: resolved,
+            }) as string
+          ).replace("<a ", "<a data-app-link ");
+        }
         const target = runtimeTarget(token.href);
         if (target === null || !taskId) return Renderer.prototype.link.call(this, token) as string;
         return (
