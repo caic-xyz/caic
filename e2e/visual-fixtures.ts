@@ -1,4 +1,4 @@
-// Deterministic API fixtures for documentation resource charts and usage trends.
+// Deterministic API fixtures and timing rules for documentation resource charts, usage trends, and turns.
 import { reportedUsageCost } from "../frontend/tests/usage";
 import { ok } from "node:assert/strict";
 import type {
@@ -18,6 +18,15 @@ export const visualRecordStrideMs = 150;
 /** Capture time of a raw record position, offset from the task start. */
 export function visualPositionTime(startMs: number, position: { recordID: number; index: number }): number {
   return startMs + (position.recordID - 2) * visualRecordStrideMs + position.index;
+}
+
+/** A completed turn's length on the visual clock. The server times a turn from
+ *  its prompt record, so its length includes the real delay before the fake
+ *  agent reads the prompt. A turn timed on the fake agent's fixture clock
+ *  reports its exact length as the harness duration, which is shorter; other
+ *  fake turns report inflated durations and keep the server's length. */
+export function visualTurnLengthMs(turn: { startedAt: string; at: string; durationMs: number }): number {
+  return Math.min(Date.parse(turn.at) - Date.parse(turn.startedAt), turn.durationMs);
 }
 
 /** Server health for the header level badge. The real server samples the host,

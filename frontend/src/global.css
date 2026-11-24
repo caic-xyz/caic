@@ -1,5 +1,5 @@
 /* Global resets and preference-driven semantic colors for the caic workspace.
-   Core brand colors follow the Brand table at https://github.com/caic-xyz/caic.xyz. */
+   Brand and neutral tokens share one blue hue, distinct from the green success state. */
 
 :root {
   accent-color: var(--color-primary);
@@ -9,8 +9,8 @@
   --size-document-preview-height: calc(100dvh - 6rem);
 
   /* Filled primary controls and their foreground. */
-  --color-primary: #24734b;
-  --color-primary-hover: #1d6240;
+  --color-primary: #1864a9;
+  --color-primary-hover: #145591;
   --color-on-primary: #fff;
 
   /* Primary tints for drag targets and focus indicators over existing surfaces. */
@@ -20,13 +20,13 @@
   --color-focus-border: #92510d;
 
   /* Low-emphasis primary containers and their readable foreground. */
-  --color-primary-container: #e4f1e8;
-  --color-primary-container-hover: #d3e7da;
-  --color-primary-border: #a5c6b2;
-  --color-on-primary-container: #214d37;
+  --color-primary-container: #e2effd;
+  --color-primary-container-hover: #d0e3f9;
+  --color-primary-border: #a1c0e2;
+  --color-on-primary-container: #1d456d;
 
   /* Links */
-  --color-link: #1d6240;
+  --color-link: #145591;
 
   /* Success controls plus paired status background and text. */
   --color-success: #226d42;
@@ -56,18 +56,18 @@
 
   /* Connection wordmark wave colors for each status. */
   --color-connection-wave-connected-base: var(--color-primary);
-  --color-connection-wave-connected-center: #164b30;
-  --color-connection-wave-connected-rim: #286d4b;
+  --color-connection-wave-connected-center: #0f4170;
+  --color-connection-wave-connected-rim: #21609d;
   --color-connection-wave-loading-center: #5f4300;
   --color-connection-wave-loading-rim: #815c00;
   --color-connection-wave-error-center: #80202d;
   --color-connection-wave-error-rim: #bb2e3e;
 
   /* Gray button variant */
-  --color-gray: #56665d;
-  --color-gray-hover: #485750;
+  --color-gray: #58636f;
+  --color-gray-hover: #4a545f;
   --color-on-gray: #fff;
-  --color-secondary-container: #edf3ee;
+  --color-secondary-container: #edf2f7;
 
   /* Plan mode and thinking (purple) */
   --color-plan: #6833bc;
@@ -92,7 +92,7 @@
   --color-state-waiting-bg: var(--color-warning-bg);
 
   /* Low-emphasis chip and disabled-state surface. */
-  --color-surface-variant: #dbe8df;
+  --color-surface-variant: #dbe5f0;
 
   /* Dark controls and media surfaces with their foreground hierarchy. */
   --color-bg-inverse: #2a2a2a;
@@ -107,25 +107,25 @@
   --color-on-inverse-hover: rgb(255 255 255 / 10%);
 
   /* Text hierarchy, including compact metadata. */
-  --color-text-primary: #172b23;
-  --color-text-placeholder: #5d6f65;
-  --color-text-secondary: #485f55;
-  --color-text-tertiary: #4c6056;
-  --color-text-meta: #53675b;
-  --color-text-muted: #475d52;
-  --color-text-faint: #495e53;
+  --color-text-primary: #1b2735;
+  --color-text-placeholder: #5f6b79;
+  --color-text-secondary: #4c5b6b;
+  --color-text-tertiary: #4f5c6b;
+  --color-text-meta: #556373;
+  --color-text-muted: #4a5969;
+  --color-text-faint: #4c5a6a;
 
   /* A value still on screen while its refresh runs; 7.5:1 on white. */
   --color-text-updating: #555;
 
   /* Workspace surfaces. The application RGB triplet supports alpha gradient stops. */
-  --color-bg-app-rgb: 244 248 245;
+  --color-bg-app-rgb: 244 247 251;
   --color-bg-elevated: #fff;
-  --color-bg-input: #e9f0eb;
-  --color-bg-input-hover: #dbe8df;
-  --color-bg-hover: #e1ece5;
-  --color-bg-code: #dbe8df;
-  --color-bg-surface: #e6efe9;
+  --color-bg-input: #e9eff5;
+  --color-bg-input-hover: #dbe5f0;
+  --color-bg-hover: #e2eaf3;
+  --color-bg-code: #dbe5f0;
+  --color-bg-surface: #e6edf5;
   --color-bg-conversation: #fafafa;
   --color-cad-annotation: #263442;
 
@@ -136,10 +136,10 @@
   --color-on-tooltip: var(--color-on-toast);
 
   /* Borders */
-  --color-border: #b9ccc0;
-  --color-border-light: #c7d7cd;
-  --color-border-medium: #74897e;
-  --color-border-strong: #687e71;
+  --color-border: #bac8d8;
+  --color-border-light: #c8d4e1;
+  --color-border-medium: #778595;
+  --color-border-strong: #6a7a8b;
 
   /* Modal and media scrims, from lighter to stronger. */
   --color-overlay: rgb(0 0 0 / 50%);
@@ -151,7 +151,7 @@
   --color-shadow-lg: rgb(0 0 0 / 24%);
 
   /* Selection */
-  --color-selected: #2c8055;
+  --color-selected: #2070bb;
 
   /* Chart mark states. Hover, linked, and focus (--color-focus-border) stay
      distinct; the selected mark adds a fill, a band, and a base marker. */
@@ -184,20 +184,20 @@
   --color-chart-compaction: #9a3412;
 
   /* Turn timeline lanes; each reaches 3:1 on the chart surface: inferred
-     model time 3.1:1 (hatched), child tools 5.5:1, commands 4.9:1. */
+     model time 3.1:1 (hatched), child tools 5.4:1, commands 4.9:1. */
   --color-chart-model: #858585;
   --color-chart-child-tool: #24619e;
   --color-chart-command: #666;
 
-  /* Resource series share the task resource charts' encoding: CPU 4.9:1 and
-     memory 5.4:1 on the chart surface. */
+  /* Resource series share the task resource charts' encoding: CPU 5.2:1 and
+     memory 5.3:1 on the chart surface; hue separates the two. */
   --color-chart-cpu: var(--color-primary);
   --color-chart-memory: var(--color-success);
 
   /* User messages and nested session controls use progressively deeper accent tints. */
-  --color-user-msg-bg: #e2efe6;
-  --color-session-bg: #e0ebe4;
-  --color-session-bg-hover: #d0e3d7;
+  --color-user-msg-bg: #e0edfb;
+  --color-session-bg: #dfe9f5;
+  --color-session-bg-hover: #cde0f4;
 
   /* Widget */
   --color-widget-border: var(--color-border-medium);
@@ -206,13 +206,13 @@
   /* Added, deleted, and binary size text in diff summaries. */
   --color-diff-added: #206535;
   --color-diff-deleted: #a6222e;
-  --color-diff-size: #516558;
+  --color-diff-size: #526171;
 
   /* Code surfaces for Markdown and repository diffs. */
-  --color-code-block-bg: #d5e4db;
-  --color-code-block-fg: #172b23;
-  --color-diff-block-bg: #e6efe9;
-  --color-diff-block-fg: #172b23;
+  --color-code-block-bg: #d6e1ed;
+  --color-code-block-fg: #1b2735;
+  --color-diff-block-bg: #e6edf5;
+  --color-diff-block-fg: #1b2735;
 
   /* Diff line, whitespace, and moved-block markers on the diff surface. */
   --color-diff-block-line-added: #1c682f;
@@ -244,15 +244,15 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --color-primary: #a5f0c5;
-    --color-primary-hover: #b8f4d1;
-    --color-on-primary: #11271d;
+    --color-primary: #7ebcff;
+    --color-primary-hover: #9dccff;
+    --color-on-primary: #152332;
     --color-focus-border: #ffd28e;
-    --color-primary-container: #223a30;
-    --color-primary-container-hover: #2b493a;
-    --color-primary-border: #466857;
-    --color-on-primary-container: #c9ead7;
-    --color-link: #a5f0c5;
+    --color-primary-container: #22364b;
+    --color-primary-container-hover: #294360;
+    --color-primary-border: #446282;
+    --color-on-primary-container: #cbe4ff;
+    --color-link: #7ebcff;
 
     /* Status foregrounds also work as button fills with their own paired text. */
     --color-success: #7cdea0;
@@ -272,16 +272,16 @@
     --color-warning-bg: #423521;
     --color-warning-border: #b9934f;
     --color-warning-text: #f5d994;
-    --color-connection-wave-connected-center: #e4ffef;
-    --color-connection-wave-connected-rim: #b8f4d1;
+    --color-connection-wave-connected-center: #f2f8ff;
+    --color-connection-wave-connected-rim: #9dccff;
     --color-connection-wave-loading-center: #fff0bd;
     --color-connection-wave-loading-rim: #ffd28e;
     --color-connection-wave-error-center: #ffe0e4;
     --color-connection-wave-error-rim: #ffc1c7;
-    --color-gray: #b1c0b9;
-    --color-gray-hover: #c9d5d0;
-    --color-on-gray: #11271d;
-    --color-secondary-container: #202e2b;
+    --color-gray: #b3bdc8;
+    --color-gray-hover: #cbd3db;
+    --color-on-gray: #152332;
+    --color-secondary-container: #242c34;
     --color-plan: #d5bafb;
     --color-thinking-border: #917bb5;
     --color-plan-bg: #382d4f;
@@ -292,61 +292,61 @@
     --color-state-asking-bg: #203e58;
     --color-state-crashed-bg: #4b3028;
     --color-state-stopping-bg: #503a26;
-    --color-state-purged-bg: #35413f;
+    --color-state-purged-bg: #383f46;
     --color-state-stopped-bg: #2c3a4e;
-    --color-surface-variant: #243634;
-    --color-text-primary: #f3f5ec;
-    --color-text-placeholder: #a3b7ae;
-    --color-text-secondary: #bacac4;
-    --color-text-tertiary: #afc1b9;
-    --color-text-meta: #a6b9b1;
-    --color-text-muted: #a5b8b0;
-    --color-text-faint: #9db0a8;
-    --color-text-updating: #bacac4;
-    --color-bg-app-rgb: 16 27 27;
-    --color-bg-elevated: #1c3030;
-    --color-bg-input: #223432;
-    --color-bg-input-hover: #2e4240;
-    --color-bg-hover: #263b38;
-    --color-bg-code: #1c3030;
-    --color-bg-surface: #172525;
+    --color-surface-variant: #29333e;
+    --color-text-primary: #eef5fc;
+    --color-text-placeholder: #a6b3c2;
+    --color-text-secondary: #bdc7d2;
+    --color-text-tertiary: #b2bdcb;
+    --color-text-meta: #a9b5c3;
+    --color-text-muted: #a8b4c2;
+    --color-text-faint: #a0acba;
+    --color-text-updating: #bdc7d2;
+    --color-bg-app-rgb: 19 25 32;
+    --color-bg-elevated: #222d39;
+    --color-bg-input: #27313c;
+    --color-bg-input-hover: #343f4b;
+    --color-bg-hover: #2c3744;
+    --color-bg-code: #222d39;
+    --color-bg-surface: #1b232b;
     --color-bg-conversation: var(--color-bg-surface);
-    --color-cad-annotation: #d7ebe1;
-    --color-border: #3d5350;
-    --color-border-light: #314744;
-    --color-border-medium: #6e8981;
-    --color-border-strong: #839c93;
-    --color-selected: #82d8a8;
+    --color-cad-annotation: #dae7f6;
+    --color-border: #434f5d;
+    --color-border-light: #374351;
+    --color-border-medium: #748496;
+    --color-border-strong: #8897a8;
+    --color-selected: #6faff4;
 
     /* Chart marks keep the light theme's roles; each reaches 3:1 on the chart
        surface and the window band. */
-    --color-mark-hover: #d0dad5;
+    --color-mark-hover: #d1d8e0;
     --color-mark-linked: #ffa94d;
-    --color-mark-selected-marker: #f3f5ec;
-    --color-mark-base: #7d918a;
-    --color-mark-running: #93a69f;
+    --color-mark-selected-marker: #eef5fc;
+    --color-mark-base: #818d9b;
+    --color-mark-running: #96a2b0;
     --color-chart-new-input: #ffa657;
     --color-chart-cache-write: #79b8ff;
     --color-chart-cache-read: #7cdea0;
     --color-chart-output: #c4a5ff;
-    --color-chart-subagent-mark: #c9d5d0;
-    --color-chart-window-band: #263b38;
-    --color-chart-window-edge: #6e8981;
+    --color-chart-subagent-mark: #cbd3db;
+    --color-chart-window-band: #2c3744;
+    --color-chart-window-edge: #748496;
     --color-chart-context: #9cc3f0;
     --color-chart-compaction: #ff9e7a;
-    --color-chart-model: #7d918a;
+    --color-chart-model: #818d9b;
     --color-chart-child-tool: #8cc4ff;
-    --color-chart-command: #a6b9b1;
-    --color-user-msg-bg: #223a30;
-    --color-session-bg: #2b493a;
-    --color-session-bg-hover: #385848;
+    --color-chart-command: #a9b5c3;
+    --color-user-msg-bg: #22364b;
+    --color-session-bg: #294360;
+    --color-session-bg-hover: #365270;
     --color-diff-added: #86d89c;
     --color-diff-deleted: #ff9ea8;
-    --color-diff-size: #bacac4;
-    --color-code-block-bg: #1c3030;
-    --color-code-block-fg: #f3f5ec;
-    --color-diff-block-bg: #172525;
-    --color-diff-block-fg: #f3f5ec;
+    --color-diff-size: #bdc7d2;
+    --color-code-block-bg: #222d39;
+    --color-code-block-fg: #eef5fc;
+    --color-diff-block-bg: #1b232b;
+    --color-diff-block-fg: #eef5fc;
     --color-diff-block-line-added: #86d89c;
     --color-diff-block-line-deleted: #ff9ea8;
     --color-diff-block-line-added-whitespace: #96bba0;
@@ -371,6 +371,11 @@ body {
   margin: 0;
   color: var(--color-text-primary);
   background: rgb(var(--color-bg-app-rgb));
+}
+
+/* Links without a component color use the link token, not browser defaults. */
+:where(a[href]) {
+  color: var(--color-link);
 }
 
 /* Monochrome inline symbols inherit the color of their control. */

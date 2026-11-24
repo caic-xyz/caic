@@ -13,8 +13,9 @@ supports sustained work, not chatbot conversation or dashboard decoration.
 
 ## Visual direction
 
-- Use neutral surfaces with green undertones. Use the caic.xyz brand green for
-  primary actions and selection. Status colors identify task and service states.
+- Use neutral surfaces with blue undertones. Blue identifies primary actions,
+  links, and selection. Status colors identify task and service states; green
+  means success, so the primary hue never uses it.
 - Give the task transcript and its fallback prompt an untinted, near-white
   reading surface in light mode. Badges, tabs, graphs, and menus keep their
   own surface colors inside the task detail view.

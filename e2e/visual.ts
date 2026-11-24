@@ -20,6 +20,7 @@ import {
   visualEpoch,
   visualPositionTime,
   visualRecordStrideMs,
+  visualTurnLengthMs,
 } from "./visual-fixtures";
 import { historyArray } from "../frontend/tests/history";
 
@@ -142,7 +143,9 @@ export async function prepareVisualPage(page: Page): Promise<VisualPage> {
   await page.route("**/api/caic/v1/tasks/*/history/**/activity/*/*?*", historyResponse);
   // A turn timeline holds its spans and calls as offsets from the turn start.
   // Move that start as the manifest moves the turn, so the turn's resource
-  // lanes read the fixture samples on the same clock.
+  // lanes read the fixture samples on the same clock. Trim the prompt delay
+  // that visualTurnLengthMs excludes from the start of the axis: it varies
+  // between runs and would shift every span.
   await page.route("**/api/caic/v1/tasks/*/history/turns/*?*", async (route) => {
     const url = new URL(route.request().url());
     const match = /\/tasks\/([^/]+)\/history\/turns\/(\d+)$/.exec(url.pathname);
@@ -158,10 +161,20 @@ export async function prepareVisualPage(page: Page): Promise<VisualPage> {
     ]);
     const turn = manifest.metadata.turns?.find((entry) => entry.number === timeline.number);
     if (!turn) throw new Error(`Visual manifest has no turn ${number}`);
-    const shift = visualPositionTime(historyClock(task).start, turn) - Date.parse(turn.at);
-    const move = (at: ISOTimestamp) => new Date(Date.parse(at) + shift).toISOString() as ISOTimestamp;
-    timeline.startedAt = move(timeline.startedAt);
-    if (timeline.endedAt) timeline.endedAt = move(timeline.endedAt);
+    const at = visualPositionTime(historyClock(task).start, turn);
+    const length = visualTurnLengthMs(turn);
+    const trim = Date.parse(turn.at) - Date.parse(turn.startedAt) - length;
+    const offset = (ms: number) => Math.max(0, ms - trim);
+    timeline.startedAt = new Date(at - length).toISOString() as ISOTimestamp;
+    if (timeline.endedAt) timeline.endedAt = new Date(at).toISOString() as ISOTimestamp;
+    timeline.durationMs = offset(timeline.durationMs);
+    // The prompt delay precedes the first tool call, so it is model time.
+    timeline.modelMs = offset(timeline.modelMs);
+    for (const span of timeline.spans ?? []) {
+      span.startMs = offset(span.startMs);
+      if (span.endMs !== undefined) span.endMs = offset(span.endMs);
+    }
+    for (const call of timeline.calls ?? []) call.atMs = offset(call.atMs);
     await route.fulfill({ json: timeline });
   });
   // Preserve real SSE ordering and checkpoints while matching finite fixture
@@ -198,8 +211,9 @@ export async function prepareVisualPage(page: Page): Promise<VisualPage> {
         metadata.setupEndedAt = iso(Math.min(...setupEnd) - history.start + history.taskStart);
       }
       for (const turn of metadata.turns ?? []) {
-        // A turn keeps its server-measured length on the visual clock.
-        turn.startedAt = iso(positionTime(turn) - (Date.parse(turn.at) - Date.parse(turn.startedAt)));
+        // Mirrors visualTurnLengthMs; the page cannot import it.
+        const length = Math.min(Date.parse(turn.at) - Date.parse(turn.startedAt), turn.durationMs);
+        turn.startedAt = iso(positionTime(turn) - length);
         turn.at = iso(positionTime(turn));
         if (turn.waitInput) turn.waitMs = positionTime(turn.waitInput) - positionTime(turn);
       }
