@@ -141,6 +141,7 @@ func (m *mcpTools) specs() []mcp.ToolSpec {
 
 	specs := []mcp.ToolSpec{
 		annotateTool(mcp.NewToolSpec("tasks_list", "List tasks", "List coding tasks in stable active-first order. A task-scoped agent lists only the tasks it created; task_get_detail accepts any stable task ID. A response-size limit may return fewer tasks than limit; pass nextCursor as cursor until it is absent.", m.handleTasksList), mcp.ToolAnnotations{Title: "List tasks", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
+		annotateTool(mcp.NewToolSpec("tasks_show_on_glasses", "Show tasks on glasses", "Show the user's tasks on their connected glasses: number, state, and title of the first tasks in tasks_list order. Call when the user asks to see their tasks. Returns which tasks the glasses show; do not read them out. Fails when no glasses are connected.", m.handleTasksShowOnGlasses), mcp.ToolAnnotations{Title: "Show tasks on glasses", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("repos_list", "List repositories", "List repositories in stable path order. Defaults to at most 200 repositories; a response-size limit may shorten the page, so pass nextCursor as cursor until it is absent.", m.handleReposList), mcp.ToolAnnotations{Title: "List repositories", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("harnesses_list", "List harnesses", "List available coding-agent harnesses and the models each accepts, with the reasoning effort values every model supports. Call this to choose a valid model or effort for task_create.", m.handleHarnessesList), mcp.ToolAnnotations{Title: "List harnesses", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		createSpec,
@@ -233,6 +234,33 @@ func (m *mcpTools) handleTasksList(ctx context.Context, call *mcp.ToolRequest[mc
 	// returned task count, and pre-wire logical payload size here. Do not use
 	// cursor, task ID, title, or user identity as metric labels.
 	return mcp.TypedToolResult(mcpschema.TaskListOutput{Tasks: tasks, NextCursor: next})
+}
+
+// handleTasksShowOnGlasses draws the first tasks on the glasses the client
+// declares, as gomode.DisplayExtension documents, and tells the model which
+// ones it drew. A malformed declaration counts as no glasses, as that contract
+// requires.
+func (m *mcpTools) handleTasksShowOnGlasses(ctx context.Context, call *mcp.ToolRequest[struct{}]) mcp.ToolResult[mcp.TextOutput] {
+	display, ok, err := mcp.ClientDisplay(&call.Params.Meta)
+	if err != nil {
+		m.taskSvc.log.WarnContext(ctx, "ignore malformed glasses display", "err", err)
+	}
+	if !ok || err != nil {
+		return mcp.ToolErrorWithMeta[mcp.TextOutput]("No glasses are connected.", mcp.MetaObject{mcp.ToolErrorCodeMetaKey: string(api.CodeBadRequest)})
+	}
+	keys, revision := taskKeys(ctx, m.taskSvc)
+	tasks, err := taskSummaries(ctx, m.taskSvc, keys[:min(len(keys), glassesTaskLimit)], 0, revision)
+	if err != nil {
+		return mcp.ToolErrorWithMeta[mcp.TextOutput]("Task ordering changed while reading. Try again.", mcp.MetaObject{mcp.ToolErrorCodeMetaKey: string(api.CodeConflict)})
+	}
+	card, err := glassesTasksCard(&display, tasks)
+	if err != nil {
+		m.taskSvc.log.ErrorContext(ctx, "draw glasses task card", "err", err)
+		return mcp.ToolErrorWithMeta[mcp.TextOutput]("The task card could not be drawn.", mcp.MetaObject{mcp.ToolErrorCodeMetaKey: string(api.CodeInternalError)})
+	}
+	res := mcp.TypedToolResult(mcp.TextOutput{Result: glassesTasksSummary(len(tasks), len(keys))})
+	res.Content = []mcp.ContentBlock{card}
+	return res
 }
 
 func (m *mcpTools) handleReposList(_ context.Context, call *mcp.ToolRequest[mcpschema.RepoListArgs]) mcp.ToolResult[mcpschema.RepoListOutput] {

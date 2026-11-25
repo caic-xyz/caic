@@ -216,8 +216,8 @@ github.com/golangci/swaggoswag v0.0.0-20250504205917-77f2aca3143e h1:ai0EfmVYE2b
 github.com/golangci/swaggoswag v0.0.0-20250504205917-77f2aca3143e/go.mod h1:Vrn4B5oR9qRwM+f54koyeH3yzphlecwERs0el27Fr/s=
 github.com/golangci/unconvert v0.0.0-20250410112200-a129a6e6413e h1:gD6P7NEo7Eqtt0ssnqSJNNndxe69DOQ24A5h7+i3KpM=
 github.com/golangci/unconvert v0.0.0-20250410112200-a129a6e6413e/go.mod h1:h+wZwLjUTJnm/P2rwlbJdRPZXOzaT36/FwnPnY2inzc=
-github.com/gomodedev/gomode v0.5.0 h1:Nc1QrAT5PpLDTPQe+oj8ubfiQxdpD8x+E5Cl3DSBA5o=
-github.com/gomodedev/gomode v0.5.0/go.mod h1:brLHSBQFNou9y48BilWrGO5xWFvFud3c63WL9IDad0Q=
+github.com/gomodedev/gomode v0.5.1-0.20261125234444-b296fe2075ab h1:Y7ObN0YrUAOxYHSG4xwNlhGlw5qd9HeHqkXKcS010ao=
+github.com/gomodedev/gomode v0.5.1-0.20261125234444-b296fe2075ab/go.mod h1:brLHSBQFNou9y48BilWrGO5xWFvFud3c63WL9IDad0Q=
 github.com/google/go-cmp v0.5.2/go.mod h1:v8dTdLbMG2kIc/vJvl+f65V22dbkXbowE6jgT/gNBxE=
 github.com/google/go-cmp v0.5.4/go.mod h1:v8dTdLbMG2kIc/vJvl+f65V22dbkXbowE6jgT/gNBxE=
 github.com/google/go-cmp v0.5.6/go.mod h1:v8dTdLbMG2kIc/vJvl+f65V22dbkXbowE6jgT/gNBxE=

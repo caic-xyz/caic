@@ -111,6 +111,7 @@ var mcpToolScopes = map[string]string{
 	"harnesses_list":             mcpScopeRead,
 	"tasks_list":                 mcpScopeTasksRead,
 	"task_get_detail":            mcpScopeTasksRead,
+	"tasks_show_on_glasses":      mcpScopeTasksRead,
 	"agent_last_message":         mcpScopeTasksRead,
 	"get_usage":                  mcpScopeRead,
 	"get_system_stats":           mcpScopeServerAdmin,
