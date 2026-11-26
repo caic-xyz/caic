@@ -140,16 +140,18 @@ describe("TaskList", () => {
       { ...task("busy"), resourceUsage: usage(200, 100) },
       { ...task("idle"), resourceUsage: usage(20, 1000) },
     ];
-    const [hostCPU, setHostCPU] = createSignal(760);
+    const [cpuLevel, setCPULevel] = createSignal<"high" | "normal">("high");
     const { container } = renderList(() => (
       <TaskList
         {...taskListProps(tasks)}
         now={() => now}
         serverHealth={() => ({
-          cpuPerc: hostCPU(),
+          cpuPerc: 760,
           cpuCount: 8,
           memUsed: 85,
           memTotal: 100,
+          cpuLevel: cpuLevel(),
+          memLevel: "warning",
           cpuHigh: true,
           memHigh: true,
         })}
@@ -164,7 +166,7 @@ describe("TaskList", () => {
     expect(level("idle", "cpu")).toHaveClass(levelStyles.normal);
     expect(level("busy", "memory")).toHaveClass(levelStyles.warning);
     expect(level("idle", "memory")).toHaveClass(levelStyles.warning);
-    setHostCPU(400);
+    setCPULevel("normal");
     expect(level("busy", "cpu")).toHaveClass(levelStyles.normal);
   });
 

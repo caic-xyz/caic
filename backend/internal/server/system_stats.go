@@ -51,9 +51,25 @@ func (s *systemStats) health() (h v1.ServerHealth, changed <-chan struct{}) {
 		h.CPUPerc += c.UsagePerc
 	}
 	h.MemUsed, h.MemTotal = v.MemUsed, v.MemTotal
-	h.CPUHigh = h.CPUCount > 0 && h.CPUPerc/float64(h.CPUCount) >= 80
-	h.MemHigh = v.MemPerc >= 80
+	if h.CPUCount > 0 {
+		h.CPULevel = hostLevel(h.CPUPerc / float64(h.CPUCount))
+	}
+	h.MemLevel = hostLevel(v.MemPerc)
+	h.CPUHigh = h.CPULevel == v1.ResourceLevelWarning || h.CPULevel == v1.ResourceLevelHigh
+	h.MemHigh = h.MemLevel == v1.ResourceLevelWarning || h.MemLevel == v1.ResourceLevelHigh
 	return h, s.changed
+}
+
+// hostLevel classifies a percentage of machine capacity.
+func hostLevel(percent float64) v1.ResourceLevel {
+	switch {
+	case percent >= 90:
+		return v1.ResourceLevelHigh
+	case percent >= 80:
+		return v1.ResourceLevelWarning
+	default:
+		return v1.ResourceLevelNormal
+	}
 }
 
 func (s *systemStats) record(sample *v1.SystemSample, err error) {

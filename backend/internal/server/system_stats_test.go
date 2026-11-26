@@ -133,14 +133,14 @@ func TestSystemStats(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			s := &systemStats{samples: make([]v1.SystemSample, 0, 60), changed: make(chan struct{})}
 			h, ch := s.health()
-			if !h.Time.IsZero() || h.Error == "" || h.CPUHigh || h.MemHigh {
+			if !h.Time.IsZero() || h.Error == "" || h.CPUHigh || h.MemHigh || h.CPULevel != "" || h.MemLevel != "" {
 				t.Fatalf("warmup = %+v", h)
 			}
 			sample := v1.SystemSample{CPUs: []v1.CPUUsage{{ID: "cpu0", UsagePerc: 100}, {ID: "cpu1", UsagePerc: 60}}, MemUsed: 800, MemTotal: 1000, MemPerc: 80}
 			sample.Time = time.Now()
 			s.record(&sample, nil)
 			h, _ = s.health()
-			if !h.CPUHigh || !h.MemHigh {
+			if !h.CPUHigh || !h.MemHigh || h.CPULevel != v1.ResourceLevelWarning || h.MemLevel != v1.ResourceLevelWarning {
 				t.Fatalf("first high sample = %+v", h)
 			}
 			select {
@@ -156,7 +156,7 @@ func TestSystemStats(t *testing.T) {
 			sample.Time = time.Now()
 			s.record(&sample, nil)
 			h, _ = s.health()
-			if h.CPUHigh || h.MemHigh {
+			if h.CPUHigh || h.MemHigh || h.CPULevel != v1.ResourceLevelNormal || h.MemLevel != v1.ResourceLevelNormal {
 				t.Fatalf("recovery below threshold = %+v", h)
 			}
 			s.record(&v1.SystemSample{}, errors.New("memory unavailable"))
@@ -174,7 +174,7 @@ func TestSystemStats(t *testing.T) {
 			sample.Time = time.Now()
 			s.record(&sample, nil)
 			h, _ := s.health()
-			if !h.CPUHigh || !h.MemHigh {
+			if !h.CPUHigh || !h.MemHigh || h.CPULevel != v1.ResourceLevelHigh || h.MemLevel != v1.ResourceLevelHigh {
 				t.Fatalf("high = %+v", h)
 			}
 			time.Sleep(time.Minute)
@@ -184,7 +184,7 @@ func TestSystemStats(t *testing.T) {
 			}
 			s.record(&v1.SystemSample{}, errors.New("sampler failed"))
 			h, _ = s.health()
-			if h.Error != "sampler failed" || !h.CPUHigh || !h.MemHigh {
+			if h.Error != "sampler failed" || !h.CPUHigh || !h.MemHigh || h.CPULevel != v1.ResourceLevelHigh {
 				t.Fatalf("retained warning after error = %+v", h)
 			}
 			sample.CPUs[0].UsagePerc, sample.MemPerc = 77, 77

@@ -1,8 +1,9 @@
 // Classifies host and task CPU/memory levels, and attributes host pressure to the tasks that drive it most.
 
-import type { EventStats, ServerHealth } from "@sdk/types.gen";
+import type { EventStats, ResourceLevel as HostLevel, ServerHealth } from "@sdk/types.gen";
 
-export type ResourceLevel = "high" | "normal" | "unavailable" | "warning";
+/** A server-classified host level, or unavailable when no reading applies. */
+export type ResourceLevel = HostLevel | "unavailable";
 
 /** A task sample older than this no longer describes the running container. */
 const sampleTTLMs = 15_000;
@@ -11,13 +12,6 @@ const rank: Record<ResourceLevel, number> = { unavailable: 0, normal: 1, warning
 
 export function isSampleFresh(sample: EventStats, now: number): boolean {
   return now - sample.ts <= sampleTTLMs;
-}
-
-/** Classifies a host percentage of machine capacity. */
-export function hostLevel(percent: number): ResourceLevel {
-  if (percent >= 90) return "high";
-  if (percent >= 80) return "warning";
-  return "normal";
 }
 
 /** Classifies a task percentage of its own container capacity. */
@@ -32,8 +26,8 @@ function containerLevel(percent: number): ResourceLevel {
  * level, as absolute usage thresholds in the task sample unit.
  */
 export interface HostShare {
-  /** Host level, given to the busiest task. */
-  level: ResourceLevel;
+  /** Server-classified host level, given to the busiest task. */
+  level: HostLevel;
   /** Largest usage among fresh task samples. */
   busiest: number;
   /** Smallest usage still marked as a contributor; tasks from here up to busiest are warning. */
@@ -67,8 +61,12 @@ export function hostMemoryPercent(h: ServerHealth): number | null {
  * tasks are thus marked together and a long tail of small ones is not.
  */
 export function hostPressure(health: ServerHealth | null, connected: boolean, samples: EventStats[]): HostPressure {
-  const share = (percent: number | null, capacity: number, usage: (s: EventStats) => number): HostShare | null => {
-    if (percent === null || hostLevel(percent) === "normal") return null;
+  const share = (
+    level: HostLevel | undefined,
+    capacity: number,
+    usage: (s: EventStats) => number,
+  ): HostShare | null => {
+    if (level === undefined || level === "normal" || capacity <= 0) return null;
     const usages = samples
       .map(usage)
       .filter((u) => u > 0)
@@ -81,12 +79,12 @@ export function hostPressure(health: ServerHealth | null, connected: boolean, sa
       if (u < capacity * contributorCapacityShare || (i > 1 && u < floor * contributorStep)) break;
       floor = u;
     }
-    return { level: hostLevel(percent), busiest, floor };
+    return { level, busiest, floor };
   };
   if (!health || health.error || !connected) return { cpu: null, memory: null };
   return {
-    cpu: share(hostCPUPercent(health), health.cpuCount * 100, (s) => s.cpuPerc),
-    memory: share(hostMemoryPercent(health), health.memTotal, (s) => s.memUsed),
+    cpu: share(health.cpuLevel, health.cpuCount * 100, (s) => s.cpuPerc),
+    memory: share(health.memLevel, health.memTotal, (s) => s.memUsed),
   };
 }
 

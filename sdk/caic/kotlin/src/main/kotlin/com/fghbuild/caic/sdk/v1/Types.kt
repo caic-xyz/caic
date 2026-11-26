@@ -1214,6 +1214,39 @@ object QuotaProviderSerializer : KSerializer<QuotaProvider> {
     }
 }
 
+@Serializable(with = ResourceLevelSerializer::class)
+sealed interface ResourceLevel {
+    val value: String
+    @Serializable
+    data object Normal : ResourceLevel {
+        override val value = "normal"
+    }
+    @Serializable
+    data object Warning : ResourceLevel {
+        override val value = "warning"
+    }
+    @Serializable
+    data object High : ResourceLevel {
+        override val value = "high"
+    }
+    @Serializable
+    data class Other(override val value: String) : ResourceLevel
+}
+
+object ResourceLevelSerializer : KSerializer<ResourceLevel> {
+    override val descriptor = PrimitiveSerialDescriptor("ResourceLevel", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: ResourceLevel) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): ResourceLevel {
+        val v = decoder.decodeString()
+        return when (v) {
+            "normal" -> ResourceLevel.Normal
+            "warning" -> ResourceLevel.Warning
+            "high" -> ResourceLevel.High
+            else -> ResourceLevel.Other(v)
+        }
+    }
+}
+
 @Serializable(with = RoleSerializer::class)
 sealed interface Role {
     val value: String
@@ -2675,10 +2708,11 @@ data class TaskListRestorationStatus(val loading: Boolean, val error: String)
 /**
  * ServerHealth is compact last-observed machine health. Time is omitted before the first
  * successful sample. CPUPerc uses 100% per fully busy logical CPU; CPUCount is
- * the whole-machine capacity. High flags are true when the latest successful sample
- * is at or above 80% of machine capacity. Sampling errors and collection gaps retain both
- * flags and readings until a successful sample updates them. Error reports sampling
- * failures separately; Time identifies the last successful measurement.
+ * the whole-machine capacity. Levels classify the latest successful sample and are
+ * omitted before it; CPULevel is also omitted while CPUCount is zero. High flags are true when the level
+ * is warning or high. Sampling errors and collection gaps retain levels, flags, and
+ * readings until a successful sample updates them. Error reports sampling failures
+ * separately; Time identifies the last successful measurement.
  */
 @Serializable
 data class ServerHealth(
@@ -2687,6 +2721,8 @@ data class ServerHealth(
     val cpuCount: Int,
     val memUsed: Long,
     val memTotal: Long,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val cpuLevel: ResourceLevel? = null,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val memLevel: ResourceLevel? = null,
     val cpuHigh: Boolean,
     val memHigh: Boolean,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val error: String? = null,

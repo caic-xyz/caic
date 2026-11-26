@@ -26,6 +26,8 @@ for (const width of [320, 390, 1280]) {
       cpuCount: 8,
       memUsed: 30 * 2 ** 30,
       memTotal: 32 * 2 ** 30,
+      cpuLevel: "high",
+      memLevel: "high",
       cpuHigh: true,
       memHigh: true,
     };
@@ -106,7 +108,7 @@ for (const width of [320, 390, 1280]) {
       await expect(tooltip).toBeHidden();
       await expect(link).toBeFocused();
 
-      update({ cpuPerc: 400 });
+      update({ cpuPerc: 400, cpuLevel: "normal" });
       await expect(link).toHaveAccessibleName("CPU normal, memory high — open System");
       const normalColor = await iconFill(cpu);
       expect(normalColor).not.toBe(highColor);
@@ -114,14 +116,14 @@ for (const width of [320, 390, 1280]) {
       expect(await memory.boundingBox()).toEqual(memBox);
       expect(await avatar.boundingBox()).toEqual(before);
 
-      update({ cpuPerc: 680, memUsed: 16 * 2 ** 30 });
+      update({ cpuPerc: 680, memUsed: 16 * 2 ** 30, cpuLevel: "warning", memLevel: "normal" });
       await expect(link).toHaveAccessibleName("CPU warning, memory normal — open System");
       const warningColor = await iconFill(cpu);
       expect([highColor, normalColor]).not.toContain(warningColor);
       await expect(memory).toHaveCSS("fill", normalColor);
       expect(await cpu.boundingBox()).toEqual(cpuBox);
 
-      update({ cpuPerc: 0, memUsed: 0 });
+      update({ cpuPerc: 0, memUsed: 0, cpuLevel: "normal", memLevel: "normal" });
       await expect(link).toHaveAccessibleName("CPU normal, memory normal — open System");
       await expect(cpu).toBeVisible();
       await expect(memory).toBeVisible();
@@ -137,7 +139,7 @@ for (const width of [320, 390, 1280]) {
       await link.focus();
       await expect(tooltip).toContainText("Sampling error: sample failed");
       expect(await avatar.boundingBox()).toEqual(before);
-      update({ error: "", cpuPerc: 750, memUsed: 30 * 2 ** 30 });
+      update({ error: "", cpuPerc: 750, memUsed: 30 * 2 ** 30, cpuLevel: "high", memLevel: "high" });
       await expect(link).toBeVisible();
       await page.clock.fastForward(30_000);
       await expect(link).toBeVisible();

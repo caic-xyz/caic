@@ -675,6 +675,28 @@ public struct QuotaProvider: Codable, Equatable, Hashable {
     }
 }
 
+public struct ResourceLevel: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let Normal = ResourceLevel("normal")
+    public static let Warning = ResourceLevel("warning")
+    public static let High = ResourceLevel("high")
+
+    public static func other(_ value: String) -> ResourceLevel { ResourceLevel(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
 public struct Role: Codable, Equatable, Hashable {
     public let value: String
 
@@ -3533,26 +3555,31 @@ public struct TaskListRestorationStatus: Codable {
 
 /// ServerHealth is compact last-observed machine health. Time is omitted before the first
 /// successful sample. CPUPerc uses 100% per fully busy logical CPU; CPUCount is
-/// the whole-machine capacity. High flags are true when the latest successful sample
-/// is at or above 80% of machine capacity. Sampling errors and collection gaps retain both
-/// flags and readings until a successful sample updates them. Error reports sampling
-/// failures separately; Time identifies the last successful measurement.
+/// the whole-machine capacity. Levels classify the latest successful sample and are
+/// omitted before it; CPULevel is also omitted while CPUCount is zero. High flags are true when the level
+/// is warning or high. Sampling errors and collection gaps retain levels, flags, and
+/// readings until a successful sample updates them. Error reports sampling failures
+/// separately; Time identifies the last successful measurement.
 public struct ServerHealth: Codable {
     public let time: ISOTimestamp?
     public let cpuPerc: Double
     public let cpuCount: Int
     public let memUsed: Int
     public let memTotal: Int
+    public let cpuLevel: ResourceLevel?
+    public let memLevel: ResourceLevel?
     public let cpuHigh: Bool
     public let memHigh: Bool
     public let error: String?
 
-    public init(time: ISOTimestamp? = nil, cpuPerc: Double, cpuCount: Int, memUsed: Int, memTotal: Int, cpuHigh: Bool, memHigh: Bool, error: String? = nil) {
+    public init(time: ISOTimestamp? = nil, cpuPerc: Double, cpuCount: Int, memUsed: Int, memTotal: Int, cpuLevel: ResourceLevel? = nil, memLevel: ResourceLevel? = nil, cpuHigh: Bool, memHigh: Bool, error: String? = nil) {
         self.time = time
         self.cpuPerc = cpuPerc
         self.cpuCount = cpuCount
         self.memUsed = memUsed
         self.memTotal = memTotal
+        self.cpuLevel = cpuLevel
+        self.memLevel = memLevel
         self.cpuHigh = cpuHigh
         self.memHigh = memHigh
         self.error = error

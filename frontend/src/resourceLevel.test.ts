@@ -30,6 +30,8 @@ const health: ServerHealth = {
   cpuCount: 8,
   memUsed: 850,
   memTotal: 1000,
+  cpuLevel: "high",
+  memLevel: "warning",
   cpuHigh: true,
   memHigh: true,
 };
@@ -43,14 +45,14 @@ describe("hostPressure", () => {
       cpu: { level: "high", busiest: 200, floor: 50 },
       memory: { level: "warning", busiest: 300, floor: 100 },
     });
-    expect(hostPressure({ ...health, cpuPerc: 632, memUsed: 799 }, true, samples)).toEqual({
+    expect(hostPressure({ ...health, cpuLevel: "normal", memLevel: "normal" }, true, samples)).toEqual({
       cpu: null,
       memory: null,
     });
   });
 
   it("extends contributors through comparable heavy tasks and stops at the small tail", () => {
-    const host = { ...health, memUsed: 29 * GiB, memTotal: 32 * GiB };
+    const host = { ...health, memUsed: 29 * GiB, memTotal: 32 * GiB, memLevel: "high" } as const;
     const memory = (gib: number[]) =>
       hostPressure(
         host,

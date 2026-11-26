@@ -38,6 +38,8 @@ export function serverHealth(): ServerHealth {
     cpuCount: 8,
     memUsed: 568 * 1024 * 1024,
     memTotal: 2 * 1024 * 1024 * 1024,
+    cpuLevel: "normal",
+    memLevel: "normal",
     cpuHigh: false,
     memHigh: false,
   };

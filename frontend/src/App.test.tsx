@@ -4366,9 +4366,11 @@ const highHealth = {
   cpuCount: 8,
   memUsed: 30 * 2 ** 30,
   memTotal: 32 * 2 ** 30,
+  cpuLevel: "high",
+  memLevel: "high",
   cpuHigh: true,
   memHigh: true,
-};
+} as const;
 
 it("always shows CPU and memory levels and marks unavailable readings", async () => {
   renderApp();
@@ -4391,17 +4393,12 @@ it("always shows CPU and memory levels and marks unavailable readings", async ()
   expect(screen.getByRole("tooltip")).toHaveTextContent("RAM: 30 GiB / 32 GiB (93.8%)");
   fireEvent.keyDown(link, { key: "Escape" });
   expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
-  for (const [percent, expected] of [
-    [79.9, "normal"],
-    [80, "warning"],
-    [89.9, "warning"],
-    [90, "high"],
-    [79.9, "normal"],
-  ] as const) {
-    dispatchSSE({ kind: "health", health: { ...highHealth, cpuPerc: percent * 8 } });
-    expect(screen.getByRole("link", { name: `CPU ${expected}, memory high — open System` })).toBe(link);
-    dispatchSSE({ kind: "health", health: { ...highHealth, memUsed: (percent / 100) * highHealth.memTotal } });
-    expect(screen.getByRole("link", { name: `CPU high, memory ${expected} — open System` })).toBe(link);
+  // The server owns the thresholds; the header shows the level it reports.
+  for (const level of ["normal", "warning", "high", "normal"] as const) {
+    dispatchSSE({ kind: "health", health: { ...highHealth, cpuLevel: level } });
+    expect(screen.getByRole("link", { name: `CPU ${level}, memory high — open System` })).toBe(link);
+    dispatchSSE({ kind: "health", health: { ...highHealth, memLevel: level } });
+    expect(screen.getByRole("link", { name: `CPU high, memory ${level} — open System` })).toBe(link);
   }
   dispatchSSE({ kind: "health", health: { ...highHealth, error: "sampling failed" } });
   expect(screen.getByRole("link", { name: "CPU unavailable, memory unavailable — open System" })).toBe(link);
@@ -4409,7 +4406,10 @@ it("always shows CPU and memory levels and marks unavailable readings", async ()
   expect(screen.getByRole("tooltip")).toHaveTextContent("Sampling error: sampling failed");
   dispatchSSE({ kind: "health", health: { ...highHealth, time: undefined, error: "Waiting for first sample" } });
   expect(screen.getByRole("link", { name: "CPU unavailable, memory unavailable — open System" })).toBe(link);
-  dispatchSSE({ kind: "health", health: { ...highHealth, cpuPerc: 0, memUsed: 0 } });
+  dispatchSSE({
+    kind: "health",
+    health: { ...highHealth, cpuPerc: 0, memUsed: 0, cpuLevel: "normal", memLevel: "normal" },
+  });
   expect(screen.getByRole("link", { name: "CPU normal, memory normal — open System" })).toBe(link);
   expect(screen.getByRole("tooltip")).toHaveTextContent("CPU: 0.0%");
 });
@@ -4613,7 +4613,10 @@ it("retains health across task reconnects and ignores retired streams", async ()
     listener({ data: JSON.stringify({ kind: "health", health: { ...highHealth, cpuPerc: 0, memUsed: 0 } }) }),
   );
   expect(screen.getByRole("link", { name: "CPU high, memory high — open System" })).toBe(link);
-  dispatchSSE({ kind: "health", health: { ...highHealth, cpuPerc: 0, memUsed: 0 } });
+  dispatchSSE({
+    kind: "health",
+    health: { ...highHealth, cpuPerc: 0, memUsed: 0, cpuLevel: "normal", memLevel: "normal" },
+  });
   expect(screen.getByRole("link", { name: "CPU normal, memory normal — open System" })).toBe(link);
   dispatchSSE({ kind: "health", health: highHealth });
   networkOnline(false);

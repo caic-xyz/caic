@@ -412,6 +412,17 @@ export const QuotaProviderTypeSafe = "typesafe";
 export const QuotaProviderXiaomi = "xiaomi";
 export const QuotaProviderZai = "zai";
 
+export type ResourceLevel =
+  | "normal"
+  | "warning"
+  | "high";
+/**
+ * Supported values.
+ */
+export const ResourceLevelNormal = "normal";
+export const ResourceLevelWarning = "warning";
+export const ResourceLevelHigh = "high";
+
 export type Role =
   | "admin"
   | "member"
@@ -1659,10 +1670,11 @@ export interface TaskListRestorationStatus {
 /**
  * ServerHealth is compact last-observed machine health. Time is omitted before the first
  * successful sample. CPUPerc uses 100% per fully busy logical CPU; CPUCount is
- * the whole-machine capacity. High flags are true when the latest successful sample
- * is at or above 80% of machine capacity. Sampling errors and collection gaps retain both
- * flags and readings until a successful sample updates them. Error reports sampling
- * failures separately; Time identifies the last successful measurement.
+ * the whole-machine capacity. Levels classify the latest successful sample and are
+ * omitted before it; CPULevel is also omitted while CPUCount is zero. High flags are true when the level
+ * is warning or high. Sampling errors and collection gaps retain levels, flags, and
+ * readings until a successful sample updates them. Error reports sampling failures
+ * separately; Time identifies the last successful measurement.
  */
 export interface ServerHealth {
   time?: ISOTimestamp;
@@ -1670,6 +1682,8 @@ export interface ServerHealth {
   cpuCount: number /* int */;
   memUsed: number /* uint64 */;
   memTotal: number /* uint64 */;
+  cpuLevel?: ResourceLevel;
+  memLevel?: ResourceLevel;
   cpuHigh: boolean;
   memHigh: boolean;
   error?: string;

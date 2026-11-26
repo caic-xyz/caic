@@ -623,21 +623,34 @@ type TaskListEvent struct {
 	Health   *ServerHealth              `json:"health,omitempty"`
 }
 
+// ResourceLevel classifies host usage as a share of machine capacity.
+type ResourceLevel string
+
+// Resource level values: warning from 80% of machine capacity, high from 90%.
+const (
+	ResourceLevelNormal  ResourceLevel = "normal"
+	ResourceLevelWarning ResourceLevel = "warning"
+	ResourceLevelHigh    ResourceLevel = "high"
+)
+
 // ServerHealth is compact last-observed machine health. Time is omitted before the first
 // successful sample. CPUPerc uses 100% per fully busy logical CPU; CPUCount is
-// the whole-machine capacity. High flags are true when the latest successful sample
-// is at or above 80% of machine capacity. Sampling errors and collection gaps retain both
-// flags and readings until a successful sample updates them. Error reports sampling
-// failures separately; Time identifies the last successful measurement.
+// the whole-machine capacity. Levels classify the latest successful sample and are
+// omitted before it; CPULevel is also omitted while CPUCount is zero. High flags are true when the level
+// is warning or high. Sampling errors and collection gaps retain levels, flags, and
+// readings until a successful sample updates them. Error reports sampling failures
+// separately; Time identifies the last successful measurement.
 type ServerHealth struct {
-	Time     time.Time `json:"time,omitzero"`
-	CPUPerc  float64   `json:"cpuPerc"`
-	CPUCount int       `json:"cpuCount"`
-	MemUsed  uint64    `json:"memUsed"`
-	MemTotal uint64    `json:"memTotal"`
-	CPUHigh  bool      `json:"cpuHigh"`
-	MemHigh  bool      `json:"memHigh"`
-	Error    string    `json:"error,omitempty"`
+	Time     time.Time     `json:"time,omitzero"`
+	CPUPerc  float64       `json:"cpuPerc"`
+	CPUCount int           `json:"cpuCount"`
+	MemUsed  uint64        `json:"memUsed"`
+	MemTotal uint64        `json:"memTotal"`
+	CPULevel ResourceLevel `json:"cpuLevel,omitempty"`
+	MemLevel ResourceLevel `json:"memLevel,omitempty"`
+	CPUHigh  bool          `json:"cpuHigh"`
+	MemHigh  bool          `json:"memHigh"`
+	Error    string        `json:"error,omitempty"`
 }
 
 // WarningCategory identifies a warning independently of translated display text.

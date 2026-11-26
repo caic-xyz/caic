@@ -5,7 +5,7 @@ import MemoryIcon from "@material-symbols/svg-400/outlined/memory_alt.svg?solid"
 import type { ServerHealth } from "@sdk/types.gen";
 
 import { formatBytes } from "../formatting";
-import { hostCPUPercent, hostLevel, hostMemoryPercent, type ResourceLevel } from "../resourceLevel";
+import { hostCPUPercent, hostMemoryPercent, type ResourceLevel } from "../resourceLevel";
 import styles from "./ServerHealthIndicator.module.css";
 import Tooltip from "./Tooltip";
 
@@ -17,13 +17,12 @@ const levelClass: Record<ResourceLevel, string> = {
 };
 
 export default function ServerHealthIndicator(props: { health: ServerHealth | null; connected: boolean }) {
-  const level = (percent: (h: ServerHealth) => number | null): ResourceLevel => {
+  const level = (pick: (h: ServerHealth) => ResourceLevel | undefined): ResourceLevel => {
     const h = props.health;
-    const p = h && props.connected && !h.error ? percent(h) : null;
-    return p === null ? "unavailable" : hostLevel(p);
+    return (h && props.connected && !h.error && pick(h)) || "unavailable";
   };
-  const cpuLevel = () => level(hostCPUPercent);
-  const memoryLevel = () => level(hostMemoryPercent);
+  const cpuLevel = () => level((h) => h.cpuLevel);
+  const memoryLevel = () => level((h) => h.memLevel);
   const description = () => {
     const h = props.health;
     if (!h) return `Waiting for the first system sample${!props.connected ? "\nUpdates unavailable" : ""}`;
