@@ -1415,12 +1415,7 @@ export default function TaskDetail(props: Props) {
                           )
                         }
                       >
-                        <button
-                          class={styles.fixCIBtn}
-                          onClick={handleFixPR}
-                          disabled={fixingPR()}
-                          title="Inject a fix-PR command into this task (auto mode — no new task created)"
-                        >
+                        <button class={styles.fixCIBtn} onClick={handleFixPR} disabled={fixingPR()}>
                           {fixingPR() ? "Sending…" : "Fix PR"}
                         </button>
                       </Show>
@@ -1515,14 +1510,10 @@ export default function TaskDetail(props: Props) {
               </span>
             </Show>
             <Show when={props.inPlanMode}>
-              <span class={styles.planIndicator} title="Agent is in plan mode">
-                Plan Mode
-              </span>
+              <span class={styles.planIndicator}>Plan Mode</span>
             </Show>
             <Show when={props.taskState === "stopped" && props.stoppedDiskUsedBytes >= 0}>
-              <span class={styles.stoppedDiskUsage} title="Writable disk space retained by this stopped task">
-                Disk {formatBytes(props.stoppedDiskUsedBytes)}
-              </span>
+              <span class={styles.stoppedDiskUsage}>Disk {formatBytes(props.stoppedDiskUsedBytes)}</span>
             </Show>
             <StatsIcon
               href={taskPerformancePath(taskPath())}

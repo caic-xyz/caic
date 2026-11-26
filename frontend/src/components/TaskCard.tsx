@@ -408,7 +408,7 @@ export default function TaskCard(props: TaskCardProps) {
                     }
                   }}
                   aria-label={props.purgeModifierActive ? "Purge" : "Stop"}
-                  title={props.purgeModifierActive ? "Purge" : "Stop (hold Shift or double-click to purge)"}
+                  title={props.purgeModifierActive ? "Purge" : "Stop · Shift or double-click: purge"}
                   data-testid="stop-task"
                 >
                   <Show

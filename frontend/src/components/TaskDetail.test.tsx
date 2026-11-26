@@ -629,10 +629,7 @@ it("keeps concurrent child Markdown and parent thinking stable through item and 
 it("shows retained disk usage for a stopped task", async () => {
   await renderTaskDetail({ taskState: "stopped", stoppedDiskUsedBytes: 2_097_152 });
 
-  expect(screen.getByText("Disk 2.0 MiB")).toHaveAttribute(
-    "title",
-    "Writable disk space retained by this stopped task",
-  );
+  expect(screen.getByText("Disk 2.0 MiB")).toBeInTheDocument();
 });
 
 it("hides unavailable disk usage for an old stopped task", async () => {

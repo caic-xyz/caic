@@ -136,13 +136,20 @@ export default function Tooltip(props: Props) {
       event.stopImmediatePropagation();
     };
 
+    // Only a scroll that can move the trigger detaches the popup from it; a
+    // streaming transcript elsewhere on the page must not close it.
+    const onScroll = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof Node) || !triggerRef || target.contains(triggerRef)) dismiss();
+    };
+
     document.addEventListener("click", onOutsideClick, true);
-    document.addEventListener("scroll", dismiss, true);
+    document.addEventListener("scroll", onScroll, true);
     document.addEventListener("keydown", onEscape, true);
     window.addEventListener("resize", dismiss);
     onCleanup(() => {
       document.removeEventListener("click", onOutsideClick, true);
-      document.removeEventListener("scroll", dismiss, true);
+      document.removeEventListener("scroll", onScroll, true);
       document.removeEventListener("keydown", onEscape, true);
       window.removeEventListener("resize", dismiss);
     });
