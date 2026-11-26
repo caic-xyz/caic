@@ -158,14 +158,12 @@ describe("TaskList", () => {
     ));
     const level = (id: string, resource: "cpu" | "memory") =>
       container.querySelector(`[data-task-id="${id}"] [data-testid="task-${resource}-level"]`);
-    // Each task uses at most 12.5% of its container.
+    // Each task uses at most 12.5% of its container. The idle runner-up uses
+    // under 5% of host CPU; the busy runner-up uses over 5% of host memory.
     expect(level("busy", "cpu")).toHaveClass(levelStyles.high);
     expect(level("idle", "cpu")).toHaveClass(levelStyles.normal);
-    expect(level("busy", "memory")).toHaveClass(levelStyles.normal);
+    expect(level("busy", "memory")).toHaveClass(levelStyles.warning);
     expect(level("idle", "memory")).toHaveClass(levelStyles.warning);
-    expect(container.querySelector('[data-task-id="busy"] [data-testid="task-resource-levels"]')).toHaveAccessibleName(
-      /Host CPU 95\.0%: 100% of busiest task/,
-    );
     setHostCPU(400);
     expect(level("busy", "cpu")).toHaveClass(levelStyles.normal);
   });

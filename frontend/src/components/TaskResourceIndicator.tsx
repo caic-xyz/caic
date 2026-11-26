@@ -1,4 +1,4 @@
-// Compact CPU and memory levels link to task performance with container-relative readings and host attribution.
+// Compact CPU and memory levels link to task performance with container-relative readings, colored by host contribution.
 
 import { A } from "@solidjs/router";
 
@@ -7,14 +7,7 @@ import MemoryIcon from "@material-symbols/svg-400/outlined/memory_alt.svg?solid"
 import type { EventStats } from "@sdk/types.gen";
 
 import { formatBytes } from "../formatting";
-import {
-  busiestShare,
-  isSampleFresh,
-  taskLevel,
-  type HostPressure,
-  type HostShare,
-  type ResourceLevel,
-} from "../resourceLevel";
+import { isSampleFresh, taskLevel, type HostPressure, type ResourceLevel } from "../resourceLevel";
 import styles from "./TaskResourceIndicator.module.css";
 import Tooltip from "./Tooltip";
 
@@ -51,10 +44,6 @@ export default function TaskResourceIndicator(props: {
     const s = fresh();
     return s ? taskLevel(memory(), s.memUsed, memoryShare()) : "unavailable";
   };
-  const hostLine = (name: string, usage: number, share: HostShare | null) =>
-    share
-      ? [`Host ${name} ${share.hostPercent.toFixed(1)}%: ${busiestShare(usage, share).toFixed(0)}% of busiest task`]
-      : [];
   const description = () => {
     const s = props.sample;
     if (!s) return "Resources: pending";
@@ -63,8 +52,6 @@ export default function TaskResourceIndicator(props: {
     return [
       `CPU: ${(s.cpuPerc / 100).toFixed(2)} / ${s.cpuCeiling ?? "??"} CPUs (${c === null ? "??" : `${c.toFixed(1)}%`})`,
       `RAM: ${formatBytes(s.memUsed)} / ${s.memLimit > 0 ? formatBytes(s.memLimit) : "??"} (${m === null ? "??" : `${m.toFixed(1)}%`})`,
-      ...hostLine("CPU", s.cpuPerc, cpuShare()),
-      ...hostLine("RAM", s.memUsed, memoryShare()),
       ...(s.cpuError ? ["CPU metadata: unavailable"] : []),
       ...(fresh() ? [] : ["Sample: stale"]),
     ].join("\n");
