@@ -3,6 +3,7 @@
 import { children, createSignal, createEffect, createMemo, createUniqueId, Show, onCleanup, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 
+import { boundTooltipText } from "../tooltipText";
 import styles from "./Tooltip.module.css";
 
 interface TooltipTrigger {
@@ -39,7 +40,7 @@ export default function Tooltip(props: Props) {
     const at = openedAt();
     if (at === null || disabled()) return "";
     const value = props.text;
-    return typeof value === "function" ? value(at) : (value ?? "");
+    return boundTooltipText(typeof value === "function" ? value(at) : (value ?? ""));
   });
   const popupId = createUniqueId();
   let triggerRef: HTMLElement | undefined;

@@ -132,6 +132,7 @@ import styles from "./TaskDetail.module.css";
 const TaskStartDirContext = createContext<Accessor<string>>(() => "");
 import { api } from "../api";
 import { taskViewMode } from "../taskView";
+import { boundTooltipText } from "../tooltipText";
 
 // Module-level store for <details> open/closed state (tool calls, thinking blocks).
 // Keys: toolUseID, "group:<firstToolUseID>", "thinking:<firstEventTs>".
@@ -3231,7 +3232,7 @@ function ToolCallCard(props: {
               <Show when={detail()}>
                 <span
                   class={elideDetailStart() ? `${styles.toolDetail} ${styles.toolDetailStart}` : styles.toolDetail}
-                  title={elideDetailStart() ? detail() : undefined}
+                  title={elideDetailStart() ? boundTooltipText(detail()) : undefined}
                 >
                   <Show when={elideDetailStart()} fallback={detail()}>
                     <bdi dir="ltr">{detail()}</bdi>

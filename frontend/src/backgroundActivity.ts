@@ -9,6 +9,7 @@ import type {
 } from "@sdk/types.gen";
 import { toolIdentity } from "./grouping";
 import { formatTimingDuration } from "./timing";
+import { firstLine } from "./tooltipText";
 
 export type BackgroundKind = TaskBackgroundItem["kind"];
 
@@ -71,8 +72,9 @@ export function backgroundLabel(counts: readonly BackgroundCount[]): string {
   return `Background: ${counts.map((c) => count(c.count, c.kind)).join(" · ")}`;
 }
 
+// backgroundItemTitle names an item on one line: a multi-line command keeps its first line.
 export function backgroundItemTitle(kindName: string, label: string): string {
-  return label && label !== kindName ? `${kindName}: ${label}` : kindName;
+  return label && label !== kindName ? `${kindName}: ${firstLine(label)}` : kindName;
 }
 
 export function backgroundTooltip(

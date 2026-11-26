@@ -9,6 +9,7 @@ import { isChildEvent, toolIdentity } from "../grouping";
 import { formatExactSeconds, formatTotalDuration } from "../timing";
 import { useTranscriptLinks } from "../TaskTimelineContext";
 import { nativeLinkKey, toolLinkKey, type TranscriptTarget } from "../transcriptLinks";
+import { boundTooltipText } from "../tooltipText";
 import Table from "./Table";
 import styles from "./TurnTimeline.module.css";
 
@@ -392,7 +393,7 @@ export default function TurnTimeline(props: {
                             }}
                             tabIndex={item.key === tabStop() ? 0 : -1}
                             aria-label={`${laneNames[lane.key]}: ${item.name}, ${item.timing}${outcome(item.span)}`}
-                            title={`${item.name} · ${item.timing}`}
+                            title={boundTooltipText(`${item.name} · ${item.timing}`)}
                             data-span={item.key}
                             data-testid="turn-timeline-span"
                             onFocus={() => setActive(item.key)}
