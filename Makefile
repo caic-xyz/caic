@@ -14,7 +14,7 @@ help:
 	@printf '  %-36s - %s\n' 'make verify' 'Fast static gate: lint, formatting, generated docs (pre-push gate)'
 	@printf '  %-36s - %s\n' 'make test [COVERAGE=1]' 'Run unit tests (Go, frontend, Python); COVERAGE=1 adds frontend coverage'
 	@printf '  %-36s - %s\n' 'make test-frontend [FILES=...]' 'Run frontend unit tests, or only the named test files'
-	@printf '  %-36s - %s\n' 'make test-e2e [SPEC=...] [ROUNDS=N]' 'Run Playwright end-to-end tests, or one spec, N times (slow)'
+	@printf '  %-36s - %s\n' 'make test-e2e [FILES=...] [ROUNDS=N]' 'Run Playwright end-to-end tests, or only the named specs, N times (slow)'
 	@printf '  %-36s - %s\n' 'make test-smoke' 'Run real runtime smoke test (slow, needs md containers)'
 	@printf '  %-36s - %s\n' 'make benchmark' 'Run Go and frontend benchmarks'
 	@printf '  %-36s - %s\n' 'make build' 'Build Go server (includes frontend build)'
@@ -112,8 +112,8 @@ test-frontend: frontend-deps
 # End-to-end tests run against the fake backend (see e2e/playwright.config.ts):
 # slow, needs a frontend build and the Playwright chromium build, and shares
 # backend/frontend/dist with build targets, so never run it concurrently with
-# them. CI runs it; verify and test do not. SPEC limits the run to one spec
-# and may carry Playwright options. ROUNDS repeats the run until the first
+# them. CI runs it; verify and test do not. FILES limits the run to the named
+# specs and may carry Playwright options. ROUNDS repeats the run until the first
 # failure; Playwright starts a fresh fake backend per round, so in-memory fake
 # state (device-code limits, fixtures) resets, unlike --repeat-each.
 ROUNDS ?= 1
@@ -121,11 +121,12 @@ test-e2e: frontend-deps generate-sdks playwright-browser
 	@case "$(ROUNDS)" in \
 	  ''|*[!0-9]*|0) echo "ROUNDS must be a positive integer, got '$(ROUNDS)'"; exit 2 ;; \
 	esac
+	@[ -z "$(SPEC)" ] || { echo "SPEC is now FILES: make test-e2e FILES=$(SPEC)"; exit 2; }
 	@pnpm --silent build
 	@status=0; \
 	for round in $$(seq 1 $(ROUNDS)); do \
 	  [ $(ROUNDS) -eq 1 ] || echo "=== e2e round $$round/$(ROUNDS)"; \
-	  pnpm --silent exec playwright test --config e2e/playwright.config.ts $(SPEC) || { status=$$?; break; }; \
+	  pnpm --silent exec playwright test --config e2e/playwright.config.ts $(FILES) || { status=$$?; break; }; \
 	done; \
 	if [ $$status -ne 0 ]; then \
 	  echo ""; echo "=== Failed trace summary ==="; \

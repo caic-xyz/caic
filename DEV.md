@@ -18,7 +18,7 @@ make build
 
 Run `make fix`, `make verify`, and `make test` from the repository root.
 Run `make test-e2e` for browser coverage, or one spec with
-`make test-e2e SPEC=e2e/tests/account-menu.spec.ts`. Both build the frontend
+`make test-e2e FILES=e2e/tests/account-menu.spec.ts`. Both build the frontend
 first: the fake server serves the built bundle, and Playwright refuses a bundle
 older than its inputs.
 
@@ -51,7 +51,7 @@ fixtures resets; `--repeat-each` keeps one server and trips those limits instead
 of reproducing the failure:
 
 ```bash
-make test-e2e SPEC=e2e/tests/device-login.spec.ts ROUNDS=5
+make test-e2e FILES=e2e/tests/device-login.spec.ts ROUNDS=5
 ```
 
 ## Profiling

@@ -15,8 +15,8 @@
 // (`make build`, screenshots targets): they share backend/frontend/dist, so
 // simultaneous builds can delete or replace one another's generated assets.
 // Run through `make test-e2e`, which builds the frontend first; a targeted run
-// takes SPEC, which may also carry Playwright options:
-//   make test-e2e SPEC=e2e/tests/account-menu.spec.ts
+// takes FILES, like make test-frontend, which may also carry Playwright options:
+//   make test-e2e FILES=e2e/tests/account-menu.spec.ts
 // The fake server embeds the last built bundle, so this config refuses to start
 // when the bundle predates its inputs (see bundle.ts).
 // Local behavioral tests detect installed Chrome on Linux, macOS, and Windows.
