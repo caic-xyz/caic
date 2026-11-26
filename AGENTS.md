@@ -41,8 +41,9 @@ version; a format without one is version 1.
 A breaking change ships as version N+1 beside version N:
 
 - Breaking: remove or rename a field, route, or enum value; change a type,
-  unit, default, or meaning; make an optional field required; reject input
-  that version N accepts. Adding an optional field or a route is not breaking.
+  unit, or meaning; make an optional field required; reject input that
+  version N accepts. Adding an optional field or a route, or changing a
+  default, is not breaking.
 - Copy the vN package to vN+1 and change the copy: `api/v2` beside `api/v1`,
   `data/v4` beside `data/v3`.
 - Use the vN types directly. Do not declare type, constant, or variable
