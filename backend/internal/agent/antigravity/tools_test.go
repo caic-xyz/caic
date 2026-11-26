@@ -156,7 +156,7 @@ func TestTools(t *testing.T) {
 			{false, usage, "text usage turn_ended"},
 			{false, command("c3", "tool_call", "in_progress", "make verify", ""), "turn_started tool_use"},
 			{false, chunk("Verifying; waiting for completion."), "text_delta"},
-			{false, usage, "text usage background_command(running c3 wakes) turn_ended"},
+			{false, usage, "text usage background_command(running c3 wakes) turn_ended(pending c3)"},
 			{false, command("c3", "tool_call_update", "completed", "make verify", `Command exited with code 2.`), "turn_started tool_output_delta tool_result background_command(failed exit 2)"},
 			{false, chunk("Verification failed."), "text_delta"},
 			{false, usage, "text usage turn_ended"},
@@ -176,7 +176,8 @@ func TestTools(t *testing.T) {
 	})
 }
 
-// summarize names each message's type, with a background command's lifecycle.
+// summarize names each message's type, with a background command's lifecycle
+// and the tool calls that outlive a turn agy ended by itself.
 func summarize(msgs []agent.Message) string {
 	names := make([]string, 0, len(msgs))
 	for _, m := range msgs {
@@ -193,6 +194,9 @@ func summarize(msgs []agent.Message) string {
 				detail += fmt.Sprintf(" exit %d", *c.Command.ExitCode)
 			}
 			name += "(" + detail + ")"
+		}
+		if e, ok := m.(*agent.TurnEndedMessage); ok && len(e.PendingToolUseIDs) != 0 {
+			name += "(pending " + strings.Join(e.PendingToolUseIDs, " ") + ")"
 		}
 		names = append(names, name)
 	}

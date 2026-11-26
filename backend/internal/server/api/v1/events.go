@@ -227,7 +227,7 @@ type EventUsage struct {
 	ContextWindow            int    `json:"contextWindow,omitempty"` // Active model context capacity.
 }
 
-// EventResult reports the end of an agent prompt.
+// EventResult reports the end of an agent turn.
 type EventResult struct {
 	Cost         EventCost  `json:"cost,omitzero"`
 	Subtype      string     `json:"subtype"`

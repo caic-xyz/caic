@@ -2149,7 +2149,7 @@ export interface EventCost {
   source: EventCostSource;
 }
 
-/** EventResult reports the end of an agent prompt. */
+/** EventResult reports the end of an agent turn. */
 export interface EventResult {
   cost?: EventCost;
   subtype: string;

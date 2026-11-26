@@ -184,7 +184,7 @@ func AcceptedInputOutput(m agent.Message) bool {
 
 func fallbackBoundary(msg agent.Message) bool {
 	switch msg.(type) {
-	case *agent.ResultMessage, *agent.ToolUseMessage, *agent.ToolResultMessage,
+	case *agent.ResultMessage, *agent.TurnEndedMessage, *agent.ToolUseMessage, *agent.ToolResultMessage,
 		*agent.ThinkingMessage, *agent.ThinkingDeltaMessage:
 		return true
 	default:

@@ -4590,7 +4590,7 @@ public struct EventCost: Codable {
     }
 }
 
-/// EventResult reports the end of an agent prompt.
+/// EventResult reports the end of an agent turn.
 public struct EventResult: Codable {
     public let cost: EventCost?
     public let subtype: String

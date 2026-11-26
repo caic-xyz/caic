@@ -132,7 +132,9 @@ func TestAntigravityAsyncCommand(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(md.Turns) != 1 || md.RunningTurn != nil || len(md.BackgroundCommands) != 1 {
+		// The report agy wrote after the command ended is a turn of its own,
+		// from the command's end to the report's last usage_update.
+		if len(md.Turns) != 2 || md.Turns[1].DurationMS != 16210 || md.RunningTurn != nil || len(md.BackgroundCommands) != 1 {
 			t.Fatalf("turns = %+v, running = %+v, commands = %+v", md.Turns, md.RunningTurn, md.BackgroundCommands)
 		}
 		cmd := md.BackgroundCommands[0]
@@ -148,11 +150,16 @@ func TestAntigravityAsyncCommand(t *testing.T) {
 			switch {
 			case m.ToolUse != nil && m.ToolUse.ToolUseID == cmd.ToolUseID:
 				order = append(order, "start")
-			case m.Result != nil:
+			case m.Result != nil && len(order) == 1:
 				if m.Result.Result != "" || !slices.Equal(m.Result.PendingToolUseIDs, []string{cmd.ToolUseID}) || m.Source != cmd.Source {
 					t.Fatalf("prompt result = %+v, source = %+v", m.Result, m.Source)
 				}
 				order = append(order, "prompt returned")
+			case m.Result != nil:
+				if !strings.HasPrefix(m.Result.Result, "Rebased") || len(m.Result.PendingToolUseIDs) != 0 || m.Source != cmd.Source {
+					t.Fatalf("woken turn result = %+v, source = %+v", m.Result, m.Source)
+				}
+				order = append(order, "report ended")
 			case m.ToolOutputDelta != nil && m.ToolOutputDelta.ToolUseID == cmd.ToolUseID:
 				if m.Source != cmd.Source || m.ToolOutputDelta.Delta != "Command exited with code 0.\n" {
 					t.Fatalf("output = %+v, source = %+v", m.ToolOutputDelta, m.Source)
@@ -164,7 +171,7 @@ func TestAntigravityAsyncCommand(t *testing.T) {
 				order = append(order, "report")
 			}
 		}
-		if want := []string{"start", "prompt returned", "command output", "command completed", "report"}; !slices.Equal(order, want) {
+		if want := []string{"start", "prompt returned", "command output", "command completed", "report", "report ended"}; !slices.Equal(order, want) {
 			t.Fatalf("projected order = %v, want %v", order, want)
 		}
 	}

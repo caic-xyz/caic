@@ -3166,7 +3166,7 @@ data class EventUsage(
 @Serializable
 data class EventCost(val usd: Double, val source: EventCostSource)
 
-/** EventResult reports the end of an agent prompt. */
+/** EventResult reports the end of an agent turn. */
 @Serializable
 data class EventResult(
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val cost: EventCost? = null,

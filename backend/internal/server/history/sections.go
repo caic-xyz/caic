@@ -356,7 +356,8 @@ func (s *sectionIndex) observeContext(msg agent.Message) {
 	s.contextSession.Apply(msg)
 }
 
-// observeTurnEnd closes a woken turn that has no prompt result to project.
+// observeTurnEnd closes a turn that its end left open: the end's projected
+// result, if any, already closed it.
 func (s *sectionIndex) observeTurnEnd(msg agent.Message) {
 	if _, ok := msg.(*agent.TurnEndedMessage); ok && !msg.Provenance().IsChild() && s.startPos.RecordID != 0 {
 		s.clearPrompt()

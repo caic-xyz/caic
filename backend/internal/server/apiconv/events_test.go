@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -697,6 +699,47 @@ func TestToolTimingTracker(t *testing.T) {
 					t.Errorf("parent result fallback = %+v", result)
 				}
 			}
+		})
+
+		t.Run("turn ended without a result", func(t *testing.T) {
+			t.Parallel()
+			// results lists the result events each sequence projects, as their
+			// fallback text and surviving tool calls.
+			results := func(messages ...agent.Message) []string {
+				tracker := NewToolTimingTracker("", harness.Antigravity, "", nil)
+				var got []string
+				for _, msg := range messages {
+					for _, e := range tracker.ConvertMessage(2, 0, msg, time.Time{}) {
+						if e.Result != nil {
+							got = append(got, e.Result.Result+"|"+strings.Join(e.Result.PendingToolUseIDs, ","))
+						}
+					}
+				}
+				return got
+			}
+			t.Run("harness-started turn ends with its text", func(t *testing.T) {
+				t.Parallel()
+				got := results(&agent.TurnStartedMessage{}, &agent.TextMessage{Text: "Tests passed."}, &agent.UsageMessage{}, &agent.TurnEndedMessage{},
+					&agent.UserInputMessage{Text: "next"}, &agent.TextMessage{Text: "Answer."}, &agent.ResultMessage{})
+				if want := []string{"Tests passed.|", "Answer.|"}; !slices.Equal(got, want) {
+					t.Errorf("results = %q, want %q", got, want)
+				}
+			})
+			t.Run("surviving command hides the text", func(t *testing.T) {
+				t.Parallel()
+				got := results(&agent.TurnStartedMessage{}, &agent.TextMessage{Text: "Waiting."}, &agent.TurnEndedMessage{PendingToolUseIDs: []string{"c3"}})
+				if want := []string{"|c3"}; !slices.Equal(got, want) {
+					t.Errorf("results = %q, want %q", got, want)
+				}
+			})
+			t.Run("turn already ended by a result", func(t *testing.T) {
+				t.Parallel()
+				// Pi ends a turn whose results continue it.
+				got := results(&agent.TurnStartedMessage{}, &agent.TextMessage{Text: "Done."}, &agent.ResultMessage{TurnContinues: true}, &agent.TurnEndedMessage{})
+				if want := []string{"Done.|"}; !slices.Equal(got, want) {
+					t.Errorf("results = %q, want %q", got, want)
+				}
+			})
 		})
 
 		t.Run("empty scoped completions remain observable", func(t *testing.T) {

@@ -880,10 +880,16 @@ type TurnStartedMessage struct {
 func (m *TurnStartedMessage) Type() string { return "turn_started" }
 
 // TurnEndedMessage reports that the harness ended a root turn whose results
-// set ResultMessage.TurnContinues, such as Pi agent_settled after its last run.
-// It is derived from native records and is not part of the transcript.
+// set ResultMessage.TurnContinues, such as Pi agent_settled after its last run,
+// or a turn that a TurnStartedMessage opened and no result ends, such as an
+// Antigravity step run without a prompt. It is derived from native records.
+// The transcript shows the end of a turn without a result as one.
 type TurnEndedMessage struct {
 	v3.MessageProvenance
+
+	// PendingToolUseIDs identifies root tool calls that survive the turn, as
+	// in ResultMessage.
+	PendingToolUseIDs []string
 }
 
 // Type implements Message.

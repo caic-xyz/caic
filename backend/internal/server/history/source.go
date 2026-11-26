@@ -150,10 +150,10 @@ func (s *Source) Refresh(ctx context.Context) (Snapshot, error) {
 			// The context meter folds raw messages, as the task does, before
 			// their events can end a turn.
 			s.sections.observeContext(m)
-			s.sections.observeTurnEnd(m)
 			for i := first; i < len(events); i++ {
 				s.sections.append(&events[i])
 			}
+			s.sections.observeTurnEnd(m)
 			// Every root exit ends the hosted cards, including one that projects
 			// no event: a clean exit or the exit of a requested stop. The
 			// settlement trailer ends them too: the agent process can die with

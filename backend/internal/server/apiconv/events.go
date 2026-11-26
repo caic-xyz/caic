@@ -31,10 +31,12 @@ const maxPendingToolTimings = 1024
 
 // ToolTimingTracker computes per-tool-call duration while converting agent
 // messages to API events, closes tool calls left open by an agent exit or task
-// settlement, and supplies fallback result text from a turn text window.
+// settlement, and supplies fallback result text from a turn text window. A
+// turn that a TurnStartedMessage opens and a TurnEndedMessage closes without a
+// result ends with a result event, as every other turn does.
 //
 // The harness is fixed at construction; the per-stream state
-// (pending, window) accumulates across ConvertMessage calls.
+// (pending, window, openTurn) accumulates across ConvertMessage calls.
 type ToolTimingTracker struct {
 	taskID           string
 	harness          harness.Name
@@ -45,6 +47,7 @@ type ToolTimingTracker struct {
 	skillReads       agent.SkillReadTracker // Confirms inferred skill loads.
 	skillTools       agent.SkillToolTracker // Hides reported skill machinery after accounting.
 	presentedSession string                 // Root session start already projected by native init or restoration.
+	openTurn         bool                   // A root TurnStartedMessage opened a turn that no result has ended.
 }
 
 // NewToolTimingTracker creates a tracker for converting agent messages from a
@@ -140,7 +143,10 @@ func (tt *ToolTimingTracker) convertMessage(recordID uint64, messageIndex int, m
 	if !now.IsZero() {
 		ts = now.UnixMilli()
 	}
-	if _, isResult := msg.(*agent.ResultMessage); !isResult {
+	switch msg.(type) {
+	case *agent.ResultMessage, *agent.TurnEndedMessage:
+		// The turn's end reads the window before resetting it.
+	default:
 		tt.window.Update(msg)
 	}
 	countable, confirmed := tt.skillReads.Confirm(msg)
@@ -314,9 +320,32 @@ func (tt *ToolTimingTracker) convertMessage(recordID uint64, messageIndex int, m
 				ContextWindow:            m.ContextWindow,
 			},
 		}}
+	case *agent.TurnStartedMessage:
+		if !m.Source.IsChild() {
+			tt.openTurn = true
+		}
+		return nil
+	case *agent.TurnEndedMessage:
+		var result string
+		if len(m.PendingToolUseIDs) == 0 {
+			result = tt.window.Value()
+		}
+		tt.window.Update(m)
+		if !tt.openTurn || m.Source.IsChild() {
+			return nil
+		}
+		tt.openTurn = false
+		return []v1.EventMessage{{
+			Kind:   v1.EventKindResult,
+			Ts:     ts,
+			Result: &v1.EventResult{PendingToolUseIDs: m.PendingToolUseIDs, Result: result},
+		}}
 	case *agent.ResultMessage:
 		// A result is a turn boundary: capture the turn's visible text as the
 		// fallback before resetting the window for the next turn.
+		if !m.Source.IsChild() {
+			tt.openTurn = false
+		}
 		result := m.Result
 		nativeDuration, _ := agent.NativeDuration(m)
 		if result == "" && !m.Source.IsChild() && len(m.PendingToolUseIDs) == 0 {

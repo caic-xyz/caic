@@ -274,10 +274,12 @@ func (t *tools) wake(sid string, messages []agent.Message) []agent.Message {
 				t.woken, t.stepText = false, false
 				detached := t.detach(sid)
 				end := make([]agent.Message, 0, len(detached)+1)
+				ended := &agent.TurnEndedMessage{Source: v3.MessageSource{ThreadID: sid}}
 				for j := range detached {
 					end = append(end, detached[j].message())
+					ended.PendingToolUseIDs = append(ended.PendingToolUseIDs, detached[j].ToolUseID)
 				}
-				end = append(end, &agent.TurnEndedMessage{})
+				end = append(end, ended)
 				messages = slices.Insert(messages, i+1, end...)
 				i += len(end)
 			}

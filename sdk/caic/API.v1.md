@@ -2288,7 +2288,7 @@ EventCost is one completed turn's reported or API-equivalent estimated cost.
 
 ### EventResult
 
-EventResult reports the end of an agent prompt.
+EventResult reports the end of an agent turn.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
