@@ -53,7 +53,7 @@ func TestSettingsPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if *again != *s {
+	if !reflect.DeepEqual(again, s) {
 		t.Fatal("secrets changed on reload")
 	}
 }
@@ -76,8 +76,20 @@ func TestTailscaleKeyStore(t *testing.T) {
 		}
 		want := *s
 		want.TailscaleAPIKey = secret
-		if *got != want {
+		if !reflect.DeepEqual(*got, want) {
 			t.Fatalf("settings after saving %q = %#v, want %#v", secret, got, want)
+		}
+	}
+	for _, tags := range [][]string{{"tag:ci", "tag:agents"}, nil} {
+		if err := store.SaveTailscaleTags(tags); err != nil {
+			t.Fatal(err)
+		}
+		got, err := loadSettings(slog.Default(), p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got.TailscaleTags, tags) {
+			t.Fatalf("tags after saving %q = %q", tags, got.TailscaleTags)
 		}
 	}
 }

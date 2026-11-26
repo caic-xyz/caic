@@ -403,6 +403,10 @@
   margin-top: 0.75rem;
 }
 
+.tailscaleHint {
+  margin: -0.5rem 0 0.75rem;
+}
+
 .tailscaleCreate {
   align-self: center;
   font-size: 0.9rem;

@@ -848,12 +848,26 @@ export interface TailscaleKeyResp {
    * falls back to; empty when none is configured.
    */
   configKeyID?: string;
+  /**
+   * Tags are the tags of new tasks' Tailscale nodes; "tag:caic" unless an
+   * administrator saved others.
+   */
+  tags: string[] | null;
 }
 
 /** SetTailscaleKeyReq is the request for POST /api/caic/v1/server/tailscale-key. */
 export interface SetTailscaleKeyReq {
   /** tskey-api-<keyID>-<secret> */
   apiKey: string;
+}
+
+/** SetTailscaleTagsReq is the request for POST /api/caic/v1/server/tailscale-tags. */
+export interface SetTailscaleTagsReq {
+  /**
+   * Tags replace the node tags of new tasks; none restores "tag:caic". Each is
+   * "tag:" followed by a letter, then letters, digits, or dashes.
+   */
+  tags: string[] | null;
 }
 
 /** ImageRefreshReq identifies the runtime whose specialized image is refreshed. */

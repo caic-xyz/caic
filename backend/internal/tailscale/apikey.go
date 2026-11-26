@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	tailscaledata "github.com/caic-xyz/caic/backend/internal/tailscale/data"
 )
 
 // ExpiryHeadroom is how long before the API access token expires that new
@@ -100,12 +102,6 @@ const (
 	keyValid
 	keyInvalid // the token is malformed, rejected, revoked, or expired
 )
-
-// keyResponse is the subset of the Tailscale "Get key" response caic reads.
-type keyResponse struct {
-	Expires time.Time `json:"expires"`
-	Invalid bool      `json:"invalid"`
-}
 
 // check implements Until and also reports the token's expiry, which is zero
 // when the token never expires or its expiry is not known.
@@ -195,7 +191,7 @@ func (k *apiKey) lookupLocked(ctx context.Context) {
 // errRejected reports that the Tailscale API refused the token for good.
 var errRejected = errors.New("rejected the access token")
 
-func (k *apiKey) get(ctx context.Context) (*keyResponse, error) {
+func (k *apiKey) get(ctx context.Context) (*tailscaledata.Key, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, keysURL+k.id, http.NoBody)
 	if err != nil {
 		return nil, err
@@ -217,7 +213,9 @@ func (k *apiKey) get(ctx context.Context) (*keyResponse, error) {
 	default:
 		return nil, fmt.Errorf("tailscale API returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
-	var r keyResponse
+	// Lenient: the API may add fields. tailscaledata.Key decoded a live "Get key"
+	// response with DisallowUnknownFields.
+	var r tailscaledata.Key
 	if err := json.Unmarshal(body, &r); err != nil {
 		return nil, fmt.Errorf("decode tailscale key: %w", err)
 	}

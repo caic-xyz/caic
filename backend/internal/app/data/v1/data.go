@@ -2,11 +2,13 @@
 package v1
 
 // Settings stores session and OAuth signing secrets and the Tailscale API
-// access token an administrator saved.
+// access token and node tags an administrator saved.
 type Settings struct {
 	SessionSecret string `json:"sessionSecret,omitempty"`
 	// TODO: Migrate to a oauth section.
 	OAuthPrivateKeyPEM string `json:"mcpOAuthPrivateKeyPEM,omitempty"`
 	OAuthKeyID         string `json:"mcpOAuthKeyID,omitempty"`
 	TailscaleAPIKey    string `json:"tailscaleAPIKey,omitempty"`
+	// TailscaleTags are the node tags of new tasks; empty means tag:caic.
+	TailscaleTags []string `json:"tailscaleTags,omitempty"`
 }

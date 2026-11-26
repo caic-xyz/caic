@@ -3,8 +3,8 @@
 package tailscale
 
 import (
+	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	tailscaledata "github.com/caic-xyz/caic/backend/internal/tailscale/data"
 	"github.com/caic-xyz/caic/internal/testlog"
 )
 
@@ -37,9 +38,18 @@ func stubAPIKey(t *testing.T, secret string, handler http.HandlerFunc) (*apiKey,
 	return k, &calls
 }
 
+// writeKey answers a lookup with key, as an API access token with ID kID.
+func writeKey(w http.ResponseWriter, key *tailscaledata.Key) {
+	key.ID = "kID"
+	key.KeyType = "api"
+	if err := json.NewEncoder(w).Encode(key); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
 func expiresIn(d time.Duration) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = fmt.Fprintf(w, `{"id":"kID","keyType":"api","expires":%q}`, time.Now().Add(d).Format(time.RFC3339))
+		writeKey(w, &tailscaledata.Key{Expires: time.Now().Add(d).Truncate(time.Second)})
 	}
 }
 
@@ -65,7 +75,7 @@ func TestAPIKey(t *testing.T) {
 					if got := r.Header.Get("Authorization"); got != "Bearer tskey-api-kID-secret" {
 						t.Errorf("Authorization = %q", got)
 					}
-					_, _ = w.Write([]byte(`{"id":"kID","keyType":"api","expires":"2099-01-02T03:04:05Z"}`))
+					writeKey(w, &tailscaledata.Key{Expires: time.Date(2099, 1, 2, 3, 4, 5, 0, time.UTC)})
 				})
 				for range 2 {
 					until, err := k.Until(t.Context())
@@ -115,7 +125,7 @@ func TestAPIKey(t *testing.T) {
 			t.Run("no expiry", func(t *testing.T) {
 				t.Parallel()
 				k, _ := stubAPIKey(t, "tskey-api-kID-secret", func(w http.ResponseWriter, _ *http.Request) {
-					_, _ = w.Write([]byte(`{"id":"kID","keyType":"api"}`))
+					writeKey(w, &tailscaledata.Key{})
 				})
 				until, err := k.Until(t.Context())
 				if err != nil || !until.IsZero() {
@@ -175,7 +185,7 @@ func TestAPIKey(t *testing.T) {
 				{"within headroom", expiresIn(ExpiryHeadroom - time.Minute)},
 				{"expired", expiresIn(-time.Hour)},
 				{"invalid", func(w http.ResponseWriter, _ *http.Request) {
-					_, _ = w.Write([]byte(`{"id":"kID","keyType":"api","invalid":true}`))
+					writeKey(w, &tailscaledata.Key{Invalid: true})
 				}},
 				{"unauthorized", func(w http.ResponseWriter, _ *http.Request) {
 					http.Error(w, `{"message":"API token invalid"}`, http.StatusUnauthorized)

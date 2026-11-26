@@ -1,9 +1,9 @@
-// Tests token loading, non-admin hiding, verified saves, superseded responses, and expiry wording.
+// Tests token loading, non-admin hiding, verified saves, tag saves, superseded responses, and expiry wording.
 import { afterEach, describe, it } from "node:test";
 import { createRoot } from "solid-js";
 import type { ISOTimestamp, TailscaleKeyResp } from "@sdk/types.gen";
 import { expect } from "@tests/expect";
-import { availableUntilMs, createTailscaleKey, formatRemaining } from "./tailscaleKey";
+import { availableUntilMs, createTailscaleKey, formatRemaining, parseTags } from "./tailscaleKey";
 
 const original = globalThis.fetch;
 afterEach(() => {
@@ -38,6 +38,7 @@ describe("createTailscaleKey", () => {
       source: "config",
       keyID: "kCfg",
       expiresAt: "2099-01-01T00:00:00Z" as ISOTimestamp,
+      tags: ["tag:caic"],
     };
     stubFetch(() => json(status));
     const { key, changes } = setup();
@@ -63,7 +64,7 @@ describe("createTailscaleKey", () => {
   });
 
   it("saves a trimmed token and reports rejection", async () => {
-    const saved: TailscaleKeyResp = { source: "saved", keyID: "kNew" };
+    const saved: TailscaleKeyResp = { source: "saved", keyID: "kNew", tags: ["tag:caic"] };
     const bodies: unknown[] = [];
     stubFetch((method, _url, body) => {
       bodies.push(body);
@@ -85,9 +86,29 @@ describe("createTailscaleKey", () => {
     expect(key.actionError()).toBe("");
   });
 
+  it("saves tags and reports their rejection apart from token errors", async () => {
+    const saved: TailscaleKeyResp = { source: "saved", keyID: "kNew", tags: ["tag:ci"] };
+    const bodies: unknown[] = [];
+    stubFetch((_method, url, body) => {
+      bodies.push(body);
+      return url.endsWith("/server/tailscale-tags") && (body as { tags: string[] }).tags[0] === "tag:ci"
+        ? json(saved)
+        : failure(400, "BAD_REQUEST", 'invalid Tailscale tag "ci"');
+    });
+    const { key, changes } = setup();
+    expect(await key.saveTags(["tag:ci"])).toBe(true);
+    expect(bodies[0]).toEqual({ tags: ["tag:ci"] });
+    expect(changes).toEqual([saved]);
+
+    expect(await key.saveTags(["ci"])).toBe(false);
+    expect(key.tagsError()).toBe('invalid Tailscale tag "ci"');
+    expect(key.actionError()).toBe("");
+    expect(key.status()).toEqual(saved);
+  });
+
   it("drops a load answered after a newer save", async () => {
     let releaseLoad = (_: Response) => {};
-    const saved: TailscaleKeyResp = { source: "saved", keyID: "kNew" };
+    const saved: TailscaleKeyResp = { source: "saved", keyID: "kNew", tags: ["tag:caic"] };
     stubFetch((method) =>
       method === "GET"
         ? new Promise<Response>((resolve) => {
@@ -102,6 +123,13 @@ describe("createTailscaleKey", () => {
     await loading;
     expect(key.status()).toEqual(saved);
     expect(changes).toEqual([saved]);
+  });
+});
+
+describe("parseTags", () => {
+  it("splits on spaces and commas", () => {
+    expect(parseTags(" tag:ci, tag:agents\ttag:md ")).toEqual(["tag:ci", "tag:agents", "tag:md"]);
+    expect(parseTags("  ")).toEqual([]);
   });
 });
 

@@ -188,7 +188,7 @@ func newTestUsageRollup(t testing.TB) *usagedb.Store {
 
 // newTestTailscale returns a credential without a Tailscale API access token.
 func newTestTailscale(t testing.TB) *tailscale.Credential {
-	return tailscale.NewCredential(t.Context(), testlog.New(t), &tailscaletest.KeyStore{}, "", "")
+	return tailscale.NewCredential(t.Context(), testlog.New(t), &tailscaletest.KeyStore{}, "", "", nil)
 }
 
 func newTestRouter(t testing.TB, backends map[harness.Name]agent.Backend) *testRouter {

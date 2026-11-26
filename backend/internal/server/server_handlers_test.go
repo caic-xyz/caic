@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -93,6 +94,9 @@ func TestServerHandlers(t *testing.T) {
 					if _, err := h.removeTailscaleKey(ctx, &api.EmptyReq{}); !errors.As(err, &apiErr) || apiErr.Status != http.StatusForbidden {
 						t.Errorf("removeTailscaleKey() error = %v, want forbidden", err)
 					}
+					if _, err := h.setTailscaleTags(ctx, &v1.SetTailscaleTagsReq{Tags: []string{"tag:ci"}}); !errors.As(err, &apiErr) || apiErr.Status != http.StatusForbidden {
+						t.Errorf("setTailscaleTags() error = %v, want forbidden", err)
+					}
 				})
 			}
 			t.Run("malformed token", func(t *testing.T) {
@@ -106,6 +110,22 @@ func TestServerHandlers(t *testing.T) {
 					t.Fatalf("getTailscaleKey() = %+v, %v, want the token unchanged", got, err)
 				}
 			})
+		})
+		t.Run("tags", func(t *testing.T) {
+			t.Parallel()
+			h := &serverHandlers{tailscale: newTestTailscale(t), authStore: store}
+			ctx := auth.NewContext(t.Context(), &admin)
+			if got, err := h.getTailscaleKey(ctx, &api.EmptyReq{}); err != nil || !slices.Equal(got.Tags, []string{"tag:caic"}) {
+				t.Fatalf("getTailscaleKey() = %+v, %v, want the default tag", got, err)
+			}
+			got, err := h.setTailscaleTags(ctx, &v1.SetTailscaleTagsReq{Tags: []string{"tag:ci"}})
+			if err != nil || !slices.Equal(got.Tags, []string{"tag:ci"}) {
+				t.Fatalf("setTailscaleTags() = %+v, %v", got, err)
+			}
+			var apiErr *api.Error
+			if _, err := h.setTailscaleTags(ctx, &v1.SetTailscaleTagsReq{Tags: []string{"ci"}}); !errors.As(err, &apiErr) || apiErr.Status != http.StatusBadRequest {
+				t.Fatalf("setTailscaleTags(invalid) error = %v, want bad request", err)
+			}
 		})
 	})
 	t.Run("image_refresh_requires_available_runtime", func(t *testing.T) {

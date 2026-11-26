@@ -128,6 +128,8 @@ class ApiClient(
     suspend fun setTailscaleKey(req: SetTailscaleKeyReq): TailscaleKeyResp = request("POST", "/api/caic/v1/server/tailscale-key", json.encodeToString(req))
     /** Removes the saved Tailscale API access token, falling back to the configured one. Requires administrator authority. */
     suspend fun removeTailscaleKey(): TailscaleKeyResp = request("POST", "/api/caic/v1/server/tailscale-key/remove")
+    /** Saves the Tailscale tags of new tasks' nodes. Requires administrator authority. */
+    suspend fun setTailscaleTags(req: SetTailscaleTagsReq): TailscaleKeyResp = request("POST", "/api/caic/v1/server/tailscale-tags", json.encodeToString(req))
     /** Rebuilds one runtime's specialized image and updates its installed coding agents. */
     suspend fun startImageRefresh(runtime: String, req: ImageRefreshReq): ImageRefreshStatus = request("POST", "/api/caic/v1/server/runtimes/$runtime/image/refresh", json.encodeToString(req))
     /** Returns one runtime's specialized image refresh progress. */

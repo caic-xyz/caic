@@ -425,6 +425,10 @@ public final class ApiClient {
     public func removeTailscaleKey() async throws -> TailscaleKeyResp {
         try await request("POST", path: "/api/caic/v1/server/tailscale-key/remove")
     }
+    /// Saves the Tailscale tags of new tasks' nodes. Requires administrator authority.
+    public func setTailscaleTags(req: SetTailscaleTagsReq) async throws -> TailscaleKeyResp {
+        try await request("POST", path: "/api/caic/v1/server/tailscale-tags", body: try encoder.encode(req))
+    }
     /// Rebuilds one runtime's specialized image and updates its installed coding agents.
     public func startImageRefresh(runtime: String, req: ImageRefreshReq) async throws -> ImageRefreshStatus {
         try await request("POST", path: "/api/caic/v1/server/runtimes/\(runtime)/image/refresh", body: try encoder.encode(req))

@@ -1,4 +1,4 @@
-// Persistent app startup settings and the administrator-saved Tailscale API access token.
+// Persistent app startup settings and the administrator-saved Tailscale API access token and tags.
 
 package app
 
@@ -21,10 +21,11 @@ type settings struct {
 	OAuthPrivateKeyPEM string
 	OAuthKeyID         string
 	TailscaleAPIKey    string
+	TailscaleTags      []string
 }
 
 // tailscaleKeyStore persists the administrator-saved Tailscale API access
-// token in settings.json. tailscale.Credential serializes its calls.
+// token and node tags in settings.json. tailscale.Credential serializes its calls.
 type tailscaleKeyStore struct {
 	path string
 	s    settings
@@ -41,6 +42,17 @@ func (t *tailscaleKeyStore) SaveTailscaleAPIKey(secret string) error {
 	return nil
 }
 
+// SaveTailscaleTags implements tailscale.KeyStore.
+func (t *tailscaleKeyStore) SaveTailscaleTags(tags []string) error {
+	next := t.s
+	next.TailscaleTags = tags
+	if err := writeSettingsAtomic(t.path, &next); err != nil {
+		return err
+	}
+	t.s = next
+	return nil
+}
+
 func loadSettings(log *slog.Logger, path string) (*settings, error) {
 	var s settings
 	if raw, err := os.ReadFile(path); err == nil { //nolint:gosec // G304: internal config path
@@ -48,7 +60,7 @@ func loadSettings(log *slog.Logger, path string) (*settings, error) {
 		if err := json.Unmarshal(raw, &f); err != nil {
 			return nil, err
 		}
-		s = settings{SessionSecret: f.SessionSecret, OAuthPrivateKeyPEM: f.OAuthPrivateKeyPEM, OAuthKeyID: f.OAuthKeyID, TailscaleAPIKey: f.TailscaleAPIKey}
+		s = settings{SessionSecret: f.SessionSecret, OAuthPrivateKeyPEM: f.OAuthPrivateKeyPEM, OAuthKeyID: f.OAuthKeyID, TailscaleAPIKey: f.TailscaleAPIKey, TailscaleTags: f.TailscaleTags}
 	}
 
 	dirty := false
@@ -92,7 +104,7 @@ func newMCPOAuthSigningKey() (keyPEM, keyID string, err error) {
 }
 
 func writeSettingsAtomic(path string, s *settings) error {
-	raw, err := json.MarshalIndent(appv1.Settings{SessionSecret: s.SessionSecret, OAuthPrivateKeyPEM: s.OAuthPrivateKeyPEM, OAuthKeyID: s.OAuthKeyID, TailscaleAPIKey: s.TailscaleAPIKey}, "", "  ") //nolint:gosec // G117: sessionSecret is intentionally written to config file owned by the user
+	raw, err := json.MarshalIndent(appv1.Settings{SessionSecret: s.SessionSecret, OAuthPrivateKeyPEM: s.OAuthPrivateKeyPEM, OAuthKeyID: s.OAuthKeyID, TailscaleAPIKey: s.TailscaleAPIKey, TailscaleTags: s.TailscaleTags}, "", "  ") //nolint:gosec // G117: sessionSecret is intentionally written to config file owned by the user
 	if err != nil {
 		return err
 	}

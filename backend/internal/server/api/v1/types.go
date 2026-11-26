@@ -164,6 +164,21 @@ type TailscaleKeyResp struct {
 	// ConfigKeyID identifies the configured token that removing a saved token
 	// falls back to; empty when none is configured.
 	ConfigKeyID string `json:"configKeyID,omitempty"`
+	// Tags are the tags of new tasks' Tailscale nodes; "tag:caic" unless an
+	// administrator saved others.
+	Tags []string `json:"tags"`
+}
+
+// SetTailscaleTagsReq is the request for POST /api/caic/v1/server/tailscale-tags.
+type SetTailscaleTagsReq struct {
+	// Tags replace the node tags of new tasks; none restores "tag:caic". Each is
+	// "tag:" followed by a letter, then letters, digits, or dashes.
+	Tags []string `json:"tags"`
+}
+
+// Validate accepts any list; the server checks each tag's syntax.
+func (r *SetTailscaleTagsReq) Validate() error {
+	return nil
 }
 
 // SetTailscaleKeyReq is the request for POST /api/caic/v1/server/tailscale-key.

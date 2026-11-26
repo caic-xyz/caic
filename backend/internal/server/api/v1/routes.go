@@ -131,6 +131,15 @@ var Routes = []apispec.Route{
 		Resp:     reflect.TypeFor[TailscaleKeyResp](),
 	},
 	{
+		Name:     "setTailscaleTags",
+		Doc:      "Saves the Tailscale tags of new tasks' nodes. Requires administrator authority.",
+		Method:   "POST",
+		Category: "Server",
+		Path:     "/api/caic/v1/server/tailscale-tags",
+		Req:      reflect.TypeFor[SetTailscaleTagsReq](),
+		Resp:     reflect.TypeFor[TailscaleKeyResp](),
+	},
+	{
 		Name:     "startImageRefresh",
 		Doc:      "Rebuilds one runtime's specialized image and updates its installed coding agents.",
 		Method:   "POST",

@@ -156,9 +156,9 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	if err != nil {
 		return nil, fmt.Errorf("load settings: %w", err)
 	}
-	tailscaleCred := tailscale.NewCredential(ctx, appLog.With("cmp", "tailscale"), &tailscaleKeyStore{path: settingsPath, s: *settings}, settings.TailscaleAPIKey, cfg.Runtime.TailscaleAPIKey)
+	tailscaleCred := tailscale.NewCredential(ctx, appLog.With("cmp", "tailscale"), &tailscaleKeyStore{path: settingsPath, s: *settings}, settings.TailscaleAPIKey, cfg.Runtime.TailscaleAPIKey, settings.TailscaleTags)
 	for i := range mdRuntimes {
-		mdRuntimes[i].backend.TailscaleAPIKey = tailscaleCred.APIKey
+		mdRuntimes[i].backend.Tailscale = tailscaleCred
 	}
 	// Read the token's expiry while startup continues; it logs the outcome.
 	discovery.Go(func() error {

@@ -1,4 +1,4 @@
-// Tests token precedence, verified saves, and fallback on removal over an HTTP stub.
+// Tests token precedence, verified saves, fallback on removal, and node tags over an HTTP stub.
 
 package tailscale
 
@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -29,7 +30,7 @@ func newStubCredential(t *testing.T, saved, configured string) (*Credential, *ta
 	if err := store.SaveTailscaleAPIKey(saved); err != nil {
 		t.Fatal(err)
 	}
-	c := NewCredential(t.Context(), testlog.New(t), store, saved, configured)
+	c := NewCredential(t.Context(), testlog.New(t), store, saved, configured, nil)
 	c.client.Transport = redirectTransport{server.URL}
 	return c, store
 }
@@ -110,6 +111,29 @@ func TestCredential(t *testing.T) {
 		}
 		if st := c.Status(t.Context()); st.Source != SourceConfig || st.KeyID != "okConfig" {
 			t.Fatalf("Status() = %+v", st)
+		}
+	})
+	t.Run("SaveTags", func(t *testing.T) {
+		t.Parallel()
+		c, store := newStubCredential(t, "", "")
+		if st := c.Status(t.Context()); !slices.Equal(st.Tags, []string{"tag:caic"}) || !slices.Equal(c.Tags(), []string{"tag:caic"}) {
+			t.Fatalf("default Status().Tags = %q, Tags() = %q", st.Tags, c.Tags())
+		}
+		if err := c.SaveTags(t.Context(), []string{" tag:ci ", "", "tag:agents", "tag:ci"}); err != nil {
+			t.Fatal(err)
+		}
+		want := []string{"tag:ci", "tag:agents"}
+		if !slices.Equal(c.Tags(), want) || !slices.Equal(store.Tags(), want) || !slices.Equal(c.Status(t.Context()).Tags, want) {
+			t.Fatalf("Tags() = %q, store = %q, want %q", c.Tags(), store.Tags(), want)
+		}
+		if err := c.SaveTags(t.Context(), []string{"tag:ci", "ci"}); !errors.Is(err, ErrInvalidTags) || !strings.Contains(err.Error(), `"ci"`) {
+			t.Fatalf("SaveTags(invalid) error = %v, want ErrInvalidTags naming the tag", err)
+		}
+		if !slices.Equal(c.Tags(), want) {
+			t.Fatalf("invalid save changed Tags() to %q", c.Tags())
+		}
+		if err := c.SaveTags(t.Context(), nil); err != nil || store.Tags() != nil || !slices.Equal(c.Tags(), []string{"tag:caic"}) {
+			t.Fatalf("SaveTags(nil) = %v, Tags() = %q, want the default restored", err, c.Tags())
 		}
 	})
 }

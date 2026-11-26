@@ -803,6 +803,19 @@ func (h *serverHandlers) removeTailscaleKey(ctx context.Context, _ *api.EmptyReq
 	return h.tailscaleKey(ctx), nil
 }
 
+func (h *serverHandlers) setTailscaleTags(ctx context.Context, req *v1.SetTailscaleTagsReq) (*v1.TailscaleKeyResp, error) {
+	if err := h.authorizeAdmin(ctx); err != nil {
+		return nil, err
+	}
+	if err := h.tailscale.SaveTags(ctx, req.Tags); err != nil {
+		if errors.Is(err, tailscale.ErrInvalidTags) {
+			return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: err.Error()}
+		}
+		return nil, err
+	}
+	return h.tailscaleKey(ctx), nil
+}
+
 func (h *serverHandlers) tailscaleKey(ctx context.Context) *v1.TailscaleKeyResp {
 	st := h.tailscale.Status(ctx)
 	resp := &v1.TailscaleKeyResp{
@@ -811,6 +824,7 @@ func (h *serverHandlers) tailscaleKey(ctx context.Context) *v1.TailscaleKeyResp 
 		ExpiresAt:      st.Expiry,
 		AvailableUntil: st.Until,
 		ConfigKeyID:    st.ConfigKeyID,
+		Tags:           st.Tags,
 	}
 	if st.Err != nil {
 		resp.Error = st.Err.Error()
@@ -849,6 +863,7 @@ func (h *serverHandlers) routes() http.Handler {
 	m.HandleFunc("GET /server/tailscale-key", handle(h.getTailscaleKey))
 	m.HandleFunc("POST /server/tailscale-key", handle(h.setTailscaleKey))
 	m.HandleFunc("POST /server/tailscale-key/remove", handle(h.removeTailscaleKey))
+	m.HandleFunc("POST /server/tailscale-tags", handle(h.setTailscaleTags))
 	m.HandleFunc("POST /server/runtimes/{runtime}/image/refresh", handle(h.startImageRefresh))
 	m.HandleFunc("GET /server/runtimes/{runtime}/image/refresh", handle(h.getImageRefresh))
 	m.HandleFunc("GET /server/caches", handle(h.listCaches))

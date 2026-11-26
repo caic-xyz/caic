@@ -38,5 +38,6 @@ declare const classes: {
   readonly "shortField": string;
   readonly "tailscaleCreate": string;
   readonly "tailscaleForm": string;
+  readonly "tailscaleHint": string;
 };
 export default classes;

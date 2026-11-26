@@ -425,9 +425,9 @@ func (a mdContainerAdapter) SSHCommand(opts []string, cmd string) []string {
 type Backend struct {
 	Provider   genai.Provider      // nil if LLM not configured
 	HarnessEnv map[string][]string // per-harness KEY=VALUE env vars from config
-	// TailscaleAPIKey returns the Tailscale API access token md mints each
-	// Tailscale-enabled instance's ephemeral auth key with; nil means none.
-	TailscaleAPIKey func() string
+	// Tailscale supplies the API access token md mints each Tailscale-enabled
+	// instance's ephemeral auth key with, and the tags of its node. Required.
+	Tailscale *tailscale.Credential
 
 	// Immutable.
 	log    *slog.Logger
@@ -950,10 +950,7 @@ func (b *Backend) Revive(ctx context.Context, id runtime.ID) error {
 	b.log.DebugContext(ctx, "calling revive", "ctr", name)
 	// md uses the key only when the tailnet removed a Tailscale container's
 	// node while it was stopped, so a missing key fails only that case.
-	var reviveOpts md.ReviveOpts
-	if b.TailscaleAPIKey != nil {
-		reviveOpts.TailscaleAPIKey = b.TailscaleAPIKey()
-	}
+	reviveOpts := md.ReviveOpts{TailscaleAPIKey: b.Tailscale.APIKey()}
 	if err = ct.Revive(ctx, &SlogWriter{Context: ctx, Logger: b.log, Phase: "revive"}, &SlogWriter{Context: ctx, Logger: b.log, Phase: "revive"}, &reviveOpts); err != nil {
 		b.log.ErrorContext(ctx, "revive failed", "ctr", name, "err", err)
 		return err
@@ -1006,6 +1003,7 @@ func (b *Backend) Fork(ctx context.Context, id runtime.ID, opts *runtime.ForkOpt
 		Repos:           forkRepos,
 		Display:         opts.Display,
 		TailscaleAPIKey: tailscaleAPIKey,
+		TailscaleTags:   b.tailscaleTags(opts.Tailscale),
 		USB:             opts.USB,
 		Sudo:            opts.Sudo,
 		Labels:          metadataLabels(opts.Metadata),
@@ -1636,14 +1634,19 @@ func (b *Backend) tailscaleAPIKey(requested bool) (string, error) {
 	if !requested {
 		return "", nil
 	}
-	key := ""
-	if b.TailscaleAPIKey != nil {
-		key = b.TailscaleAPIKey()
-	}
+	key := b.Tailscale.APIKey()
 	if key == "" {
 		return "", tailscale.ErrNoAPIKey
 	}
 	return key, nil
+}
+
+// tailscaleTags returns the node tags of a Tailscale-enabled instance.
+func (b *Backend) tailscaleTags(requested bool) []string {
+	if !requested {
+		return nil
+	}
+	return b.Tailscale.Tags()
 }
 
 // mdStartOpts builds the md.StartOpts for a given harness and task options.
@@ -1677,6 +1680,7 @@ func (b *Backend) mdStartOpts(c mdContainer, opts *runtime.StartOptions) (*md.St
 		Labels:          metadataLabels(opts.Metadata),
 		USB:             opts.USB,
 		TailscaleAPIKey: tailscaleAPIKey,
+		TailscaleTags:   b.tailscaleTags(opts.Tailscale),
 		Display:         opts.Display,
 		Sudo:            opts.Sudo,
 		ExtraEnv:        extraEnv,

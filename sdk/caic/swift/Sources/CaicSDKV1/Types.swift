@@ -1567,14 +1567,50 @@ public struct TailscaleKeyResp: Codable {
     /// ConfigKeyID identifies the configured token that removing a saved token
     /// falls back to; empty when none is configured.
     public let configKeyID: String?
+    /// Tags are the tags of new tasks' Tailscale nodes; "tag:caic" unless an
+    /// administrator saved others.
+    public let tags: [String]?
 
-    public init(source: TailscaleKeySource, keyID: String? = nil, expiresAt: ISOTimestamp? = nil, availableUntil: ISOTimestamp? = nil, error: String? = nil, configKeyID: String? = nil) {
+    private enum CodingKeys: String, CodingKey {
+        case source
+        case keyID
+        case expiresAt
+        case availableUntil
+        case error
+        case configKeyID
+        case tags
+    }
+
+    public init(source: TailscaleKeySource, keyID: String? = nil, expiresAt: ISOTimestamp? = nil, availableUntil: ISOTimestamp? = nil, error: String? = nil, configKeyID: String? = nil, tags: [String]?) {
         self.source = source
         self.keyID = keyID
         self.expiresAt = expiresAt
         self.availableUntil = availableUntil
         self.error = error
         self.configKeyID = configKeyID
+        self.tags = tags
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.source = try c.decode(TailscaleKeySource.self, forKey: .source)
+        self.keyID = try c.decodeIfPresent(String.self, forKey: .keyID)
+        self.expiresAt = try c.decodeIfPresent(ISOTimestamp.self, forKey: .expiresAt)
+        self.availableUntil = try c.decodeIfPresent(ISOTimestamp.self, forKey: .availableUntil)
+        self.error = try c.decodeIfPresent(String.self, forKey: .error)
+        self.configKeyID = try c.decodeIfPresent(String.self, forKey: .configKeyID)
+        self.tags = try c.decode([String]?.self, forKey: .tags)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.source, forKey: .source)
+        try c.encodeIfPresent(self.keyID, forKey: .keyID)
+        try c.encodeIfPresent(self.expiresAt, forKey: .expiresAt)
+        try c.encodeIfPresent(self.availableUntil, forKey: .availableUntil)
+        try c.encodeIfPresent(self.error, forKey: .error)
+        try c.encodeIfPresent(self.configKeyID, forKey: .configKeyID)
+        try c.encode(self.tags, forKey: .tags)
     }
 }
 
@@ -1585,6 +1621,31 @@ public struct SetTailscaleKeyReq: Codable {
 
     public init(apiKey: String) {
         self.apiKey = apiKey
+    }
+}
+
+/// SetTailscaleTagsReq is the request for POST /api/caic/v1/server/tailscale-tags.
+public struct SetTailscaleTagsReq: Codable {
+    /// Tags replace the node tags of new tasks; none restores "tag:caic". Each is
+    /// "tag:" followed by a letter, then letters, digits, or dashes.
+    public let tags: [String]?
+
+    private enum CodingKeys: String, CodingKey {
+        case tags
+    }
+
+    public init(tags: [String]?) {
+        self.tags = tags
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.tags = try c.decode([String]?.self, forKey: .tags)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.tags, forKey: .tags)
     }
 }
 

@@ -1,4 +1,4 @@
-// SettingsForm presents autosaved harness compaction, container, storage, automation, and server settings, and the Tailscale token.
+// SettingsForm presents autosaved harness compaction, container, storage, automation, and server settings, and the Tailscale token and tags.
 
 import { useSearchParams } from "@solidjs/router";
 import {
@@ -45,7 +45,13 @@ import SettingsMappings, { containerSortPath } from "./SettingsMappings";
 
 import { formatDuration, parseDuration } from "../duration";
 import { formatTime } from "../formatting";
-import { createTailscaleKey, formatRemaining, TAILSCALE_KEYS_URL } from "../tailscaleKey";
+import {
+  createTailscaleKey,
+  formatRemaining,
+  parseTags,
+  TAILSCALE_KEYS_URL,
+  TAILSCALE_TAGS_URL,
+} from "../tailscaleKey";
 import { harnessLabel } from "../harnessLabels";
 
 import styles from "./SettingsForm.module.css";
@@ -118,6 +124,8 @@ export default function SettingsForm(props: SettingsFormProps) {
     if (section() === "server") void tailscale.load();
   });
   const [tailscaleDraft, setTailscaleDraft] = createSignal("");
+  // null until edited, so the field follows the saved tags.
+  const [tagsDraft, setTagsDraft] = createSignal<string | null>(null);
   const tailscaleSummary = (st: TailscaleKeyResp): string => {
     const origin = st.source === "saved" ? "saved here" : "from TAILSCALE_API_KEY";
     if (st.error) return `${origin}.`;
@@ -623,6 +631,63 @@ export default function SettingsForm(props: SettingsFormProps) {
                   <Show when={tailscale.actionError()}>
                     <p class={`${styles.settingsDescription} ${styles.settingsDescriptionError}`} role="alert">
                       {tailscale.actionError()}
+                    </p>
+                  </Show>
+                  <form
+                    class={styles.tailscaleForm}
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      const draft = tagsDraft();
+                      if (draft === null) return;
+                      void tailscale.saveTags(parseTags(draft)).then((saved) => {
+                        if (saved) setTagsDraft(null);
+                      });
+                    }}
+                  >
+                    <label class={styles.settingsLabel}>
+                      Node tags
+                      <input
+                        type="text"
+                        class={styles.settingsInput}
+                        autocomplete="off"
+                        spellcheck={false}
+                        placeholder="tag:caic"
+                        aria-describedby="tailscale-tags-hint"
+                        value={tagsDraft() ?? (st().tags ?? []).join(" ")}
+                        onInput={(e) => {
+                          setTagsDraft(e.currentTarget.value);
+                          tailscale.clearTagsError();
+                        }}
+                      />
+                    </label>
+                    <p id="tailscale-tags-hint" class={`${styles.settingsDescription} ${styles.tailscaleHint}`}>
+                      Space-separated. The token's owner must own each tag.
+                    </p>
+                    <div class={styles.buttonRow}>
+                      <Button
+                        type="submit"
+                        disabled={
+                          tagsDraft() === null ||
+                          parseTags(tagsDraft() ?? "").join(" ") === (st().tags ?? []).join(" ") ||
+                          tailscale.pending() !== null
+                        }
+                        loading={tailscale.pending() === "tags"}
+                      >
+                        Save tags
+                      </Button>
+                      <a
+                        class={styles.tailscaleCreate}
+                        href={TAILSCALE_TAGS_URL}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Tag owners
+                      </a>
+                    </div>
+                  </form>
+                  <Show when={tailscale.tagsError()}>
+                    <p class={`${styles.settingsDescription} ${styles.settingsDescriptionError}`} role="alert">
+                      {tailscale.tagsError()}
                     </p>
                   </Show>
                 </>

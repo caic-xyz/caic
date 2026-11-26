@@ -7,6 +7,7 @@ import "sync"
 type KeyStore struct {
 	mu     sync.Mutex
 	secret string
+	tags   []string
 }
 
 // SaveTailscaleAPIKey implements tailscale.KeyStore.
@@ -15,6 +16,21 @@ func (s *KeyStore) SaveTailscaleAPIKey(secret string) error {
 	defer s.mu.Unlock()
 	s.secret = secret
 	return nil
+}
+
+// SaveTailscaleTags implements tailscale.KeyStore.
+func (s *KeyStore) SaveTailscaleTags(tags []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tags = tags
+	return nil
+}
+
+// Tags returns the last saved tags.
+func (s *KeyStore) Tags() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.tags
 }
 
 // Secret returns the last saved secret.

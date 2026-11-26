@@ -1,4 +1,4 @@
-// Credential picks the saved or configured Tailscale API access token and verifies administrator changes.
+// Credential owns the Tailscale API access token and node tags, and verifies administrator changes.
 
 package tailscale
 
@@ -8,8 +8,12 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/caic-xyz/md"
 )
 
 // Source identifies where the active Tailscale API access token comes from.
@@ -26,19 +30,29 @@ const (
 // rejected, revoked, expiring within ExpiryHeadroom, or not verifiable now.
 var ErrUnusableKey = errors.New("unusable tailscale API access token")
 
-// unusableKeyError matches ErrUnusableKey and reads as its cause alone.
-type unusableKeyError struct{ err error }
+// DefaultTag is the tag of new tasks' nodes until an administrator saves
+// others. It differs from md's own default so a tailnet policy can tell caic's
+// agent containers from containers started with md directly.
+const DefaultTag = "tag:caic"
 
-func (e unusableKeyError) Error() string { return e.err.Error() }
+// ErrInvalidTags reports node tags that Credential.SaveTags refuses.
+var ErrInvalidTags = errors.New("invalid tailscale tags")
 
-func (e unusableKeyError) Is(target error) bool { return target == ErrUnusableKey }
+// sentinelError matches sentinel and reads as its cause alone.
+type sentinelError struct{ sentinel, err error }
 
-func (e unusableKeyError) Unwrap() error { return e.err }
+func (e sentinelError) Error() string { return e.err.Error() }
 
-// KeyStore persists the token an administrator saves; an empty secret removes
-// it. Credential serializes calls.
+func (e sentinelError) Is(target error) bool { return target == e.sentinel }
+
+func (e sentinelError) Unwrap() error { return e.err }
+
+// KeyStore persists what an administrator saves: the token, where an empty
+// secret removes it, and the node tags, where none means DefaultTag.
+// Credential serializes calls.
 type KeyStore interface {
 	SaveTailscaleAPIKey(secret string) error
+	SaveTailscaleTags(tags []string) error
 }
 
 // Status describes the active token without revealing it.
@@ -53,22 +67,28 @@ type Status struct {
 	// ConfigKeyID identifies the configured token that removing a saved token
 	// falls back to; empty when none is configured.
 	ConfigKeyID string
+	// Tags are the tags of new tasks' nodes, DefaultTag unless an
+	// administrator saved others.
+	Tags []string
 }
 
-// Credential owns the active Tailscale API access token: the one an
-// administrator saved, otherwise the configured one.
+// Credential owns the active Tailscale API access token, the one an
+// administrator saved, otherwise the configured one, and the tags md applies
+// to the nodes it registers with it.
 type Credential struct {
 	log    *slog.Logger
 	client *http.Client // shared by the tokens' lookups
 	store  KeyStore
 	config *apiKey // nil when none is configured; Immutable
 
-	mu    sync.Mutex // serializes Save and Remove
+	mu    sync.Mutex // serializes Save, Remove, and SaveTags
 	saved *apiKey    // nil when no administrator-saved token
+	tags  []string   // nil means DefaultTag; never mutated in place
 }
 
-// NewCredential selects the active token among saved and configured.
-func NewCredential(ctx context.Context, log *slog.Logger, store KeyStore, saved, configured string) *Credential {
+// NewCredential selects the active token among saved and configured. tags
+// are the saved node tags.
+func NewCredential(ctx context.Context, log *slog.Logger, store KeyStore, saved, configured string, tags []string) *Credential {
 	client := &http.Client{Timeout: 10 * time.Second}
 	c := &Credential{
 		log:    log,
@@ -76,6 +96,7 @@ func NewCredential(ctx context.Context, log *slog.Logger, store KeyStore, saved,
 		store:  store,
 		config: newAPIKey(log, client, configured),
 		saved:  newAPIKey(log, client, saved),
+		tags:   slices.Clone(tags),
 	}
 	active, _ := c.activeLocked()
 	if active != nil && active.KeyID() == "" {
@@ -96,6 +117,43 @@ func (c *Credential) APIKey() string {
 	return k.secret
 }
 
+// Tags returns the node tags of new tasks: the saved ones, otherwise
+// DefaultTag. Runtimes pass them to md with APIKey, so md's own default never
+// applies.
+func (c *Credential) Tags() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.tags) == 0 {
+		return []string{DefaultTag}
+	}
+	return c.tags
+}
+
+// SaveTags persists the node tags of new tasks. It trims each tag and drops
+// empty and repeated ones; no tag restores DefaultTag. A tag
+// Tailscale rejects wraps ErrInvalidTags and leaves the tags unchanged. The
+// token's owner must also own each tag, which Tailscale checks only when md
+// mints an auth key.
+func (c *Credential) SaveTags(ctx context.Context, tags []string) error {
+	var next []string
+	for _, tag := range tags {
+		if tag = strings.TrimSpace(tag); tag != "" && !slices.Contains(next, tag) {
+			next = append(next, tag)
+		}
+	}
+	if err := md.ValidateTailscaleTags(next); err != nil {
+		return sentinelError{ErrInvalidTags, err}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.store.SaveTailscaleTags(next); err != nil {
+		return fmt.Errorf("save tailscale tags: %w", err)
+	}
+	c.tags = next
+	c.log.InfoContext(ctx, "tailscale tags saved", "tags", next)
+	return nil
+}
+
 // Until reports when new tasks stop being able to enable Tailscale, as
 // apiKey.Until does for the active token.
 func (c *Credential) Until(ctx context.Context) (time.Time, error) {
@@ -109,7 +167,7 @@ func (c *Credential) Until(ctx context.Context) (time.Time, error) {
 // Status describes the active token, looking it up as Until does.
 func (c *Credential) Status(ctx context.Context) Status {
 	k, src := c.active()
-	st := Status{Source: src, Err: ErrNoAPIKey}
+	st := Status{Source: src, Err: ErrNoAPIKey, Tags: c.Tags()}
 	if c.config != nil {
 		st.ConfigKeyID = c.config.KeyID()
 	}
@@ -126,10 +184,10 @@ func (c *Credential) Status(ctx context.Context) Status {
 func (c *Credential) Save(ctx context.Context, secret string) error {
 	k := newAPIKey(c.log, c.client, secret)
 	if k == nil {
-		return unusableKeyError{errors.New("empty tailscale API access token")}
+		return sentinelError{ErrUnusableKey, errors.New("empty tailscale API access token")}
 	}
 	if _, err := k.Until(ctx); err != nil {
-		return unusableKeyError{err}
+		return sentinelError{ErrUnusableKey, err}
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()

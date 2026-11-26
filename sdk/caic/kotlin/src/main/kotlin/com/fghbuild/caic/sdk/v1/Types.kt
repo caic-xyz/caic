@@ -1888,6 +1888,11 @@ data class TailscaleKeyResp(
      * falls back to; empty when none is configured.
      */
     @SerialName("configKeyID") @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val configKeyID: String? = null,
+    /**
+     * Tags are the tags of new tasks' Tailscale nodes; "tag:caic" unless an
+     * administrator saved others.
+     */
+    val tags: List<String>?,
 )
 
 /** SetTailscaleKeyReq is the request for POST /api/caic/v1/server/tailscale-key. */
@@ -1895,6 +1900,16 @@ data class TailscaleKeyResp(
 data class SetTailscaleKeyReq(
     /** tskey-api-<keyID>-<secret> */
     val apiKey: String,
+)
+
+/** SetTailscaleTagsReq is the request for POST /api/caic/v1/server/tailscale-tags. */
+@Serializable
+data class SetTailscaleTagsReq(
+    /**
+     * Tags replace the node tags of new tasks; none restores "tag:caic". Each is
+     * "tag:" followed by a letter, then letters, digits, or dashes.
+     */
+    val tags: List<String>?,
 )
 
 /** ImageRefreshReq identifies the runtime whose specialized image is refreshed. */

@@ -22,6 +22,7 @@ Type notation: `JSONValue` means any valid JSON value.
 | GET | `/api/caic/v1/server/tailscale-key` | Describes the active Tailscale API access token without revealing it. Requires administrator authority. |  | `TailscaleKeyResp` |
 | POST | `/api/caic/v1/server/tailscale-key` | Verifies a Tailscale API access token with Tailscale and saves it in place of the configured one. Requires administrator authority. | `SetTailscaleKeyReq` | `TailscaleKeyResp` |
 | POST | `/api/caic/v1/server/tailscale-key/remove` | Removes the saved Tailscale API access token, falling back to the configured one. Requires administrator authority. |  | `TailscaleKeyResp` |
+| POST | `/api/caic/v1/server/tailscale-tags` | Saves the Tailscale tags of new tasks' nodes. Requires administrator authority. | `SetTailscaleTagsReq` | `TailscaleKeyResp` |
 | POST | `/api/caic/v1/server/runtimes/{runtime}/image/refresh` | Rebuilds one runtime's specialized image and updates its installed coding agents. | `ImageRefreshReq` | `ImageRefreshStatus` |
 | GET | `/api/caic/v1/server/runtimes/{runtime}/image/refresh` | Returns one runtime's specialized image refresh progress. |  | `ImageRefreshStatus` |
 | GET | `/api/caic/v1/server/caches` | Lists well-known cache configurations. |  | `WellKnownCachesResp` |
@@ -896,6 +897,7 @@ revealing it.
 | `availableUntil` | `ISOTimestamp` | AvailableUntil is when new tasks stop being able to enable Tailscale, ahead of ExpiresAt. Zero when Error is set or the token never expires. |  |
 | `error` | `string` | Error is why new tasks cannot enable Tailscale now; empty when they can. |  |
 | `configKeyID` | `string` | ConfigKeyID identifies the configured token that removing a saved token falls back to; empty when none is configured. |  |
+| `tags` | `string[] \| null` | Tags are the tags of new tasks' Tailscale nodes; "tag:caic" unless an administrator saved others. | yes |
 
 ### SetTailscaleKeyReq
 
@@ -904,6 +906,14 @@ SetTailscaleKeyReq is the request for POST /api/caic/v1/server/tailscale-key.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `apiKey` | `string` | tskey-api-<keyID>-<secret> | yes |
+
+### SetTailscaleTagsReq
+
+SetTailscaleTagsReq is the request for POST /api/caic/v1/server/tailscale-tags.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `tags` | `string[] \| null` | Tags replace the node tags of new tasks; none restores "tag:caic". Each is "tag:" followed by a letter, then letters, digits, or dashes. | yes |
 
 ### ImageRefreshReq
 
