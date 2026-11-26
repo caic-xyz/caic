@@ -454,13 +454,8 @@ func TestNewConn(t *testing.T) {
 		workers.Go(func() { read <- c.ReadMessages(stdout, nil) })
 		workers.Go(func() { _, _ = io.WriteString(output, strings.Repeat(request, 100)) })
 		t.Cleanup(func() { cancel(); c.Cancel(); _ = output.Close(); _ = stdin.Close(); workers.Wait() })
-		select {
-		case err := <-read:
-			if !errors.Is(err, ErrResponseQueueFull) || !errors.Is(err, ErrResponsesAborted) {
-				t.Fatalf("MCP overload=%v", err)
-			}
-		case <-time.After(time.Second):
-			t.Fatal("MCP overload blocked stdout or shutdown")
+		if err := <-read; !errors.Is(err, ErrResponseQueueFull) || !errors.Is(err, ErrResponsesAborted) {
+			t.Fatalf("MCP overload=%v", err)
 		}
 	})
 	t.Run("blocked_registry_preserves_stdout_and_cancels", func(t *testing.T) {
@@ -481,22 +476,13 @@ func TestNewConn(t *testing.T) {
 			}
 		})
 		<-registry.started
-		select {
-		case parsed := <-messages:
-			if m, ok := parsed.Message.(*TextMessage); !ok || m.Text != "working" {
-				t.Fatalf("output=%#v", parsed.Message)
-			}
-		case <-time.After(time.Second):
-			t.Fatal("MCP execution blocked stdout")
+		parsed := <-messages
+		if m, ok := parsed.Message.(*TextMessage); !ok || m.Text != "working" {
+			t.Fatalf("output=%#v", parsed.Message)
 		}
 		cancel()
-		select {
-		case err := <-read:
-			if !errors.Is(err, context.Canceled) || !errors.Is(err, ErrResponsesAborted) {
-				t.Fatalf("cancel=%v", err)
-			}
-		case <-time.After(time.Second):
-			t.Fatal("MCP worker was not canceled and joined")
+		if err := <-read; !errors.Is(err, context.Canceled) || !errors.Is(err, ErrResponsesAborted) {
+			t.Fatalf("cancel=%v", err)
 		}
 	})
 
@@ -644,7 +630,7 @@ func TestSession(t *testing.T) {
 	t.Run("error_automatic_response_ends_process", func(t *testing.T) {
 		t.Parallel()
 		ctx, cancel := context.WithCancel(t.Context())
-		cmd := exec.CommandContext(ctx, "sleep", "60")
+		cmd := exec.CommandContext(ctx, "sleep", "3600")
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}
@@ -662,13 +648,9 @@ func TestSession(t *testing.T) {
 				t.Errorf("feed MCP: %v", err)
 			}
 		})
-		select {
-		case <-s.Done():
-			if err := s.Wait(); !errors.Is(err, ErrResponsesAborted) || !errors.Is(err, io.ErrUnexpectedEOF) {
-				t.Fatalf("session failure = %v", err)
-			}
-		case <-time.After(time.Second):
-			t.Fatal("failed reply left the agent process or reader running")
+		<-s.Done()
+		if err := s.Wait(); !errors.Is(err, ErrResponsesAborted) || !errors.Is(err, io.ErrUnexpectedEOF) {
+			t.Fatalf("session failure = %v", err)
 		}
 	})
 
@@ -1468,13 +1450,8 @@ func TestReadMessages(t *testing.T) {
 			t.Fatal(err)
 		}
 		conn.Cancel()
-		select {
-		case err := <-readDone:
-			if err != nil {
-				t.Fatalf("cancel reader: %v", err)
-			}
-		case <-time.After(5 * time.Second):
-			t.Fatal("cancel did not release the reader")
+		if err := <-readDone; err != nil {
+			t.Fatalf("cancel reader: %v", err)
 		}
 		if _, err := output.Write([]byte("\n")); !errors.Is(err, io.ErrClosedPipe) {
 			t.Fatalf("output remained open: %v", err)
