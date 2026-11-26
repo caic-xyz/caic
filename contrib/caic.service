@@ -11,6 +11,9 @@ Documentation=https://github.com/caic-xyz/caic
 After=network-online.target podman.socket graphical-session-pre.target
 # Start Podman's packaged socket when available without requiring it for Docker-only setups.
 Wants=network-online.target podman.socket
+# Let the packaged OpenSSH socket publish SSH_AUTH_SOCK before caic starts.
+Wants=ssh-agent.socket
+After=ssh-agent.socket
 
 [Service]
 Type=simple
@@ -70,4 +73,4 @@ KeyringMode=private
 RemoveIPC=true
 
 [Install]
-WantedBy=graphical-session.target
+WantedBy=default.target

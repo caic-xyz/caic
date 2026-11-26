@@ -18,6 +18,12 @@ login shell environment at startup unless `core.shell_env = false`.
 | Linux    | systemd `caic.service`      | `journalctl --user -u caic.service` |
 | macOS    | launchd `com.fghbuild.caic` | `~/Library/Logs/caic/`              |
 
+On Linux, caic starts with the systemd user manager. To start caic at boot
+and keep it running after logout, enable lingering for the service account
+with `loginctl enable-linger "$USER"`. If you previously enabled caic under
+`graphical-session.target`, run `systemctl --user reenable caic.service`
+after updating the unit to refresh its enablement links.
+
 For other installation workflows, [build caic from source](../README.md#from-source)
 and install [md](https://github.com/caic-xyz/md) separately.
 
