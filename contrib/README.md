@@ -24,6 +24,12 @@ with `loginctl enable-linger "$USER"`. If you previously enabled caic under
 `graphical-session.target`, run `systemctl --user reenable caic.service`
 after updating the unit to refresh its enablement links.
 
+On Linux, tasks get KVM acceleration when the service user can write
+`/dev/kvm`. The installer prints the missing step: join the device's group with
+`sudo usermod -aG kvm "$USER"` and reboot, or enable virtualization in the
+firmware settings. On Debian and Ubuntu, `sudo apt install cpu-checker && kvm-ok`
+diagnoses a missing `/dev/kvm`.
+
 For other installation workflows, [build caic from source](../README.md#from-source)
 and install [md](https://github.com/caic-xyz/md) separately.
 

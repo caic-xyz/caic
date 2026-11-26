@@ -179,6 +179,21 @@ else
   launchctl bootstrap "$domain" "$service_path"
 fi
 printf 'Configuration: %s\nSee https://docs.caic.xyz/caic/configuration to get started.\n' "$config_path"
+# md passes /dev/kvm to task containers only when the service user can write it.
+if [[ "$platform" == linux && ! -w /dev/kvm ]]; then
+  printf 'KVM acceleration is unavailable to caic tasks.\n'
+  if [[ -e /dev/kvm ]]; then
+    # shellcheck disable=SC2016 # Print $USER literally for the user's shell.
+    printf 'Grant access, then reboot so the user service gains the group:\n  sudo usermod -aG %s "$USER"\n' "$(stat -c %G /dev/kvm)"
+  else
+    printf 'Enable virtualization (Intel VT-x or AMD-V) in the firmware settings.\n'
+    # shellcheck disable=SC1091 # os-release is a host file.
+    os_ids="$(if [[ -r /etc/os-release ]]; then . /etc/os-release && printf '%s %s' "${ID:-}" "${ID_LIKE:-}"; fi)"
+    case " $os_ids " in
+    *" debian "* | *" ubuntu "*) printf 'Diagnose with:\n  sudo apt install cpu-checker && kvm-ok\n' ;;
+    esac
+  fi
+fi
 case ":$PATH:" in
 *":$install_dir:"*) ;;
 *) printf 'Add %s to PATH to use caic and md from your terminal.\n' "$install_dir" ;;
