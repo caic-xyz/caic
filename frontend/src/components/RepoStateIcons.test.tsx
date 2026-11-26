@@ -27,7 +27,6 @@ it("preserves link identity and focus when its task URL changes", () => {
   ));
   const link = screen.getByRole("link");
   link.focus();
-  expect(link).toHaveAccessibleDescription("1 changed file, 1 addition");
   setHref("/task/@abc+title/diff");
   expect(screen.getByRole("link")).toBe(link);
   expect(link).toHaveFocus();

@@ -234,12 +234,6 @@ describe("TaskCard", () => {
       expect(cost).toHaveTextContent("$1.25");
       expect(timing).toHaveTextContent(/1m\s*\/\s*1m 10s/);
       expect(timing?.parentElement).toContainElement(screen.getByTestId("state-badge"));
-      if (harness === "claude" || harness === "codex" || harness === "antigravity") {
-        const trigger = cost.firstElementChild;
-        if (!trigger) throw new Error("Missing cost tooltip trigger");
-        fireEvent.mouseEnter(trigger);
-        expect(screen.getByText(/API-equivalent cost/)).toBeInTheDocument();
-      }
     });
   }
 
@@ -486,22 +480,6 @@ describe("TaskCard", () => {
     expect(screen.getByTestId("task-card-repo-state")).toHaveTextContent("task-branch");
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
     expect(screen.queryByText(/changed file/)).not.toBeInTheDocument();
-  });
-
-  it("does not invent a TTL when only a legacy cache expiry is available", () => {
-    renderCard(() => (
-      <TaskCard
-        {...props({
-          state: "waiting",
-          cacheExpiresAt: "2026-07-08T11:55:00Z",
-        })}
-      />
-    ));
-
-    fireEvent.focus(screen.getByRole("button", { name: "waiting" }));
-
-    expect(screen.getByText("Prompt cache likely expired — continuing may use more tokens")).toBeInTheDocument();
-    expect(screen.queryByText(/TTL/)).not.toBeInTheDocument();
   });
 
   it("shows a quota reset countdown in the summary", () => {

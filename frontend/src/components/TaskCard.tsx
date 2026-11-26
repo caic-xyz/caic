@@ -70,7 +70,6 @@ export interface TaskCardProps {
   cumulativeOutputTokens: number;
   contextWindowLimit: number;
   autoCompactTokenLimit: number;
-  cacheTTLSeconds?: number;
   cacheExpiresAt?: string;
   turnStartedAt?: string;
   diffStat?: DiffStat;
@@ -137,20 +136,7 @@ export default function TaskCard(props: TaskCardProps) {
   const isTerminal = () => terminalStates.has(props.state);
   const stale = () =>
     !terminalStates.has(props.state) && props.state !== "running" && isCacheStale(props.now(), props.cacheExpiresAt);
-  const cacheExpiryText = () =>
-    props.cacheTTLSeconds
-      ? `Prompt cache likely expired (${formatElapsed(props.cacheTTLSeconds * 1000)} TTL) — continuing may use more tokens`
-      : "Prompt cache likely expired — continuing may use more tokens";
   const [titleTruncated, setTitleTruncated] = createSignal(false);
-  // subscriptionLabel names the subscription for harnesses whose cost is
-  // API-equivalent pricing rather than actual spend; "" otherwise.
-  const subscriptionLabel = (): string => {
-    const h = props.harness;
-    if (h === "claude") return "Claude Code subscription";
-    if (h === "codex") return "Codex subscription";
-    if (h === "antigravity") return "Antigravity subscription";
-    return "";
-  };
   const displayHarness = () => props.harness && harnessLabel(props.harness);
   const [contextMenuPosition, setContextMenuPosition] = createSignal<{ x: number; y: number } | undefined>();
   const [menuActionPending, setMenuActionPending] = createSignal(false);
@@ -525,16 +511,14 @@ export default function TaskCard(props: TaskCardProps) {
               <Show when={props.forgePR && props.ciStatus} keyed>
                 {(status) => <CIDot status={status as CIStatus} checks={props.ciChecks} />}
               </Show>
-              <Tooltip text={cacheExpiryText()} disabled={!stale()}>
-                <span
-                  class={styles.badge}
-                  classList={{ [styles.asking]: props.state === "asking" }}
-                  data-testid="state-badge"
-                  style={{ "--badge-bg": stale() ? staleStateColor(props.state) : stateColor(props.state) }}
-                >
-                  {props.state}
-                </span>
-              </Tooltip>
+              <span
+                class={styles.badge}
+                classList={{ [styles.asking]: props.state === "asking" }}
+                data-testid="state-badge"
+                style={{ "--badge-bg": stale() ? staleStateColor(props.state) : stateColor(props.state) }}
+              >
+                {props.state}
+              </span>
               <Show when={props.runtime?.id && !isTerminal()}>
                 <TaskResourceIndicator
                   href={taskPerformancePath(`/task/@${props.id}`)}
@@ -551,12 +535,7 @@ export default function TaskCard(props: TaskCardProps) {
                 {timePair()}
                 <Show when={props.costKnown}>
                   <span class={`${styles.meta} ${styles.cost}`} data-testid="task-card-cost">
-                    <Show when={hasTime()}>· </Show>
-                    <Show when={subscriptionLabel()} fallback={`$${props.costUSD.toFixed(2)}`}>
-                      <Tooltip text={`API-equivalent cost — ${subscriptionLabel()}`}>
-                        <span>${props.costUSD.toFixed(2)}</span>
-                      </Tooltip>
-                    </Show>
+                    <Show when={hasTime()}>· </Show>${props.costUSD.toFixed(2)}
                   </span>
                 </Show>
               </span>

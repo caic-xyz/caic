@@ -12,7 +12,6 @@ import OperationIcon from "@material-symbols/svg-400/outlined/sync.svg?solid";
 import type { DiffFileStat, GitRepositoryState } from "@sdk/types.gen";
 
 import styles from "./RepoStateIcons.module.css";
-import Tooltip from "./Tooltip";
 
 interface Props {
   state?: GitRepositoryState;
@@ -141,56 +140,37 @@ export default function RepoStateIcons(props: Props) {
 
   return (
     <Show when={label()}>
-      <Tooltip
-        text={label()}
-        trigger={(tip) => (
-          <Show
-            when={props.href}
-            fallback={
-              <span
-                {...tip}
-                class={styles.icons}
-                data-elide-diff-stats={shouldElideDiffStats() ? "" : undefined}
-                ref={(element) => {
-                  markerRef = element;
-                  tip.ref(element);
-                }}
-                role="img"
-                aria-label={label()}
-              >
-                {markers()}
-              </span>
-            }
+      <Show
+        when={props.href}
+        fallback={
+          <span
+            class={styles.icons}
+            data-elide-diff-stats={shouldElideDiffStats() ? "" : undefined}
+            ref={markerRef}
+            role="img"
+            aria-label={label()}
           >
-            {(href) => (
-              <A
-                {...tip}
-                class={styles.link}
-                data-elide-diff-stats={shouldElideDiffStats() ? "" : undefined}
-                href={href()}
-                ref={(element) => {
-                  markerRef = element;
-                  tip.ref(element);
-                }}
-                aria-label={props.state?.name ? `${props.state.name}: ${label()}` : label()}
-                onFocus={() => {
-                  tip.onFocus();
-                  props.onNavigateIntent?.();
-                }}
-                onPointerEnter={() => props.onNavigateIntent?.()}
-                onPointerDown={(event) => {
-                  tip.onPointerDown(event);
-                  props.onNavigateIntent?.();
-                }}
-              >
-                <span class={styles.icons} aria-hidden="true">
-                  {markers()}
-                </span>
-              </A>
-            )}
-          </Show>
+            {markers()}
+          </span>
+        }
+      >
+        {(href) => (
+          <A
+            class={styles.link}
+            data-elide-diff-stats={shouldElideDiffStats() ? "" : undefined}
+            href={href()}
+            ref={(element) => (markerRef = element)}
+            aria-label={props.state?.name ? `${props.state.name}: ${label()}` : label()}
+            onFocus={() => props.onNavigateIntent?.()}
+            onPointerEnter={() => props.onNavigateIntent?.()}
+            onPointerDown={() => props.onNavigateIntent?.()}
+          >
+            <span class={styles.icons} aria-hidden="true">
+              {markers()}
+            </span>
+          </A>
         )}
-      />
+      </Show>
     </Show>
   );
 }

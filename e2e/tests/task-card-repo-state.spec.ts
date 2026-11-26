@@ -141,6 +141,35 @@ test("task navigation reveals the repository when it fits with the selected card
     .toBeGreaterThanOrEqual(fade - 1);
 });
 
+test("task-card title tooltip follows elision across resizes", async ({ page, api, uniquePrompt }) => {
+  const id = await createTaskAPI(api, uniquePrompt("elided title"));
+  await waitForTaskState(api, id, "waiting");
+  const title = "Refactor the history stream decoder for bounded memory use and more";
+  const snapshot = { kind: "snapshot", snapshot: [{ ...(await api.getTask(id)), title }] } satisfies TaskListEvent;
+  await page.route(
+    (url) => url.pathname === "/api/caic/v1/tasks/events",
+    (route) => route.fulfill({ contentType: "text/event-stream", body: `data: ${JSON.stringify(snapshot)}\n\n` }),
+  );
+  const heading = page.locator(`[data-task-id="${id}"]`).getByText(title, { exact: true });
+  const tooltip = page.getByRole("tooltip").filter({ hasText: title });
+  const elided = () => heading.evaluate((el) => el.scrollWidth > el.clientWidth);
+  // Cross the elision threshold in both directions without a reload.
+  for (const [width, expected] of [
+    [1280, false],
+    [390, true],
+    [1280, false],
+  ] as const) {
+    await page.setViewportSize({ width, height: 900 });
+    if (page.url() === "about:blank") await page.goto("/");
+    await expect.poll(elided).toBe(expected);
+    await heading.hover();
+    if (expected) await expect(tooltip).toBeVisible();
+    else await expect(tooltip).toHaveCount(0);
+    await page.mouse.move(0, 0);
+    await expect(tooltip).toHaveCount(0);
+  }
+});
+
 test("task-card fixtures distinguish known zero from unknown cost", async ({ page, api, uniquePrompt }, testInfo) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -185,7 +214,12 @@ test("task-card fixtures distinguish known zero from unknown cost", async ({ pag
   expect(errors).toEqual([]);
 });
 
-test("task-card cost tooltip stays open after the first touch tap", async ({ browser, baseURL, api, uniquePrompt }) => {
+test("task-card harness tooltip stays open after the first touch tap", async ({
+  browser,
+  baseURL,
+  api,
+  uniquePrompt,
+}) => {
   const repos = (await api.listRepos()) ?? [];
   const firstRepo = repos[0];
   ok(firstRepo);
@@ -214,11 +248,12 @@ test("task-card cost tooltip stays open after the first touch tap", async ({ bro
     // opening the tooltip, which correctly dismisses on navigation or scrolling.
     await card.press("Enter");
     await expect(page).toHaveURL(new RegExp(`/task/@${task.id}\\+[^/]+$`));
-    const cost = card.getByTestId("task-card-cost").getByRole("button");
-    await cost.tap();
-    await expect(page.getByText(/API-equivalent cost/)).toBeVisible();
-    await cost.tap();
-    await expect(page.getByText(/API-equivalent cost/)).toHaveCount(0);
+    const harness = card.getByRole("button", { name: "claude", exact: true });
+    const tooltip = page.getByRole("tooltip").filter({ hasText: /^claude$/ });
+    await harness.tap();
+    await expect(tooltip).toBeVisible();
+    await harness.tap();
+    await expect(tooltip).toHaveCount(0);
   } finally {
     await context.close();
   }
@@ -268,14 +303,7 @@ test("task cards keep single- and multi-repository states coherent", async ({ pa
   const singleCard = page.locator(`[data-task-id="${singleTask.id}"]`);
   const multiCard = page.locator(`[data-task-id="${multiTask.id}"]`);
   const summary = "2 changed files, 12 additions, 2 deletions, 1 uncommitted file, 1 commit ahead of upstream";
-  const singleMarkers = singleCard.getByRole("img", { name: summary });
-  await singleMarkers.hover();
-  const repoTooltip = page.getByRole("tooltip").filter({ hasText: summary });
-  await expect(repoTooltip).toBeVisible();
-  await repoTooltip.click();
-  await expect(page).toHaveURL(new RegExp(`/task/@${multiTask.id}`));
-  await page.keyboard.press("Escape");
-  await expect(repoTooltip).toBeHidden();
+  await expect(singleCard.getByRole("img", { name: summary })).toBeVisible();
   await expect(
     multiCard.getByRole("img", {
       name: "2 changed files, 12 additions, 2 deletions, 1 uncommitted file, 1 commit ahead of upstream",
@@ -428,10 +456,6 @@ test("turn completion refreshes the diff and preserves task-card agreement", asy
     await expect(uncommitted).toContainText("−2");
   };
   await assertAgreement();
-  await card.getByTestId("task-card-cost").getByRole("button").hover();
-  await expect(page.getByText(/API-equivalent cost/)).toBeVisible();
-  await page.mouse.move(0, 0);
-  await expect(page.getByText(/API-equivalent cost/)).toHaveCount(0);
 
   const indexResponse = () =>
     page.waitForResponse((response) => new URL(response.url()).pathname === `/api/caic/v1/tasks/${id}/diff/index`);

@@ -1,6 +1,6 @@
 // Shared informational popup attached to an existing trigger or a standalone disclosure.
 
-import { createSignal, createEffect, createMemo, createUniqueId, Show, onCleanup, type JSX } from "solid-js";
+import { children, createSignal, createEffect, createMemo, createUniqueId, Show, onCleanup, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 
 import styles from "./Tooltip.module.css";
@@ -167,6 +167,10 @@ export default function Tooltip(props: Props) {
 
   onCleanup(dismiss);
 
+  // Resolve children once: each props.children read builds new DOM, so the
+  // enabled and disabled wrappers would otherwise swap in fresh nodes and
+  // detach any ref or observer a caller holds on the old ones.
+  const content = children(() => props.children);
   const wrapperClass = () => `${styles.wrapper}${props.class ? ` ${props.class}` : ""}`;
 
   return (
@@ -174,7 +178,7 @@ export default function Tooltip(props: Props) {
       <Show
         when={props.trigger}
         fallback={
-          <Show when={!disabled()} fallback={<span class={wrapperClass()}>{props.children}</span>}>
+          <Show when={!disabled()} fallback={<span class={wrapperClass()}>{content()}</span>}>
             <span
               {...trigger}
               class={wrapperClass()}
@@ -187,7 +191,7 @@ export default function Tooltip(props: Props) {
                 toggle(event);
               }}
             >
-              {props.children}
+              {content()}
             </span>
           </Show>
         }
