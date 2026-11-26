@@ -1,4 +1,4 @@
-/* Shared tooltip placement, surface, and pointer passage between popup and trigger. */
+/* Shared tooltip placement and surface; the popup is transparent to the pointer. */
 
 .wrapper {
   display: inline-flex;
@@ -11,21 +11,7 @@
   z-index: 1000;
   inline-size: max-content;
   max-inline-size: min(28rem, calc(100vw - 8px));
-}
-
-.popup[data-side]::after {
-  position: absolute;
-  inset-inline: 0;
-  block-size: var(--tooltip-gap);
-  content: "";
-}
-
-.popup[data-side="above"]::after {
-  top: 100%;
-}
-
-.popup[data-side="below"]::after {
-  bottom: 100%;
+  pointer-events: none;
 }
 
 .content {

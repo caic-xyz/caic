@@ -30,7 +30,6 @@ interface Props {
   stopActivationPropagation?: boolean;
 }
 
-const HOVER_EXIT_DELAY = 150;
 let dismissActiveTooltip: (() => void) | undefined;
 
 export default function Tooltip(props: Props) {
@@ -45,18 +44,11 @@ export default function Tooltip(props: Props) {
   const popupId = createUniqueId();
   let triggerRef: HTMLElement | undefined;
   let popupRef: HTMLSpanElement | undefined;
-  let hoverExit: ReturnType<typeof setTimeout> | undefined;
   let touch = false;
   let hovering = false;
   let focused = false;
 
-  function cancelHoverExit() {
-    clearTimeout(hoverExit);
-    hoverExit = undefined;
-  }
-
   function open() {
-    cancelHoverExit();
     if (disabled() || openedAt() !== null) return;
     dismissActiveTooltip?.();
     dismissActiveTooltip = dismiss;
@@ -64,7 +56,6 @@ export default function Tooltip(props: Props) {
   }
 
   function dismiss() {
-    cancelHoverExit();
     if (dismissActiveTooltip === dismiss) dismissActiveTooltip = undefined;
     setOpenedAt(null);
   }
@@ -78,8 +69,7 @@ export default function Tooltip(props: Props) {
   function handleMouseLeave() {
     if (touch) return;
     hovering = false;
-    cancelHoverExit();
-    if (!focused && openedAt() !== null) hoverExit = setTimeout(dismiss, HOVER_EXIT_DELAY);
+    if (!focused) dismiss();
   }
 
   function toggle(event: MouseEvent | KeyboardEvent) {
@@ -126,7 +116,7 @@ export default function Tooltip(props: Props) {
     if (!text()) return;
     const onOutsideClick = (event: MouseEvent) => {
       const target = event.target as Node;
-      if (!triggerRef?.contains(target) && !popupRef?.contains(target)) dismiss();
+      if (!triggerRef?.contains(target)) dismiss();
     };
     const onEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
@@ -169,8 +159,6 @@ export default function Tooltip(props: Props) {
 
     popupRef.style.top = `${clampedTop}px`;
     popupRef.style.left = `${Math.max(margin, Math.min(left, window.innerWidth - popup.width - margin))}px`;
-    if (top === clampedTop) popupRef.dataset.side = above >= margin ? "above" : "below";
-    else delete popupRef.dataset.side;
   });
 
   onCleanup(dismiss);
@@ -208,15 +196,7 @@ export default function Tooltip(props: Props) {
       </Show>
       <Show when={text()}>
         <Portal mount={triggerRef?.closest("dialog[open]") ?? undefined}>
-          <span
-            ref={popupRef}
-            id={popupId}
-            role="tooltip"
-            class={styles.popup}
-            onMouseEnter={handleMouseEnter}
-            onMouseLeave={handleMouseLeave}
-            onClick={(event) => event.stopPropagation()}
-          >
+          <span ref={popupRef} id={popupId} role="tooltip" class={styles.popup}>
             <span class={styles.content}>{text()}</span>
           </span>
         </Portal>

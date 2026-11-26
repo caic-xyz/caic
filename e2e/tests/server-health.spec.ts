@@ -93,11 +93,13 @@ for (const width of [320, 390, 1280]) {
       if (!tipBox) throw new Error("Tooltip missing");
       expect(tipBox.x).toBeGreaterThanOrEqual(0);
       expect(tipBox.x + tipBox.width).toBeLessThanOrEqual(width);
-      await tooltip.hover();
-      await page.clock.fastForward(250);
-      await expect(tooltip).toBeVisible();
+      // The popup is transparent to the pointer: moving onto it leaves the trigger.
+      await page.mouse.move(tipBox.x + tipBox.width / 2, tipBox.y + tipBox.height / 2);
+      await expect(tooltip).toBeHidden();
 
       // Hover must dismiss even while keyboard focus belongs to another control.
+      await link.hover();
+      await expect(tooltip).toBeVisible();
       await page.keyboard.press("Escape");
       await expect(tooltip).toBeHidden();
       await expect(avatar).toBeFocused();

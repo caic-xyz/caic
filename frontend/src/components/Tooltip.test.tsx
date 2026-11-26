@@ -1,10 +1,24 @@
-// Tests tooltip scroll dismissal scope and bounded agent-supplied text.
+// Tests tooltip hover dismissal, scroll dismissal scope, and bounded agent-supplied text.
 
 import { it } from "node:test";
 import { fireEvent, render, screen } from "@solidjs/testing-library";
 import { expect } from "@tests/expect";
 
 import Tooltip from "./Tooltip";
+
+it("closes as soon as the pointer leaves the trigger for the popup", () => {
+  render(() => (
+    <Tooltip text="Exact value">
+      <span>value</span>
+    </Tooltip>
+  ));
+  const trigger = screen.getByRole("button", { name: "value" });
+  fireEvent.mouseEnter(trigger);
+  const popup = screen.getByRole("tooltip");
+  fireEvent.mouseLeave(trigger);
+  fireEvent.mouseEnter(popup);
+  expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+});
 
 it("stays open while unrelated content scrolls and closes when its trigger scrolls", () => {
   render(() => (
