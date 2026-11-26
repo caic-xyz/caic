@@ -9,7 +9,7 @@ require (
 	github.com/coder/websocket v1.8.15
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/gofrs/flock v0.13.1
-	github.com/gomodedev/gomode v0.5.1-0.20261126200910-416c0b42e471
+	github.com/gomodedev/gomode v0.5.1-0.20261126214742-f2f083aad09f
 	github.com/google/go-cmp v0.7.0
 	github.com/huin/goupnp v1.3.0
 	github.com/invopop/jsonschema v0.14.0
