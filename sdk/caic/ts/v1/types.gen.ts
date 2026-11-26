@@ -443,6 +443,17 @@ export type SyncTarget =
 export const SyncTargetBranch = "branch";
 export const SyncTargetDefault = "default";
 
+export type TailscaleKeySource =
+  | "config"
+  | "none"
+  | "saved";
+/**
+ * Supported values.
+ */
+export const TailscaleKeyConfig = "config";
+export const TailscaleKeyNone = "none";
+export const TailscaleKeySaved = "saved";
+
 export type TaskBackgroundItemKind =
   | "agent"
   | "command"
@@ -810,6 +821,39 @@ export interface HarnessInfo {
 
 /** RefreshHarnessReq is the request for POST /api/caic/v1/server/harnesses/{harness}/refresh. */
 export interface RefreshHarnessReq {
+}
+
+/**
+ * TailscaleKeyResp describes the active Tailscale API access token without
+ * revealing it.
+ */
+export interface TailscaleKeyResp {
+  source: TailscaleKeySource;
+  /**
+   * KeyID is the token's ID in the Tailscale admin console; empty when
+   * Source is none or the token is malformed.
+   */
+  keyID?: string;
+  /** ExpiresAt is zero when the token never expires or its expiry is unknown. */
+  expiresAt?: ISOTimestamp;
+  /**
+   * AvailableUntil is when new tasks stop being able to enable Tailscale,
+   * ahead of ExpiresAt. Zero when Error is set or the token never expires.
+   */
+  availableUntil?: ISOTimestamp;
+  /** Error is why new tasks cannot enable Tailscale now; empty when they can. */
+  error?: string;
+  /**
+   * ConfigKeyID identifies the configured token that removing a saved token
+   * falls back to; empty when none is configured.
+   */
+  configKeyID?: string;
+}
+
+/** SetTailscaleKeyReq is the request for POST /api/caic/v1/server/tailscale-key. */
+export interface SetTailscaleKeyReq {
+  /** tskey-api-<keyID>-<secret> */
+  apiKey: string;
 }
 
 /** ImageRefreshReq identifies the runtime whose specialized image is refreshed. */

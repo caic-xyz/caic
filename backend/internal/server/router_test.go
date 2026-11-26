@@ -30,6 +30,7 @@ import (
 
 	agentbackends "github.com/caic-xyz/caic/backend/internal/agent/backends"
 	"github.com/caic-xyz/caic/backend/internal/tailscale"
+	"github.com/caic-xyz/caic/backend/internal/tailscale/tailscaletest"
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun/taskruntest"
 	"github.com/caic-xyz/caic/internal/testlog"
@@ -185,6 +186,11 @@ func newTestUsageRollup(t testing.TB) *usagedb.Store {
 	return rollup
 }
 
+// newTestTailscale returns a credential without a Tailscale API access token.
+func newTestTailscale(t testing.TB) *tailscale.Credential {
+	return tailscale.NewCredential(t.Context(), testlog.New(t), &tailscaletest.KeyStore{}, "", "")
+}
+
 func newTestRouter(t testing.TB, backends map[harness.Name]agent.Backend) *testRouter {
 	checker, err := geoip.NewChecker(t.Context(), testlog.New(t), "0.0.0.0/0,::/0", "", "")
 	if err != nil {
@@ -210,6 +216,7 @@ func newTestRouter(t testing.TB, backends map[harness.Name]agent.Backend) *testR
 		CacheSizes:   NewCacheSizeStore(testlog.New(t)),
 		Metrics:      metrics.NewStore(metrics.Resource{ServiceName: "caic"}),
 		UsageRollup:  newTestUsageRollup(t),
+		Tailscale:    newTestTailscale(t),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -244,6 +251,7 @@ func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshToken
 		CacheSizes:                 NewCacheSizeStore(testlog.New(t)),
 		Metrics:                    metrics.NewStore(metrics.Resource{ServiceName: "caic"}),
 		UsageRollup:                newTestUsageRollup(t),
+		Tailscale:                  newTestTailscale(t),
 		AuthStore:                  authStore,
 		OAuthPrivateKeyPEM:         testMCPOAuthSigningKeyPEM(t),
 		OAuthIssuer:                "https://caic.example.com",
@@ -285,6 +293,7 @@ func TestNew(t *testing.T) {
 			CacheSizes:  NewCacheSizeStore(testlog.New(t)),
 			Metrics:     metrics.NewStore(metrics.Resource{ServiceName: "caic"}),
 			UsageRollup: newTestUsageRollup(t),
+			Tailscale:   newTestTailscale(t),
 		}
 	}
 
@@ -575,6 +584,7 @@ func newCheckoutConstructionTestServer(t *testing.T, root string) checkoutConstr
 		CacheSizes:   NewCacheSizeStore(testlog.New(t)),
 		Metrics:      metrics.NewStore(metrics.Resource{ServiceName: "caic"}),
 		UsageRollup:  newTestUsageRollup(t),
+		Tailscale:    newTestTailscale(t),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -1443,7 +1453,7 @@ func TestSignalProcess(t *testing.T) {
 		s := newTestRouter(t, nil)
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "")
 		tk.Repos = []repo.Mount{{Name: "r"}}
-		tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{SSHHost: "ctr"}, "", "", 0)
+		tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{SSHHost: "ctr"}, "", 0)
 		insertTestTask(s, tk.ID, tk)
 		backend := &runtimetest.FakeBackend{}
 		processes := &runtimeProcessHandlers{
@@ -1472,7 +1482,7 @@ func TestSignalProcess(t *testing.T) {
 		s := newTestRouter(t, nil)
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "")
 		tk.Repos = []repo.Mount{{Name: "r"}}
-		tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{SSHHost: "ctr"}, "", "", 0)
+		tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{SSHHost: "ctr"}, "", 0)
 		insertTestTask(s, tk.ID, tk)
 		backend := &runtimetest.FakeBackend{}
 		processes := &runtimeProcessHandlers{

@@ -194,10 +194,6 @@ func tailscaleURLFromSnapshot(s *taskrun.Snapshot) string {
 	if s.TailscaleFQDN != "" {
 		return "https://" + s.TailscaleFQDN
 	}
-	// TODO: Dead code; see runtime.ConnectionInfo.TailscaleAuthURL.
-	if s.TailscaleAuthURL != "" {
-		return s.TailscaleAuthURL
-	}
 	if s.Tailscale {
 		return "true"
 	}

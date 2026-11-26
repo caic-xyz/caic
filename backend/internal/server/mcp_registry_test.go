@@ -299,7 +299,7 @@ func TestMCPRegistry(t *testing.T) {
 		backend := &mcpSourceBackend{FakeBackend: &agenttest.FakeBackend{WireFactory: claudecode.New().NewWire}, stdout: stdout, registry: executor.Wrap(s.mcpHandlers.protocol.Registry)}
 		r := &taskrun.AgentRuntime{Backends: agent.Backends{harness.Claude: backend}, LogStore: s.logStore,
 			LogPath: &entry.LogPath, Runtimes: s.serverHandlers.runtimes, Log: testlog.New(t), NotifyTaskChange: s.taskMgr.NotifyTaskChange}
-		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "self-stop"), runtime.ConnectionTarget{SSHHost: "self-stop"}, "", "", 0)
+		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "self-stop"), runtime.ConnectionTarget{SSHHost: "self-stop"}, "", 0)
 		h, err := r.StartSession(ctx, tk, agent.Prompt{})
 		if err != nil {
 			t.Fatal(err)

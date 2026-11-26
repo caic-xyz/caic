@@ -55,7 +55,7 @@ func TestLifecycle(t *testing.T) {
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "owned title"}, harness.Claude, "")
 		tk.OwnerID = user.ID
 		tk.Provider = provider
-		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "owned-title"), runtime.ConnectionTarget{SSHHost: "owned-title"}, "", "", 0)
+		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "owned-title"), runtime.ConnectionTarget{SSHHost: "owned-title"}, "", 0)
 		taskruntest.SetState(tk, task.StateWaiting)
 		entry := manager.NewEntry(tk, nil)
 		manager.Insert(tk.ID, entry)
@@ -118,7 +118,7 @@ func TestLifecycle(t *testing.T) {
 				m := newTestManager(t, Config{ServerCtx: t.Context()})
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Claude, "")
 				tk.Provider = provider
-				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "title-drain"), runtime.ConnectionTarget{SSHHost: "title-drain"}, "", "", 0)
+				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "title-drain"), runtime.ConnectionTarget{SSHHost: "title-drain"}, "", 0)
 				taskruntest.SetState(tk, task.StateRunning)
 				entry := m.NewEntry(tk, nil)
 				m.Insert(tk.ID, entry)
@@ -211,7 +211,7 @@ func TestLifecycle(t *testing.T) {
 						t.Fatal(err)
 					}
 					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "accepted"}, harness.Claude, "")
-					tk.SetRuntimeConnectionInfo(id, runtime.ConnectionTarget{SSHHost: "fixture"}, "", "", 0)
+					tk.SetRuntimeConnectionInfo(id, runtime.ConnectionTarget{SSHHost: "fixture"}, "", 0)
 					taskruntest.SetState(tk, task.StateWaiting)
 					entry := m.NewEntry(tk, nil)
 					m.Insert(tk.ID, entry)
@@ -415,7 +415,7 @@ func TestLifecycle(t *testing.T) {
 					m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: agent.Backends{harness.Codex: backend}})
 					t.Cleanup(m.cancelServerCtx)
 					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
-					tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "blocked-reconnect"), runtime.ConnectionTarget{SSHHost: "blocked-reconnect"}, "", "", 0)
+					tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "blocked-reconnect"), runtime.ConnectionTarget{SSHHost: "blocked-reconnect"}, "", 0)
 					tk.SetSessionMetadata(agent.SessionMetadata{SessionID: "saved-session"})
 					taskruntest.SetState(tk, task.StateWaiting)
 					e := m.NewEntry(tk, nil)
@@ -463,7 +463,7 @@ func TestLifecycle(t *testing.T) {
 			fake := &runtimetest.FakeBackend{}
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, fake, nil)})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, harness.Claude, "")
-			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", 0)
 			taskruntest.SetState(tk, task.StateStopped)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
@@ -507,7 +507,7 @@ func TestLifecycle(t *testing.T) {
 					}
 					m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: agent.Backends{harness.Codex: backend}})
 					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
-					tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "restore-gate"), runtime.ConnectionTarget{SSHHost: "restore-gate"}, "", "", 0)
+					tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "restore-gate"), runtime.ConnectionTarget{SSHHost: "restore-gate"}, "", 0)
 					tk.SetSessionMetadata(agent.SessionMetadata{SessionID: "saved-session"})
 					taskruntest.SetState(tk, state)
 					e := m.NewEntry(tk, nil)

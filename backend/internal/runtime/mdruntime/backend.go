@@ -30,6 +30,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	"github.com/caic-xyz/caic/backend/internal/tailscale"
 )
 
 const (
@@ -86,7 +87,7 @@ type mdContainer interface {
 	SyncDefaultBranch(ctx context.Context, repoIdx int) error
 	Stop(ctx context.Context) error
 	Purge(ctx context.Context, stdout, stderr io.Writer) error
-	Revive(ctx context.Context, stdout, stderr io.Writer) error
+	Revive(ctx context.Context, stdout, stderr io.Writer, opts *md.ReviveOpts) error
 	Fork(ctx context.Context, stdout, stderr io.Writer, opts *md.ForkOpts) (mdContainer, error)
 	SSHCommand(opts []string, cmd string) []string
 }
@@ -404,8 +405,8 @@ func (a mdContainerAdapter) Purge(ctx context.Context, stdout, stderr io.Writer)
 	return a.c.Purge(ctx, stdout, stderr)
 }
 
-func (a mdContainerAdapter) Revive(ctx context.Context, stdout, stderr io.Writer) error {
-	return a.c.Revive(ctx, stdout, stderr)
+func (a mdContainerAdapter) Revive(ctx context.Context, stdout, stderr io.Writer, opts *md.ReviveOpts) error {
+	return a.c.Revive(ctx, stdout, stderr, opts)
 }
 
 func (a mdContainerAdapter) Fork(ctx context.Context, stdout, stderr io.Writer, opts *md.ForkOpts) (mdContainer, error) {
@@ -424,6 +425,9 @@ func (a mdContainerAdapter) SSHCommand(opts []string, cmd string) []string {
 type Backend struct {
 	Provider   genai.Provider      // nil if LLM not configured
 	HarnessEnv map[string][]string // per-harness KEY=VALUE env vars from config
+	// TailscaleAPIKey returns the Tailscale API access token md mints each
+	// Tailscale-enabled instance's ephemeral auth key with; nil means none.
+	TailscaleAPIKey func() string
 
 	// Immutable.
 	log    *slog.Logger
@@ -540,11 +544,10 @@ func (b *Backend) Connect(ctx context.Context, id runtime.ID, opts *runtime.Star
 		b.log.ErrorContext(ctx, "connect failed", "ctr", name, "err", err)
 		return runtime.ConnectionInfo{}, err
 	}
-	b.log.DebugContext(ctx, "connect succeeded", "ctr", name, "fqdn", sr.TailscaleFQDN, "authurl", sr.TailscaleAuthURL)
+	b.log.DebugContext(ctx, "connect succeeded", "ctr", name, "fqdn", sr.TailscaleFQDN)
 	return runtime.ConnectionInfo{
-		AgentTarget:      runtime.ConnectionTarget{SSHHost: name},
-		TailscaleFQDN:    sr.TailscaleFQDN,
-		TailscaleAuthURL: sr.TailscaleAuthURL,
+		AgentTarget:   runtime.ConnectionTarget{SSHHost: name},
+		TailscaleFQDN: sr.TailscaleFQDN,
 	}, nil
 }
 
@@ -945,7 +948,13 @@ func (b *Backend) Revive(ctx context.Context, id runtime.ID) error {
 	}
 	b.log.DebugContext(ctx, "revive starting", "ctr", name, "repos_count", len(ctRepos))
 	b.log.DebugContext(ctx, "calling revive", "ctr", name)
-	if err = ct.Revive(ctx, &SlogWriter{Context: ctx, Logger: b.log, Phase: "revive"}, &SlogWriter{Context: ctx, Logger: b.log, Phase: "revive"}); err != nil {
+	// md uses the key only when the tailnet removed a Tailscale container's
+	// node while it was stopped, so a missing key fails only that case.
+	var reviveOpts md.ReviveOpts
+	if b.TailscaleAPIKey != nil {
+		reviveOpts.TailscaleAPIKey = b.TailscaleAPIKey()
+	}
+	if err = ct.Revive(ctx, &SlogWriter{Context: ctx, Logger: b.log, Phase: "revive"}, &SlogWriter{Context: ctx, Logger: b.log, Phase: "revive"}, &reviveOpts); err != nil {
 		b.log.ErrorContext(ctx, "revive failed", "ctr", name, "err", err)
 		return err
 	}
@@ -985,17 +994,21 @@ func (b *Backend) Fork(ctx context.Context, id runtime.ID, opts *runtime.ForkOpt
 		return "", runtime.ConnectionInfo{}, err
 	}
 	b.log.DebugContext(ctx, "building fork options", "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display, "sudo", opts.Sudo)
+	tailscaleAPIKey, err := b.tailscaleAPIKey(opts.Tailscale)
+	if err != nil {
+		return "", runtime.ConnectionInfo{}, err
+	}
 	forkRepos := make([]md.ForkRepo, len(opts.Repos))
 	for i, r := range opts.Repos {
 		forkRepos[i] = md.ForkRepo{GitRoot: r.GitRoot, SourceBranches: r.SourceBranches, ContainerPath: r.ContainerPath, DestPrimary: r.DestPrimary}
 	}
 	forkOpts := &md.ForkOpts{
-		Repos:     forkRepos,
-		Display:   opts.Display,
-		Tailscale: opts.Tailscale,
-		USB:       opts.USB,
-		Sudo:      opts.Sudo,
-		Labels:    metadataLabels(opts.Metadata),
+		Repos:           forkRepos,
+		Display:         opts.Display,
+		TailscaleAPIKey: tailscaleAPIKey,
+		USB:             opts.USB,
+		Sudo:            opts.Sudo,
+		Labels:          metadataLabels(opts.Metadata),
 		// The forked container's ~/.env is rewritten from scratch, so the target
 		// harness's config env (e.g. its API keys) must be re-injected here, as
 		// for new instances. opts.ExtraEnv stays last so caller-set vars (e.g.
@@ -1617,6 +1630,22 @@ func (b *Backend) containerMemoryLimit(ctx context.Context) (uint64, error) {
 	return limit, nil
 }
 
+// tailscaleAPIKey returns the token that enables Tailscale in md when
+// requested. md would otherwise start the instance without Tailscale.
+func (b *Backend) tailscaleAPIKey(requested bool) (string, error) {
+	if !requested {
+		return "", nil
+	}
+	key := ""
+	if b.TailscaleAPIKey != nil {
+		key = b.TailscaleAPIKey()
+	}
+	if key == "" {
+		return "", tailscale.ErrNoAPIKey
+	}
+	return key, nil
+}
+
 // mdStartOpts builds the md.StartOpts for a given harness and task options.
 func (b *Backend) mdStartOpts(c mdContainer, opts *runtime.StartOptions) (*md.StartOpts, error) {
 	image := opts.BaseImage
@@ -1624,6 +1653,10 @@ func (b *Backend) mdStartOpts(c mdContainer, opts *runtime.StartOptions) (*md.St
 		image = md.DefaultBaseImage + ":latest"
 	}
 	mounts, err := mdMounts(c, opts.Harness, opts.Mounts)
+	if err != nil {
+		return nil, err
+	}
+	tailscaleAPIKey, err := b.tailscaleAPIKey(opts.Tailscale)
 	if err != nil {
 		return nil, err
 	}
@@ -1638,18 +1671,18 @@ func (b *Backend) mdStartOpts(c mdContainer, opts *runtime.StartOptions) (*md.St
 	}
 	extraEnv = append(extraEnv, opts.ExtraEnv...)
 	return &md.StartOpts{
-		BaseImage:    image,
-		Platform:     opts.ContainerPlatform,
-		Caches:       toMDCacheMounts(opts.Caches),
-		Labels:       metadataLabels(opts.Metadata),
-		USB:          opts.USB,
-		Tailscale:    opts.Tailscale,
-		Display:      opts.Display,
-		Sudo:         opts.Sudo,
-		ExtraEnv:     extraEnv,
-		Mounts:       mounts,
-		MaxCPUs:      maxCPUsOrDefault(opts.MaxCPUs),
-		ExtraRunArgs: extraRunArgs,
+		BaseImage:       image,
+		Platform:        opts.ContainerPlatform,
+		Caches:          toMDCacheMounts(opts.Caches),
+		Labels:          metadataLabels(opts.Metadata),
+		USB:             opts.USB,
+		TailscaleAPIKey: tailscaleAPIKey,
+		Display:         opts.Display,
+		Sudo:            opts.Sudo,
+		ExtraEnv:        extraEnv,
+		Mounts:          mounts,
+		MaxCPUs:         maxCPUsOrDefault(opts.MaxCPUs),
+		ExtraRunArgs:    extraRunArgs,
 	}, nil
 }
 

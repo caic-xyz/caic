@@ -592,7 +592,7 @@ func TestAgentRuntime(t *testing.T) { //nolint:tparallel // Relay subprocess cas
 		t.Run("replaced_instance", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "")
-			tk.SetRuntimeConnectionInfo("test-runtime:new", runtime.ConnectionTarget{}, "", "", 0)
+			tk.SetRuntimeConnectionInfo("test-runtime:new", runtime.ConnectionTarget{}, "", 0)
 			r, _ := mustTaskRun(t, tk)
 			current := v3.DiffStat{{Path: "current.go", LinesAdded: 1}}
 			if _, err := r.RecordRepositorySummary(t.Context(), tk, &repo.GitSnapshot{Read: repo.NewGitRead(tk.RuntimeInstanceID()), DiffStat: current}); err != nil {
@@ -614,7 +614,7 @@ func TestAgentRuntime(t *testing.T) { //nolint:tparallel // Relay subprocess cas
 		t.Run("partial_failure_and_replay", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "")
-			tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{}, "", "", 0)
+			tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{}, "", 0)
 			r, _ := mustTaskRun(t, tk)
 			target := repo.GitTarget{InstanceID: tk.RuntimeInstanceID(), Repos: []runtime.Repo{{ContainerPath: "/one", Branch: "branch-one"}, {ContainerPath: "/two", Branch: "branch-two"}}}
 			for _, snapshot := range []repo.GitSnapshot{
@@ -652,7 +652,7 @@ func TestAgentRuntime(t *testing.T) { //nolint:tparallel // Relay subprocess cas
 		t.Run("recovery_rejects_older_failure", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "")
-			tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{}, "", "", 0)
+			tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{}, "", 0)
 			r, _ := mustTaskRun(t, tk)
 			target := repo.GitTarget{InstanceID: tk.RuntimeInstanceID(), Repos: []runtime.Repo{{ContainerPath: "/repo", Branch: "main"}}}
 			failed := repo.GitSnapshot{Read: repo.NewGitRead(target.InstanceID), Target: target, FailedRepos: []int{0}}
@@ -688,7 +688,7 @@ func TestAgentRuntime(t *testing.T) { //nolint:tparallel // Relay subprocess cas
 					t.Parallel()
 					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "")
 					tk.Repos = []repo.Mount{{Name: "repo", Branch: "main", ContainerPath: "/repo"}}
-					tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{}, "", "", 0)
+					tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{}, "", 0)
 					r, run := mustTaskRun(t, tk)
 					target := tk.GitTarget()
 					if _, err := r.RecordRepositorySummary(t.Context(), tk, &repo.GitSnapshot{Read: repo.NewGitRead(target.InstanceID), Target: target, DiffStat: v3.DiffStat{{Path: "old.go", LinesAdded: 7}}, RepoStates: []v3.RepoState{{RepoIndex: 0, Branch: "main", ChangedFiles: 1, LinesAdded: 7, Stale: kind == "result clean recovery"}}}); err != nil {
@@ -897,7 +897,7 @@ else:
 				r := newTestAgentRuntime(t, nil, filepath.Join(t.TempDir(), "logs"), agent.Backends{harness.OpenCode: opencode.New("", nil)})
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.OpenCode, "", "")
 				tk.SetSessionMetadata(agent.SessionMetadata{SessionID: "session"})
-				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "retained"), runtime.ConnectionTarget{SSHHost: "retained"}, "", "", 0)
+				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "retained"), runtime.ConnectionTarget{SSHHost: "retained"}, "", 0)
 				log, err := r.openLog(tk)
 				if err != nil {
 					t.Fatal(err)
@@ -1013,7 +1013,7 @@ else:
 						t.Parallel()
 						r := newTestAgentRuntime(t, nil, "", nil)
 						tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness, "", "")
-						tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+						tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", 0)
 						setState(tk, task.StateRunning)
 						_, err := r.Reconnect(t.Context(), tk)
 						if err == nil {
@@ -1040,7 +1040,7 @@ else:
 						if err := log.Close(); err != nil {
 							t.Fatal(err)
 						}
-						tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+						tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", 0)
 						setState(tk, state)
 						h, err := r.Reconnect(t.Context(), tk)
 						if err != nil {
@@ -1072,7 +1072,7 @@ else:
 				if err := logW.Close(); err != nil {
 					t.Fatal(err)
 				}
-				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", 0)
 				setState(tk, task.StateRunning)
 				tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 					&agent.AskMessage{
@@ -1144,7 +1144,7 @@ else:
 							if err := log.Close(); err != nil {
 								t.Fatal(err)
 							}
-							tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+							tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", 0)
 							setState(tk, task.StateWaiting)
 							ctx, cancel := context.WithCancel(context.WithoutCancel(t.Context()))
 							t.Cleanup(cancel)
@@ -1192,7 +1192,7 @@ else:
 						if err := log.Close(); err != nil {
 							t.Fatal(err)
 						}
-						tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+						tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", 0)
 						setState(tk, task.StateWaiting)
 						ctx, cancel := context.WithCancel(context.WithoutCancel(t.Context()))
 						t.Cleanup(cancel)
@@ -1229,7 +1229,7 @@ else:
 				backend := &attachCaptureBackend{FakeBackend: &agenttest.FakeBackend{}}
 				r := newTestAgentRuntime(t, nil, filepath.Join(t.TempDir(), "logs"), map[harness.Name]agent.Backend{"test": backend})
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "test", "", "")
-				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", 0)
 				setState(tk, task.StateRunning)
 
 				if _, err := r.Reconnect(t.Context(), tk); !errors.Is(err, os.ErrNotExist) {
@@ -1447,7 +1447,7 @@ else:
 				r.Runtimes = runtimes
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 				tk.Repos = []repo.Mount{{Branch: "caic-0", ContainerPath: "/repo"}}
-				tk.SetRuntimeConnectionInfo("test-runtime:ctr-1", runtime.ConnectionTarget{}, "", "", 0)
+				tk.SetRuntimeConnectionInfo("test-runtime:ctr-1", runtime.ConnectionTarget{}, "", 0)
 				setState(tk, task.StateRunning)
 				full, err := checkout.RepositoryStatuses(t.Context(), runtimes, tk.GitTarget())
 				if err != nil {
@@ -1497,7 +1497,7 @@ else:
 						r := newTestAgentRuntime(t, newTestCheckout(t, "", "/repo", backend), "", nil)
 						tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 						tk.Repos = []repo.Mount{{Branch: "caic-0", ContainerPath: "/repo"}}
-						tk.SetRuntimeConnectionInfo("test-runtime:ctr-1", runtime.ConnectionTarget{}, "", "", 0)
+						tk.SetRuntimeConnectionInfo("test-runtime:ctr-1", runtime.ConnectionTarget{}, "", 0)
 						setState(tk, task.StateRunning)
 						prior := v3.DiffStat{{Path: "prior.go", LinesAdded: 4}}
 						backend.onDiff = func() {
@@ -1505,7 +1505,7 @@ else:
 							// completed result read. A changed instance still invalidates it.
 							tk.addParsedMessage(agent.TimedMessage{Message: &agent.DiffStatMessage{DiffStat: prior}})
 							if replaced {
-								tk.SetRuntimeConnectionInfo("test-runtime:replacement", runtime.ConnectionTarget{}, "", "", 0)
+								tk.SetRuntimeConnectionInfo("test-runtime:replacement", runtime.ConnectionTarget{}, "", 0)
 							}
 						}
 						run := beginTestExecution(t, r, tk)
@@ -1554,7 +1554,7 @@ else:
 
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 				tk.Repos = []repo.Mount{{Branch: "caic-0", ContainerPath: "/home/user/src/repo"}}
-				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", 0)
 				setState(tk, task.StateRunning)
 				// Exercise delivery before AttachSession.
 				addTaskMessage(tk, agent.NewTurnCommitSnapshotMessage([]v3.RepositoryCommit{{
@@ -1635,7 +1635,7 @@ else:
 
 						tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 						tk.Repos = []repo.Mount{{Branch: "caic-0"}}
-						tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+						tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", 0)
 						setState(tk, task.StateRunning)
 						ch := newMessageCursor(t, tk)
 
@@ -1706,7 +1706,7 @@ else:
 
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 				tk.Repos = []repo.Mount{{Branch: "caic-0"}}
-				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", 0)
 				setState(tk, task.StateRunning)
 				ch := newMessageCursor(t, tk)
 
@@ -1748,7 +1748,7 @@ else:
 				newTask := func(t *testing.T) *Task {
 					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 					tk.Repos = []repo.Mount{{Branch: "caic-0"}}
-					tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+					tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", 0)
 					return tk
 				}
 
@@ -1848,7 +1848,7 @@ else:
 
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 				tk.Repos = []repo.Mount{{Branch: "caic-0"}}
-				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", 0)
 				setState(tk, task.StateRunning)
 				tk.SetTitle("Stable title")
 				tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.ResultMessage{}, &agent.ResultMessage{}}), nil)
@@ -1954,7 +1954,7 @@ else:
 					backend := &agenttest.FakeBackend{HarnessName: "test"}
 					r := newTestAgentRuntime(t, newTestCheckout(t, "", t.TempDir(), testContainer()), t.TempDir(), map[harness.Name]agent.Backend{"test": backend})
 					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "test", "", "")
-					tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "fake-instance"), runtime.ConnectionTarget{SSHHost: "fake-instance"}, "", "", 0)
+					tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "fake-instance"), runtime.ConnectionTarget{SSHHost: "fake-instance"}, "", 0)
 					tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 						&agent.ToolUseMessage{ToolUseID: "write", Name: "Write", Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"first plan"}`)},
 						&agent.ToolUseMessage{ToolUseID: "exit", Name: "ExitPlanMode"},
@@ -2001,7 +2001,7 @@ else:
 
 					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "old prompt"}, "test", "", "")
 					tk.Repos = []repo.Mount{{Name: "org/repo", Branch: "caic-0"}}
-					tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "fake-instance"), runtime.ConnectionTarget{SSHHost: "fake-instance"}, "", "", 0)
+					tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "fake-instance"), runtime.ConnectionTarget{SSHHost: "fake-instance"}, "", 0)
 					setState(tk, startState)
 
 					log, err := r.openLog(tk)
@@ -2059,7 +2059,7 @@ else:
 
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "test", "", "")
 			tk.Repos = []repo.Mount{{Name: "org/repo", Branch: "caic-0"}}
-			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "fake-instance"), runtime.ConnectionTarget{SSHHost: "fake-instance"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "fake-instance"), runtime.ConnectionTarget{SSHHost: "fake-instance"}, "", 0)
 
 			h1, err := r.StartSession(t.Context(), tk, agent.Prompt{})
 			if err != nil {
@@ -2121,7 +2121,7 @@ else:
 				r := newTestAgentRuntimeWithRuntime(t, testContainer(), agent.Backends{"test": backend}, t.TempDir())
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "test", "", "")
 				setState(tk, task.StateWaiting)
-				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "fake-instance"), runtime.ConnectionTarget{SSHHost: "fake-instance"}, "", "", 0)
+				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "fake-instance"), runtime.ConnectionTarget{SSHHost: "fake-instance"}, "", 0)
 				var completion sync.Once
 				r.NotifyTaskChange = func() {
 					if tk.GetState() == task.StateWaiting && tk.LastAgentResult() != "" {
@@ -2701,7 +2701,7 @@ else:
 			r := newTestAgentRuntime(t, checkout, "", nil)
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.Repos = []repo.Mount{{Name: "org/repo", Branch: "caic-0", GitRoot: clone}}
-			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", 0)
 			setState(tk, task.StateStopped)
 
 			r.Cleanup(t.Context(), tk)
@@ -2719,7 +2719,7 @@ else:
 			r := newTestAgentRuntime(t, checkout, "", nil)
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.Repos = []repo.Mount{{Name: "org/repo", Branch: "caic-0", GitRoot: clone}}
-			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", 0)
 			setState(tk, task.StateStopped)
 
 			r.Cleanup(t.Context(), tk)
@@ -2737,7 +2737,7 @@ else:
 			r := newTestAgentRuntime(t, checkout, "", nil)
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.Repos = []repo.Mount{{Name: "org/repo", Branch: "caic-0", GitRoot: clone}}
-			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", 0)
 			setState(tk, task.StateStopped)
 			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 				&agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: v3.DiffStat{{Path: "main.go", LinesAdded: 1}}},
@@ -2765,7 +2765,7 @@ else:
 			r := newTestAgentRuntime(t, checkout, "", nil)
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.Repos = []repo.Mount{{Name: "org/repo", Branch: "caic-0", GitRoot: clone}}
-			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", 0)
 			setState(tk, task.StateStopped)
 
 			r.Cleanup(t.Context(), tk)
@@ -2784,7 +2784,7 @@ else:
 				stub := testContainer()
 				r := newTestAgentRuntimeWithRuntime(t, stub, nil, "")
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", 0)
 				setState(tk, state)
 
 				if _, err := r.StopTask(t.Context(), tk); err != nil {
@@ -2813,7 +2813,7 @@ else:
 			backend := &retryStopBackend{fail: true}
 			r := newTestAgentRuntimeWithRuntime(t, backend, nil, "")
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "retained"}, "", "", "")
-			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "retained"), runtime.ConnectionTarget{SSHHost: "retained"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "retained"), runtime.ConnectionTarget{SSHHost: "retained"}, "", 0)
 			tk.OwnerID = owner.ID
 			r.OwnerPolicy = store
 			setState(tk, task.StateStopping)
@@ -2880,7 +2880,7 @@ else:
 			stub := testContainer()
 			r := newTestAgentRuntimeWithRuntime(t, stub, nil, "")
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", 0)
 			setState(tk, task.StateStopping)
 			beginTestExecution(t, r, tk)
 			var announced []task.State
@@ -2911,7 +2911,7 @@ else:
 			r := newTestAgentRuntimeWithRuntime(t, stub, nil, "")
 			r.Runtimes = runtimes
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", 0)
 
 			r.recordStoppedDiskUsage(t.Context(), tk, tk.RuntimeInstanceID(), logtest.Logger(t))
 
@@ -2931,7 +2931,7 @@ else:
 			r := newTestAgentRuntime(t, newTestCheckout(t, "", "/repo", stub), t.TempDir(), map[harness.Name]agent.Backend{"test": backend})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "accepted"}, "test", "", "")
 			tk.Repos = []repo.Mount{{Branch: "caic-0", ContainerPath: "/repo"}}
-			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", 0)
 			tk.SetSessionMetadata(agent.SessionMetadata{SessionID: "session-1"})
 			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 				&agent.UserInputMessage{Text: "accepted"},
@@ -2993,7 +2993,7 @@ else:
 			r := newTestAgentRuntimeWithRuntime(t, testContainer(), map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			prompt := agent.Prompt{Text: "recover this task", Images: []v3.ImageData{{MediaType: "image/png", Data: "aW1hZ2U="}}}
 			tk := mustNewTask(t, ksid.NewID(), prompt, "test", "", "")
-			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", 0)
 			setState(tk, task.StateStopped)
 
 			if _, err := r.ReviveTask(t.Context(), tk); err == nil || !strings.Contains(err.Error(), "did not accept its initial prompt") {
@@ -3008,7 +3008,7 @@ else:
 			backend := &reviveCaptureBackend{FakeBackend: &agenttest.FakeBackend{}}
 			r := newTestAgentRuntimeWithRuntime(t, testContainer(), map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "already accepted"}, "test", "", "")
-			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", 0)
 			tk.SetSessionMetadata(agent.SessionMetadata{SessionID: "session-1"})
 			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.UserInputMessage{Text: "already accepted"}}), nil)
 			setState(tk, task.StateStopped)
@@ -3070,7 +3070,7 @@ else:
 				t.Parallel()
 				r := newTestAgentRuntimeWithRuntime(t, testContainer(), nil, "")
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", 0)
 				setState(tk, task.StateRunning)
 				if _, err := r.ReviveTask(t.Context(), tk); err == nil {
 					t.Fatal("want error")
@@ -3109,7 +3109,7 @@ else:
 					logDir := t.TempDir()
 					r := newTestAgentRuntimeWithRuntime(t, tc.runtime, tc.backends, logDir)
 					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "test", "", "")
-					tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+					tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", 0)
 					tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.UserInputMessage{Text: "test"}}), nil)
 					setState(tk, task.StateStopped)
 					log, err := r.openLog(tk)
@@ -3155,7 +3155,7 @@ else:
 			backend := &reviveEnsureFailureBackend{}
 			r := newTestAgentRuntimeWithRuntime(t, testContainer(), map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "accepted"}, "test", "", "")
-			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", 0)
 			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.UserInputMessage{Text: "accepted"}}), nil)
 			tk.SetSessionMetadata(agent.SessionMetadata{SessionID: "saved-session"})
 			setState(tk, task.StateStopped)
@@ -3178,7 +3178,7 @@ else:
 			backend := &instantExitBackend{}
 			r := newTestAgentRuntimeWithRuntime(t, testContainer(), map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "test", "", "")
-			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", 0)
 			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.UserInputMessage{Text: "test"}}), nil)
 			setState(tk, task.StateStopped)
 
@@ -3210,7 +3210,7 @@ else:
 			backend := &instantExitBackend{}
 			r := newTestAgentRuntimeWithRuntime(t, testContainer(), map[harness.Name]agent.Backend{harness.Claude: backend}, t.TempDir())
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "")
-			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", 0)
 			tk.Restore(task.StateStarting, time.Time{})
 			run := beginTestExecution(t, r, tk)
 			for _, native := range []string{
@@ -3281,7 +3281,7 @@ else:
 			r := newTestAgentRuntimeWithRuntime(t, runtimeBackend, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			source := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "test", "", "")
 			source.Repos = []repo.Mount{{Name: "caic", GitRoot: "/src/caic", Branch: "caic/source"}}
-			source.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-src"), runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", "", 0)
+			source.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-src"), runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", 0)
 			fork := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "fork prompt"}, "test", "", "")
 			fork.Repos = []repo.Mount{{Name: "caic", GitRoot: "/src/caic", Branch: "caic/source"}}
 			fork.StartedAt = time.Now().UTC()
@@ -3321,7 +3321,7 @@ else:
 			r := newTestAgentRuntimeWithRuntime(t, runtimeBackend, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			source := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "test", "", "")
 			source.Repos = []repo.Mount{{Name: "caic", GitRoot: "/src/caic", Branch: "caic-3"}}
-			source.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-src"), runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", "", 0)
+			source.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-src"), runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", 0)
 			// Primary repo plus an extra repo whose branch the caller already
 			// allocated from its own checkout (a different number than primary).
 			fork := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "test", "", "")
@@ -3356,7 +3356,7 @@ else:
 			r := newTestAgentRuntimeWithRuntime(t, runtimeBackend, agent.Backends{"test": &testBackend{FakeBackend: &agenttest.FakeBackend{}}}, t.TempDir())
 			source := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "test", "", "")
 			source.Repos = []repo.Mount{{Name: "caic", GitRoot: "/src/caic", Branch: "caic/source"}}
-			source.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-src"), runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", "", 0)
+			source.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-src"), runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", 0)
 			fork := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "fork prompt"}, "test", "", "")
 			fork.Repos = []repo.Mount{{Name: "caic", GitRoot: "/src/caic", Branch: "caic/source"}}
 			fork.StartedAt = time.Now().UTC()
@@ -3384,7 +3384,7 @@ else:
 			r := newTestAgentRuntimeWithRuntime(t, runtimeBackend, map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			source := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "test", "", "")
 			source.Repos = []repo.Mount{{Name: "caic", GitRoot: "/src/caic", Branch: "caic/source"}}
-			source.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-src"), runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", "", 0)
+			source.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-src"), runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", 0)
 			fork := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "fork prompt"}, "test", "", "")
 			fork.Repos = []repo.Mount{{Name: "caic", GitRoot: "/src/caic", Branch: "caic/source"}}
 			fork.StartedAt = time.Now().UTC()
@@ -3408,7 +3408,7 @@ else:
 			r := newTestAgentRuntimeWithRuntime(t, runtimeBackend, map[harness.Name]agent.Backend{"test": &instantExitBackend{}}, t.TempDir())
 			r.RuntimeMetadata = runtime.Metadata{runtime.MetadataSmokeRun: "run-token", runtime.MetadataTaskID: "wrong"}
 			source := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "test", "", "")
-			source.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-src"), runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", "", 0)
+			source.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-src"), runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", 0)
 			fork := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "fork"}, "test", "", "")
 			fork.StartedAt = time.Now().UTC()
 			h, err := r.ForkTask(t.Context(), source, fork, &runtime.ForkOptions{}, "")
@@ -3431,7 +3431,7 @@ else:
 			backend := &testBackend{FakeBackend: &agenttest.FakeBackend{}}
 			r := newTestAgentRuntimeWithRuntime(t, testContainer(), map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			source := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "test", "", "")
-			source.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-src"), runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", "", 0)
+			source.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-src"), runtime.ConnectionTarget{SSHHost: "ctr-src"}, "", 0)
 			fork := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "fork prompt"}, "test", "", "")
 
 			h, err := r.ForkTask(t.Context(), source, fork, &runtime.ForkOptions{}, "")

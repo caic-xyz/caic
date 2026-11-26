@@ -82,7 +82,7 @@ func newTaskDiffTestRouter(t *testing.T) (*testRouter, *diffRuntimeBackend, ksid
 	registerRouterCheckout(t, s.checkouts, "repo", newRouterTestCheckout(t.TempDir()))
 	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude)
 	tk.Repos = []repo.Mount{{Name: "repo", Branch: "caic-1", ContainerPath: "/workspace/repo"}}
-	tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{SSHHost: "ctr"}, "", "", 0)
+	tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{SSHHost: "ctr"}, "", 0)
 	insertTestTask(s, tk.ID, tk)
 	recordRouterTaskLog(t, s, tk)
 	return s, backend, tk.ID

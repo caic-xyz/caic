@@ -68,7 +68,7 @@ func TestTaskListEventsReplayPurgeTransitions(t *testing.T) {
 	s := newTestRouter(t, nil)
 	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude)
 	tk.Repos = []repo.Mount{{Name: "r"}}
-	tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+	tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", 0)
 	taskruntest.SetState(tk, task.StateWaiting)
 	registerRouterCheckout(t, s.taskMgr.Checkouts, "r", newRouterTestCheckout(t.TempDir()))
 	insertTestTask(s, tk.ID, tk)

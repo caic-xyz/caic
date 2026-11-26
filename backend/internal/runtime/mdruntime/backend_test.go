@@ -32,6 +32,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/logtest"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	"github.com/caic-xyz/caic/backend/internal/tailscale"
 	"github.com/caic-xyz/caic/internal/testlog"
 	"github.com/caic-xyz/caic/metrics"
 )
@@ -62,6 +63,7 @@ type fakeMDContainer struct {
 	fetchOpts    *md.FetchOpts
 	fetchResults [][]md.FetchedBranch
 	forkOpts     *md.ForkOpts
+	reviveOpts   *md.ReviveOpts
 }
 
 func (f *fakeMDContainer) Name() string     { return f.name }
@@ -136,8 +138,9 @@ func (f *fakeMDContainer) Purge(_ context.Context, _, _ io.Writer) error {
 	return nil
 }
 
-func (f *fakeMDContainer) Revive(_ context.Context, _, _ io.Writer) error {
+func (f *fakeMDContainer) Revive(_ context.Context, _, _ io.Writer, opts *md.ReviveOpts) error {
 	f.calls = append(f.calls, "Revive")
+	f.reviveOpts = opts
 	return nil
 }
 
@@ -1256,6 +1259,56 @@ func TestBackend(t *testing.T) {
 		if !slices.Equal(src.forkOpts.ExtraRunArgs, wantRunArgs) {
 			t.Errorf("Fork ExtraRunArgs = %v, want %v", src.forkOpts.ExtraRunArgs, wantRunArgs)
 		}
+	})
+
+	t.Run("TailscaleAPIKey", func(t *testing.T) {
+		t.Parallel()
+		t.Run("requested without a token", func(t *testing.T) {
+			t.Parallel()
+			src := &fakeMDContainer{forkResult: &fakeMDContainer{name: "fork-1"}}
+			b := newTestBackend(t, &fakeMDClient{getResult: src})
+			b.TailscaleAPIKey = func() string { return "" }
+			if _, err := b.mdStartOpts(&fakeMDContainer{}, &runtime.StartOptions{Harness: harness.Claude, Tailscale: true}); !errors.Is(err, tailscale.ErrNoAPIKey) {
+				t.Errorf("mdStartOpts error = %v, want ErrNoAPIKey", err)
+			}
+			if _, _, err := b.Fork(t.Context(), "docker:src", &runtime.ForkOptions{Harness: harness.Claude, Tailscale: true}); !errors.Is(err, tailscale.ErrNoAPIKey) {
+				t.Errorf("Fork error = %v, want ErrNoAPIKey", err)
+			}
+		})
+		for _, enabled := range []bool{false, true} {
+			want := ""
+			if enabled {
+				want = "tskey-api-k-s"
+			}
+			src := &fakeMDContainer{forkResult: &fakeMDContainer{name: "fork-1"}}
+			b := newTestBackend(t, &fakeMDClient{getResult: src})
+			b.TailscaleAPIKey = func() string { return "tskey-api-k-s" }
+			opts, err := b.mdStartOpts(&fakeMDContainer{}, &runtime.StartOptions{Harness: harness.Claude, Tailscale: enabled})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if opts.TailscaleAPIKey != want {
+				t.Errorf("enabled=%v: StartOpts.TailscaleAPIKey = %q, want %q", enabled, opts.TailscaleAPIKey, want)
+			}
+			if _, _, err := b.Fork(t.Context(), "docker:src", &runtime.ForkOptions{Harness: harness.Claude, Tailscale: enabled}); err != nil {
+				t.Fatal(err)
+			}
+			if src.forkOpts.TailscaleAPIKey != want {
+				t.Errorf("enabled=%v: ForkOpts.TailscaleAPIKey = %q, want %q", enabled, src.forkOpts.TailscaleAPIKey, want)
+			}
+		}
+		t.Run("revive", func(t *testing.T) {
+			t.Parallel()
+			ctr := &fakeMDContainer{name: "ctr-1"}
+			b := newTestBackend(t, &fakeMDClient{getResult: ctr})
+			b.TailscaleAPIKey = func() string { return "tskey-api-k-s" }
+			if err := b.Revive(t.Context(), "docker:ctr-1"); err != nil {
+				t.Fatal(err)
+			}
+			if ctr.reviveOpts == nil || ctr.reviveOpts.TailscaleAPIKey != "tskey-api-k-s" {
+				t.Errorf("ReviveOpts = %+v, want the current API key", ctr.reviveOpts)
+			}
+		})
 	})
 
 	t.Run("Fork extraEnv", func(t *testing.T) {

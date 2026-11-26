@@ -26,15 +26,14 @@ func (t redirectTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 }
 
 // stubAPIKey routes the token's lookups to handler and counts them.
-func stubAPIKey(t *testing.T, secret string, handler http.HandlerFunc) (*APIKey, *atomic.Int32) {
+func stubAPIKey(t *testing.T, secret string, handler http.HandlerFunc) (*apiKey, *atomic.Int32) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		handler(w, r)
 	}))
 	t.Cleanup(server.Close)
-	k := NewAPIKey(t.Context(), testlog.New(t), secret)
-	k.client.Transport = redirectTransport{server.URL}
+	k := newAPIKey(testlog.New(t), &http.Client{Transport: redirectTransport{server.URL}}, secret)
 	return k, &calls
 }
 
@@ -46,8 +45,8 @@ func expiresIn(d time.Duration) http.HandlerFunc {
 
 func TestNewAPIKey(t *testing.T) {
 	t.Parallel()
-	if k := NewAPIKey(t.Context(), testlog.New(t), ""); k != nil {
-		t.Fatalf("NewAPIKey(\"\") = %v, want nil", k)
+	if k := newAPIKey(testlog.New(t), http.DefaultClient, ""); k != nil {
+		t.Fatalf("newAPIKey(\"\") = %v, want nil", k)
 	}
 }
 

@@ -968,7 +968,7 @@ func prepareSmokeImage(t *testing.T, log *slog.Logger, fx serverFixture, xdgDir 
 		}()
 	}
 	t.Setenv("XDG_CONFIG_HOME", xdgDir)
-	client, err := mdruntime.New(ctx, log, "", "", "")
+	client, err := mdruntime.New(ctx, log, "", "")
 	if err != nil {
 		t.Fatalf("init smoke image client: %v", err)
 	}

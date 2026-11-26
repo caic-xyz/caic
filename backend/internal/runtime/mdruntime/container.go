@@ -28,7 +28,7 @@ func AvailableRuntimeNames() []string {
 
 // New creates an md.Client for the md runtime adapter.
 // runtimeName selects the container runtime ("docker" or "podman"); empty means auto-detect.
-func New(ctx context.Context, log *slog.Logger, tailscaleAPIKey, githubToken, runtimeName string) (*md.Client, error) {
+func New(ctx context.Context, log *slog.Logger, githubToken, runtimeName string) (*md.Client, error) {
 	if log == nil {
 		return nil, errors.New("logger is required")
 	}
@@ -45,7 +45,6 @@ func New(ctx context.Context, log *slog.Logger, tailscaleAPIKey, githubToken, ru
 	if err != nil {
 		return nil, err
 	}
-	c.TailscaleAPIKey = tailscaleAPIKey
 	c.GithubToken = githubToken
 	c.ControlMaster = true
 	return c, nil
@@ -64,7 +63,7 @@ func InstancesFromMD(ctx context.Context, mdContainers []*md.Container) []runtim
 			State:         c.State,
 			Repos:         fromMDRepos(c.Repos),
 			Tailscale:     c.Tailscale,
-			TailscaleFQDN: c.TailscaleFQDN(ctx),
+			TailscaleFQDN: c.TailscaleNode(ctx).FQDN,
 			USB:           c.USB,
 			Display:       c.Display,
 			Sudo:          c.Sudo,

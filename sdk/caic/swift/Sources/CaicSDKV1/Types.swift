@@ -740,6 +740,28 @@ public struct SyncTarget: Codable, Equatable, Hashable {
     }
 }
 
+public struct TailscaleKeySource: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let TailscaleKeyConfig = TailscaleKeySource("config")
+    public static let TailscaleKeyNone = TailscaleKeySource("none")
+    public static let TailscaleKeySaved = TailscaleKeySource("saved")
+
+    public static func other(_ value: String) -> TailscaleKeySource { TailscaleKeySource(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
 public struct TaskBackgroundItemKind: Codable, Equatable, Hashable {
     public let value: String
 
@@ -1525,6 +1547,44 @@ public struct HarnessInfo: Codable {
 public struct RefreshHarnessReq: Codable {
 
     public init() {
+    }
+}
+
+/// TailscaleKeyResp describes the active Tailscale API access token without
+/// revealing it.
+public struct TailscaleKeyResp: Codable {
+    public let source: TailscaleKeySource
+    /// KeyID is the token's ID in the Tailscale admin console; empty when
+    /// Source is none or the token is malformed.
+    public let keyID: String?
+    /// ExpiresAt is zero when the token never expires or its expiry is unknown.
+    public let expiresAt: ISOTimestamp?
+    /// AvailableUntil is when new tasks stop being able to enable Tailscale,
+    /// ahead of ExpiresAt. Zero when Error is set or the token never expires.
+    public let availableUntil: ISOTimestamp?
+    /// Error is why new tasks cannot enable Tailscale now; empty when they can.
+    public let error: String?
+    /// ConfigKeyID identifies the configured token that removing a saved token
+    /// falls back to; empty when none is configured.
+    public let configKeyID: String?
+
+    public init(source: TailscaleKeySource, keyID: String? = nil, expiresAt: ISOTimestamp? = nil, availableUntil: ISOTimestamp? = nil, error: String? = nil, configKeyID: String? = nil) {
+        self.source = source
+        self.keyID = keyID
+        self.expiresAt = expiresAt
+        self.availableUntil = availableUntil
+        self.error = error
+        self.configKeyID = configKeyID
+    }
+}
+
+/// SetTailscaleKeyReq is the request for POST /api/caic/v1/server/tailscale-key.
+public struct SetTailscaleKeyReq: Codable {
+    /// tskey-api-<keyID>-<secret>
+    public let apiKey: String
+
+    public init(apiKey: String) {
+        self.apiKey = apiKey
     }
 }
 

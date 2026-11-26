@@ -1,9 +1,10 @@
-// SettingsForm presents autosaved harness compaction, container, storage, automation, and server settings.
+// SettingsForm presents autosaved harness compaction, container, storage, automation, and server settings, and the Tailscale token.
 
 import { useSearchParams } from "@solidjs/router";
 import {
   createEffect,
   createMemo,
+  createSignal,
   createUniqueId,
   For,
   Match,
@@ -26,6 +27,7 @@ import type {
   Platform,
   RuntimeInfo,
   RuntimeSettings,
+  TailscaleKeyResp,
   UpdatePreferencesReq,
   VersionResp,
   WellKnownCachesResp,
@@ -42,6 +44,8 @@ import ActionButton from "./ActionButton";
 import SettingsMappings, { containerSortPath } from "./SettingsMappings";
 
 import { formatDuration, parseDuration } from "../duration";
+import { formatTime } from "../formatting";
+import { createTailscaleKey, formatRemaining, TAILSCALE_KEYS_URL } from "../tailscaleKey";
 import { harnessLabel } from "../harnessLabels";
 
 import styles from "./SettingsForm.module.css";
@@ -94,6 +98,7 @@ interface SettingsFormProps {
   checkForUpdate: () => Promise<void>;
   triggerServerUpdate: () => Promise<void>;
   refreshAvailableModels: (harness: Harness) => Promise<void>;
+  applyTailscaleKey: (status: TailscaleKeyResp) => void;
 }
 
 export default function SettingsForm(props: SettingsFormProps) {
@@ -108,6 +113,17 @@ export default function SettingsForm(props: SettingsFormProps) {
     props.markSettingsDraft(false);
   });
   onCleanup(() => props.markSettingsDraft(false));
+  const tailscale = createTailscaleKey((status) => props.applyTailscaleKey(status));
+  createEffect(() => {
+    if (section() === "server") void tailscale.load();
+  });
+  const [tailscaleDraft, setTailscaleDraft] = createSignal("");
+  const tailscaleSummary = (st: TailscaleKeyResp): string => {
+    const origin = st.source === "saved" ? "saved here" : "from TAILSCALE_API_KEY";
+    if (st.error) return `${origin}.`;
+    if (!st.expiresAt) return `${origin}, never expires.`;
+    return `${origin}, expires ${formatRemaining(Date.parse(st.expiresAt), Date.now())} (${formatTime(st.expiresAt)}).`;
+  };
   const saveLabel = () =>
     props.settingsError()
       ? "Settings not saved"
@@ -514,6 +530,104 @@ export default function SettingsForm(props: SettingsFormProps) {
                 void props.saveSettings({ customMounts });
               }}
             />
+          </section>
+        </Show>
+        <Show when={section() === "server" && (tailscale.status() || tailscale.loadError())}>
+          <section class={styles.settingsSection} aria-labelledby="settings-tailscale">
+            <h3 id="settings-tailscale" class={styles.settingsSectionTitle}>
+              Tailscale
+            </h3>
+            <Show
+              when={tailscale.status()}
+              fallback={
+                <p class={`${styles.settingsDescription} ${styles.settingsDescriptionError}`}>
+                  {tailscale.loadError()}
+                </p>
+              }
+            >
+              {(st) => (
+                <>
+                  <p class={styles.settingsDescription} data-testid="tailscale-key-status">
+                    <Switch>
+                      <Match when={st().source === "none"}>No API access token; new tasks cannot use Tailscale.</Match>
+                      <Match when={st().source !== "none"}>
+                        <Show when={st().keyID} fallback="Unrecognized token">
+                          {(id) => (
+                            <>
+                              Key <code>{id()}</code>
+                            </>
+                          )}
+                        </Show>{" "}
+                        {tailscaleSummary(st())}
+                      </Match>
+                    </Switch>
+                  </p>
+                  <Show when={st().source !== "none" && st().error}>
+                    <p class={`${styles.settingsDescription} ${styles.settingsDescriptionError}`}>{st().error}</p>
+                  </Show>
+                  <form
+                    class={styles.tailscaleForm}
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void tailscale.save(tailscaleDraft()).then((saved) => {
+                        if (saved) setTailscaleDraft("");
+                      });
+                    }}
+                  >
+                    <label class={styles.settingsLabel}>
+                      {st().source === "none" ? "API access token" : "New token"}
+                      <input
+                        type="password"
+                        class={styles.settingsInput}
+                        autocomplete="off"
+                        spellcheck={false}
+                        placeholder="tskey-api-…"
+                        value={tailscaleDraft()}
+                        onInput={(e) => {
+                          setTailscaleDraft(e.currentTarget.value);
+                          tailscale.clearActionError();
+                        }}
+                      />
+                    </label>
+                    <div class={styles.buttonRow}>
+                      <Button
+                        type="submit"
+                        disabled={!tailscaleDraft().trim() || tailscale.pending() === "remove"}
+                        loading={tailscale.pending() === "save"}
+                      >
+                        {tailscale.pending() === "save" ? "Verifying…" : "Save"}
+                      </Button>
+                      <Show when={st().source === "saved"}>
+                        <Button
+                          type="button"
+                          variant="gray"
+                          disabled={tailscale.pending() === "save"}
+                          loading={tailscale.pending() === "remove"}
+                          onClick={() => {
+                            void tailscale.remove();
+                          }}
+                        >
+                          {st().configKeyID ? `Use configured key ${st().configKeyID}` : "Remove token"}
+                        </Button>
+                      </Show>
+                      <a
+                        class={styles.tailscaleCreate}
+                        href={TAILSCALE_KEYS_URL}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Create a token
+                      </a>
+                    </div>
+                  </form>
+                  <Show when={tailscale.actionError()}>
+                    <p class={`${styles.settingsDescription} ${styles.settingsDescriptionError}`} role="alert">
+                      {tailscale.actionError()}
+                    </p>
+                  </Show>
+                </>
+              )}
+            </Show>
           </section>
         </Show>
         <Show when={section() === "server" && props.mcpOAuthAvailable()}>

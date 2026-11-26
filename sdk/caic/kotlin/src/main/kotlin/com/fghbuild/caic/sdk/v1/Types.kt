@@ -1308,6 +1308,39 @@ object SyncTargetSerializer : KSerializer<SyncTarget> {
     }
 }
 
+@Serializable(with = TailscaleKeySourceSerializer::class)
+sealed interface TailscaleKeySource {
+    val value: String
+    @Serializable
+    data object TailscaleKeyConfig : TailscaleKeySource {
+        override val value = "config"
+    }
+    @Serializable
+    data object TailscaleKeyNone : TailscaleKeySource {
+        override val value = "none"
+    }
+    @Serializable
+    data object TailscaleKeySaved : TailscaleKeySource {
+        override val value = "saved"
+    }
+    @Serializable
+    data class Other(override val value: String) : TailscaleKeySource
+}
+
+object TailscaleKeySourceSerializer : KSerializer<TailscaleKeySource> {
+    override val descriptor = PrimitiveSerialDescriptor("TailscaleKeySource", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: TailscaleKeySource) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): TailscaleKeySource {
+        val v = decoder.decodeString()
+        return when (v) {
+            "config" -> TailscaleKeySource.TailscaleKeyConfig
+            "none" -> TailscaleKeySource.TailscaleKeyNone
+            "saved" -> TailscaleKeySource.TailscaleKeySaved
+            else -> TailscaleKeySource.Other(v)
+        }
+    }
+}
+
 @Serializable(with = TaskBackgroundItemKindSerializer::class)
 sealed interface TaskBackgroundItemKind {
     val value: String
@@ -1828,6 +1861,41 @@ data class HarnessInfo(
 /** RefreshHarnessReq is the request for POST /api/caic/v1/server/harnesses/{harness}/refresh. */
 @Serializable
 class RefreshHarnessReq
+
+/**
+ * TailscaleKeyResp describes the active Tailscale API access token without
+ * revealing it.
+ */
+@Serializable
+data class TailscaleKeyResp(
+    val source: TailscaleKeySource,
+    /**
+     * KeyID is the token's ID in the Tailscale admin console; empty when
+     * Source is none or the token is malformed.
+     */
+    @SerialName("keyID") @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val keyID: String? = null,
+    /** ExpiresAt is zero when the token never expires or its expiry is unknown. */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val expiresAt: Instant? = null,
+    /**
+     * AvailableUntil is when new tasks stop being able to enable Tailscale,
+     * ahead of ExpiresAt. Zero when Error is set or the token never expires.
+     */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val availableUntil: Instant? = null,
+    /** Error is why new tasks cannot enable Tailscale now; empty when they can. */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val error: String? = null,
+    /**
+     * ConfigKeyID identifies the configured token that removing a saved token
+     * falls back to; empty when none is configured.
+     */
+    @SerialName("configKeyID") @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val configKeyID: String? = null,
+)
+
+/** SetTailscaleKeyReq is the request for POST /api/caic/v1/server/tailscale-key. */
+@Serializable
+data class SetTailscaleKeyReq(
+    /** tskey-api-<keyID>-<secret> */
+    val apiKey: String,
+)
 
 /** ImageRefreshReq identifies the runtime whose specialized image is refreshed. */
 @Serializable

@@ -520,7 +520,7 @@ func newGatedInputSession(t *testing.T, tk *taskrun.Task, wireFactory func() age
 		Log:              testlog.New(t),
 		NotifyTaskChange: func() {},
 	}
-	tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "fixture"), runtime.ConnectionTarget{SSHHost: "fixture"}, "", "", 0)
+	tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "fixture"), runtime.ConnectionTarget{SSHHost: "fixture"}, "", 0)
 	h, err := r.StartSession(ctx, tk, agent.Prompt{})
 	if err != nil {
 		t.Fatal(err)

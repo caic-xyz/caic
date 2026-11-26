@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -18,17 +19,95 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/tailscale"
 	"github.com/caic-xyz/caic/internal/testlog"
 	"github.com/gomodedev/gomode/autoupdate"
+	"github.com/maruel/ksid"
 )
 
 func TestServerHandlers(t *testing.T) {
 	t.Parallel()
+	t.Run("tailscale_key", func(t *testing.T) {
+		t.Parallel()
+		store, err := auth.Open(filepath.Join(t.TempDir(), "users.json"), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		admin, err := store.UpsertUser(&auth.User{Provider: auth.ProviderGitHub, ProviderID: "admin"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.SetRole(admin.ID, auth.RoleAdmin); err != nil {
+			t.Fatal(err)
+		}
+		admin, _ = store.ActiveUser(admin.ID)
+		member, err := store.UpsertUser(&auth.User{Provider: auth.ProviderGitHub, ProviderID: "member"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// A session issued while the member was an administrator.
+		demoted := member
+		demoted.Role = auth.RoleAdmin
+		h := &serverHandlers{tailscale: newTestTailscale(t), authStore: store}
+		t.Run("valid", func(t *testing.T) {
+			t.Parallel()
+			for name, ctx := range map[string]context.Context{
+				"local operator": auth.NewLocalContext(t.Context()),
+				"administrator":  auth.NewContext(t.Context(), &admin),
+			} {
+				t.Run(name, func(t *testing.T) {
+					t.Parallel()
+					got, err := h.getTailscaleKey(ctx, &api.EmptyReq{})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if got.Source != v1.TailscaleKeyNone || got.KeyID != "" || got.Error == "" {
+						t.Fatalf("getTailscaleKey() = %+v, want no token and its reason", got)
+					}
+				})
+			}
+		})
+		t.Run("error", func(t *testing.T) {
+			t.Parallel()
+			for name, ctx := range map[string]context.Context{
+				"anonymous":        t.Context(),
+				"member":           auth.NewContext(t.Context(), &member),
+				"demoted session":  auth.NewContext(t.Context(), &demoted),
+				"task of an admin": newMCPPrincipalContext(auth.NewContext(t.Context(), &admin), &mcpPrincipal{TaskID: ksid.NewID()}),
+			} {
+				t.Run(name, func(t *testing.T) {
+					t.Parallel()
+					var apiErr *api.Error
+					if _, err := h.getTailscaleKey(ctx, &api.EmptyReq{}); !errors.As(err, &apiErr) || apiErr.Status != http.StatusForbidden {
+						t.Errorf("getTailscaleKey() error = %v, want forbidden", err)
+					}
+					if _, err := h.setTailscaleKey(ctx, &v1.SetTailscaleKeyReq{APIKey: "tskey-api-k-s"}); !errors.As(err, &apiErr) || apiErr.Status != http.StatusForbidden { //nolint:gosec // G101: fake token
+						t.Errorf("setTailscaleKey() error = %v, want forbidden", err)
+					}
+					if _, err := h.removeTailscaleKey(ctx, &api.EmptyReq{}); !errors.As(err, &apiErr) || apiErr.Status != http.StatusForbidden {
+						t.Errorf("removeTailscaleKey() error = %v, want forbidden", err)
+					}
+				})
+			}
+			t.Run("malformed token", func(t *testing.T) {
+				t.Parallel()
+				ctx := auth.NewLocalContext(t.Context())
+				var apiErr *api.Error
+				if _, err := h.setTailscaleKey(ctx, &v1.SetTailscaleKeyReq{APIKey: "tskey-auth-k-s"}); !errors.As(err, &apiErr) || apiErr.Status != http.StatusBadRequest { //nolint:gosec // G101: fake token
+					t.Fatalf("setTailscaleKey() error = %v, want bad request", err)
+				}
+				if got, err := h.getTailscaleKey(ctx, &api.EmptyReq{}); err != nil || got.Source != v1.TailscaleKeyNone {
+					t.Fatalf("getTailscaleKey() = %+v, %v, want the token unchanged", got, err)
+				}
+			})
+		})
+	})
 	t.Run("image_refresh_requires_available_runtime", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
@@ -398,6 +477,19 @@ func TestServerAPIV1EnumParity(t *testing.T) {
 		for _, agentHarness := range []harness.Name{harness.Claude, harness.Codex, harness.Dsh, harness.OpenCode, harness.Pi} {
 			if _, ok := got[agentHarness]; !ok {
 				t.Errorf("agent harness %q is missing from the v1 API", agentHarness)
+			}
+		}
+	})
+
+	t.Run("tailscale key sources", func(t *testing.T) {
+		t.Parallel()
+		for dto, src := range map[v1.TailscaleKeySource]tailscale.Source{
+			v1.TailscaleKeyConfig: tailscale.SourceConfig,
+			v1.TailscaleKeyNone:   tailscale.SourceNone,
+			v1.TailscaleKeySaved:  tailscale.SourceSaved,
+		} {
+			if string(dto) != string(src) {
+				t.Errorf("DTO source %q does not match tailscale source %q", dto, src)
 			}
 		}
 	})

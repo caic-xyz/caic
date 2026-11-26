@@ -151,18 +151,20 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		repoCh <- repoDiscoveryResult{paths, err}
 		return nil
 	})
-	tailscaleKey := tailscale.NewAPIKey(ctx, appLog.With("cmp", "tailscale"), cfg.Runtime.TailscaleAPIKey)
-	if tailscaleKey != nil {
-		// Read the token's expiry while startup continues; it logs the outcome.
-		discovery.Go(func() error {
-			_, _ = tailscaleKey.Until(discoveryCtx)
-			return nil
-		})
-	}
-	settings, err := loadSettings(appLog, filepath.Join(cfg.Dirs.ConfigDir, "settings.json"))
+	settingsPath := filepath.Join(cfg.Dirs.ConfigDir, "settings.json")
+	settings, err := loadSettings(appLog, settingsPath)
 	if err != nil {
 		return nil, fmt.Errorf("load settings: %w", err)
 	}
+	tailscaleCred := tailscale.NewCredential(ctx, appLog.With("cmp", "tailscale"), &tailscaleKeyStore{path: settingsPath, s: *settings}, settings.TailscaleAPIKey, cfg.Runtime.TailscaleAPIKey)
+	for i := range mdRuntimes {
+		mdRuntimes[i].backend.TailscaleAPIKey = tailscaleCred.APIKey
+	}
+	// Read the token's expiry while startup continues; it logs the outcome.
+	discovery.Go(func() error {
+		_, _ = tailscaleCred.Until(discoveryCtx)
+		return nil
+	})
 	sessionSecret, err := hex.DecodeString(settings.SessionSecret)
 	if err != nil {
 		return nil, fmt.Errorf("decode session secret: %w", err)
@@ -382,7 +384,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		Checkouts:                  checkoutRegistry,
 		CheckoutRoot:               absRoot,
 		RepoStatus:                 repoStatus,
-		Tailscale:                  tailscaleKey,
+		Tailscale:                  tailscaleCred,
 		Preferences:                prefsStore,
 		AuthStore:                  authStore,
 		SessionSecret:              sessionSecret,
@@ -724,7 +726,7 @@ func initRuntimeSystem(ctx context.Context, log *slog.Logger, cfg *server.Config
 	var mdRuntimes []mdRuntime
 	var runtimes []runtime.System
 	for _, name := range mdruntime.AvailableRuntimeNames() {
-		mdClient, err := mdruntime.New(ctx, log, cfg.Runtime.TailscaleAPIKey, cfg.GitHub.Token, name)
+		mdClient, err := mdruntime.New(ctx, log, cfg.GitHub.Token, name)
 		if err != nil {
 			return nil, nil, fmt.Errorf("init %s md runtime adapter: %w", name, err)
 		}

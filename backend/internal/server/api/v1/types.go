@@ -135,6 +135,50 @@ const (
 	ImageRefreshFailed    ImageRefreshState = "failed"
 )
 
+// TailscaleKeySource identifies where the active Tailscale API access token
+// comes from.
+type TailscaleKeySource string
+
+// Tailscale API access token sources. A saved token takes precedence over a
+// configured one.
+const (
+	TailscaleKeyConfig TailscaleKeySource = "config" // TAILSCALE_API_KEY from config.toml or the environment
+	TailscaleKeyNone   TailscaleKeySource = "none"
+	TailscaleKeySaved  TailscaleKeySource = "saved" // saved by an administrator
+)
+
+// TailscaleKeyResp describes the active Tailscale API access token without
+// revealing it.
+type TailscaleKeyResp struct {
+	Source TailscaleKeySource `json:"source"`
+	// KeyID is the token's ID in the Tailscale admin console; empty when
+	// Source is none or the token is malformed.
+	KeyID string `json:"keyID,omitempty"`
+	// ExpiresAt is zero when the token never expires or its expiry is unknown.
+	ExpiresAt time.Time `json:"expiresAt,omitzero"`
+	// AvailableUntil is when new tasks stop being able to enable Tailscale,
+	// ahead of ExpiresAt. Zero when Error is set or the token never expires.
+	AvailableUntil time.Time `json:"availableUntil,omitzero"`
+	// Error is why new tasks cannot enable Tailscale now; empty when they can.
+	Error string `json:"error,omitempty"`
+	// ConfigKeyID identifies the configured token that removing a saved token
+	// falls back to; empty when none is configured.
+	ConfigKeyID string `json:"configKeyID,omitempty"`
+}
+
+// SetTailscaleKeyReq is the request for POST /api/caic/v1/server/tailscale-key.
+type SetTailscaleKeyReq struct {
+	APIKey string `json:"apiKey"` // tskey-api-<keyID>-<secret>
+}
+
+// Validate checks that the token is present.
+func (r *SetTailscaleKeyReq) Validate() error {
+	if strings.TrimSpace(r.APIKey) == "" {
+		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "apiKey is required"}
+	}
+	return nil
+}
+
 // Model describes the configuration choices supported by a harness model.
 type Model struct {
 	ID            string   `json:"id"`

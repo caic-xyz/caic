@@ -63,6 +63,7 @@ export default function SettingsPage() {
         checkForUpdate={s.checkForUpdate}
         triggerServerUpdate={s.triggerServerUpdate}
         refreshAvailableModels={s.refreshAvailableModels}
+        applyTailscaleKey={s.applyTailscaleKey}
       />
     </Layout>
   );

@@ -1,4 +1,4 @@
-// Tests for historical startup settings persistence and secret preservation.
+// Tests for historical startup settings persistence, secret preservation, and the saved Tailscale API access token.
 
 package app
 
@@ -55,5 +55,29 @@ func TestSettingsPersistence(t *testing.T) {
 	}
 	if *again != *s {
 		t.Fatal("secrets changed on reload")
+	}
+}
+
+func TestTailscaleKeyStore(t *testing.T) {
+	t.Parallel()
+	p := filepath.Join(t.TempDir(), "settings.json")
+	s, err := loadSettings(slog.Default(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &tailscaleKeyStore{path: p, s: *s}
+	for _, secret := range []string{"tskey-api-k-s", ""} {
+		if err := store.SaveTailscaleAPIKey(secret); err != nil {
+			t.Fatal(err)
+		}
+		got, err := loadSettings(slog.Default(), p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := *s
+		want.TailscaleAPIKey = secret
+		if *got != want {
+			t.Fatalf("settings after saving %q = %#v, want %#v", secret, got, want)
+		}
 	}
 }

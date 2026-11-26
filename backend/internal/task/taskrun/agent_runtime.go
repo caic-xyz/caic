@@ -233,7 +233,7 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 	if err != nil {
 		return nil, r.finishStartupFailure(ctx, t, run, &StartupError{Harness: t.Harness, Phase: "runtime setup", Err: err})
 	}
-	t.SetRuntimeConnectionInfo(sr.InstanceID, sr.AgentTarget, sr.TailscaleFQDN, sr.TailscaleAuthURL, r.Runtimes.VNCPort(ctx, sr.InstanceID))
+	t.SetRuntimeConnectionInfo(sr.InstanceID, sr.AgentTarget, sr.TailscaleFQDN, r.Runtimes.VNCPort(ctx, sr.InstanceID))
 	if err := r.recordCommitBaseline(ctx, records, sr.InstanceID); err != nil {
 		return nil, r.finishStartupFailure(ctx, t, run, err)
 	}
@@ -655,7 +655,7 @@ func (r *AgentRuntime) ForkTask(ctx context.Context, source, fork *Task, forkOpt
 		return nil, r.finishStartupFailure(ctx, fork, run, fmt.Errorf("fork instance: %w", err))
 	}
 	tlog.Debug("checkout", "msg", "instance.Fork succeeded", "source", sourceInstanceID, "fork", forkName)
-	fork.SetRuntimeConnectionInfo(forkName, forkConn.AgentTarget, "", "", r.Runtimes.VNCPort(ctx, forkName))
+	fork.SetRuntimeConnectionInfo(forkName, forkConn.AgentTarget, "", r.Runtimes.VNCPort(ctx, forkName))
 	// Branch names need no sync from the fork result: the runtime is contracted
 	// to create DestPrimary verbatim, so the reserved names set before the log
 	// opened remain authoritative, matching the launch path.
@@ -968,7 +968,7 @@ func (r *AgentRuntime) setup(ctx context.Context, t *Task, metadata runtime.Meta
 	r.Log.Debug("checkout", "msg", "instance.Launch succeeded", "instance", instanceID)
 	// The task owns the instance as soon as launch succeeds so every later
 	// setup failure can purge it, including failures before Connect returns.
-	t.SetRuntimeConnectionInfo(instanceID, runtime.ConnectionTarget{}, "", "", 0)
+	t.SetRuntimeConnectionInfo(instanceID, runtime.ConnectionTarget{}, "", 0)
 	if err := provisioningLog.Flush(); err != nil {
 		return setupResult{}, err
 	}
@@ -984,10 +984,9 @@ func (r *AgentRuntime) setup(ctx context.Context, t *Task, metadata runtime.Meta
 	}
 	r.Log.Info("checkout", "msg", "started", "br", primaryBranch, "dur", time.Since(tContainer), "instance", instanceID, "fqdn", conn.TailscaleFQDN)
 	return setupResult{
-		InstanceID:       instanceID,
-		AgentTarget:      conn.AgentTarget,
-		TailscaleFQDN:    conn.TailscaleFQDN,
-		TailscaleAuthURL: conn.TailscaleAuthURL,
+		InstanceID:    instanceID,
+		AgentTarget:   conn.AgentTarget,
+		TailscaleFQDN: conn.TailscaleFQDN,
 	}, nil
 }
 
@@ -1057,7 +1056,7 @@ func (r *AgentRuntime) purgeFailedStartupInstance(ctx context.Context, t *Task) 
 	if err != nil {
 		tlog.WarnContext(ctx, "purge failed startup instance", "err", err)
 	} else {
-		t.SetRuntimeConnectionInfo("", runtime.ConnectionTarget{}, "", "", 0)
+		t.SetRuntimeConnectionInfo("", runtime.ConnectionTarget{}, "", 0)
 	}
 	return err
 }
@@ -1344,10 +1343,9 @@ const (
 // setupResult holds the outputs of setup: the instance name and optional Tailscale FQDN.
 // The primary branch is written into the task repo metadata during setup.
 type setupResult struct {
-	InstanceID       runtime.ID
-	AgentTarget      runtime.ConnectionTarget
-	TailscaleFQDN    string
-	TailscaleAuthURL string
+	InstanceID    runtime.ID
+	AgentTarget   runtime.ConnectionTarget
+	TailscaleFQDN string
 }
 
 // provisioningWriter is an io.Writer that converts line-by-line output from the

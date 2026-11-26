@@ -514,6 +514,7 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 		CacheSizes:                 NewCacheSizeStore(testlog.New(t)),
 		Metrics:                    metrics.NewStore(metrics.Resource{ServiceName: "caic"}),
 		UsageRollup:                newTestUsageRollup(t),
+		Tailscale:                  newTestTailscale(t),
 		AuthStore:                  store,
 		SessionSecret:              []byte("0123456789abcdef0123456789abcdef"),
 		HostPolicy:                 newTestHostPolicy(t, "https://caic.example.com"),

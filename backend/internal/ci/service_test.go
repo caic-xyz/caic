@@ -339,7 +339,7 @@ func ownedCIEntryWithPolicy(t *testing.T, policy func(*auth.Store) task.OwnerPol
 	if err := system.Revive(t.Context(), id); err != nil {
 		t.Fatal(err)
 	}
-	tk.SetRuntimeConnectionInfo(id, runtime.ConnectionTarget{SSHHost: tk.ID.String()}, "", "", 0)
+	tk.SetRuntimeConnectionInfo(id, runtime.ConnectionTarget{SSHHost: tk.ID.String()}, "", 0)
 	taskruntest.SetState(tk, task.StateWaiting)
 	entry := manager.NewEntry(tk, nil)
 	journal, path, err := logs.Open(tk.LogFilename(), tk.LogHeader())

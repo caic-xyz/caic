@@ -2449,7 +2449,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	t.VNCPort = c.VNCPort
 	t.Provider = m.provider
 	t.ForgeIssue = forgeIssue
-	t.SetRuntimeConnectionInfo(c.ID, c.AgentTarget, c.TailscaleFQDN, "", c.VNCPort)
+	t.SetRuntimeConnectionInfo(c.ID, c.AgentTarget, c.TailscaleFQDN, c.VNCPort)
 	// Restore GitHub token flag from log trailer (primary) or runtime metadata (fallback).
 	gtLabel, _ := m.Runtimes.Metadata(ctx, c.ID, runtime.MetadataGitHubToken)
 	if lt.GitHubToken || gtLabel == "true" {

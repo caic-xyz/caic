@@ -135,6 +135,9 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (_ *Router, retE
 	if d.UsageRollup == nil {
 		return nil, errors.New("usage rollup is required")
 	}
+	if d.Tailscale == nil {
+		return nil, errors.New("tailscale credential is required")
+	}
 	log = log.With("cmp", "server")
 	if d.VoiceGateway.Mode == VoiceGatewayModeExternal {
 		switch {
@@ -664,7 +667,7 @@ type Dependencies struct {
 	Checkouts                  *repo.Registry
 	CheckoutRoot               string
 	RepoStatus                 *ci.RepoStatusStore
-	Tailscale                  *tailscale.APIKey // nil without TAILSCALE_API_KEY
+	Tailscale                  *tailscale.Credential
 	Preferences                *preferences.Store
 	AuthStore                  *auth.Store
 	SessionSecret              []byte

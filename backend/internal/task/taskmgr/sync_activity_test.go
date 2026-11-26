@@ -268,7 +268,7 @@ func newSyncTestEntry(t *testing.T, backend func(dir string, fetched []runtime.F
 	registerCheckout(t, m.Checkouts, "repo", checkout)
 	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 	tk.Repos = []repo.Mount{{Name: "repo", GitRoot: dir, ContainerPath: "~/src/repo", Branch: "caic-0"}}
-	tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{}, "", "", 0)
+	tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{}, "", 0)
 	taskruntest.SetState(tk, task.StateWaiting)
 	e := m.NewEntry(tk, nil)
 	m.Insert(tk.ID, e)

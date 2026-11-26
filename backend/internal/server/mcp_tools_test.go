@@ -1794,7 +1794,7 @@ func TestMCPTools(t *testing.T) {
 				s := newMCPTaskCreateTestRouter(t)
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "source"}, harness.Claude)
 				tk.Repos = []repo.Mount{{Name: "myrepo", Branch: "main"}}
-				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "source"), runtime.ConnectionTarget{}, "", "", 0)
+				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "source"), runtime.ConnectionTarget{}, "", 0)
 				taskruntest.SetState(tk, task.StateWaiting)
 				insertTestTask(s, tk.ID, tk)
 				c := &mcpTools{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
@@ -1822,7 +1822,7 @@ func TestMCPTools(t *testing.T) {
 		s := newMCPTaskCreateTestRouter(t)
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "source"}, harness.Claude)
 		tk.Repos = []repo.Mount{{Name: "myrepo", Branch: "main"}}
-		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "source"), runtime.ConnectionTarget{}, "", "", 0)
+		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "source"), runtime.ConnectionTarget{}, "", 0)
 		taskruntest.SetState(tk, task.StateWaiting)
 		insertTestTask(s, tk.ID, tk)
 		c := &mcpTools{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
@@ -1848,7 +1848,7 @@ func TestMCPTools(t *testing.T) {
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "source"}, harness.Claude)
 		tk.RequestedModel = "retired-model"
 		tk.Repos = []repo.Mount{{Name: "myrepo", Branch: "main"}}
-		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "source"), runtime.ConnectionTarget{}, "", "", 0)
+		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "source"), runtime.ConnectionTarget{}, "", 0)
 		taskruntest.SetState(tk, task.StateWaiting)
 		insertTestTask(s, tk.ID, tk)
 		c := &mcpTools{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
@@ -1874,7 +1874,7 @@ func TestMCPTools(t *testing.T) {
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "source"}, harness.Claude)
 		tk.RequestedModel = "claude-default"
 		tk.Repos = []repo.Mount{{Name: "myrepo", Branch: "main"}}
-		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "source"), runtime.ConnectionTarget{}, "", "", 0)
+		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "source"), runtime.ConnectionTarget{}, "", 0)
 		taskruntest.SetState(tk, task.StateWaiting)
 		insertTestTask(s, tk.ID, tk)
 		c := &mcpTools{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}

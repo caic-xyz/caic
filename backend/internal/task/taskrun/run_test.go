@@ -225,7 +225,7 @@ func TestRun(t *testing.T) {
 				r := newTestAgentRuntime(t, newTestCheckout(t, "", "/repo", backend), "", nil)
 				tk := mustNewTask(t, id, agent.Prompt{Text: "test"}, harness.Claude, "", "")
 				tk.Repos = []repo.Mount{{Branch: "caic-0", ContainerPath: "/repo"}}
-				tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{}, "", "", 0)
+				tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{}, "", 0)
 				setState(tk, task.StateRunning)
 				run := beginTestExecution(t, r, tk)
 				result := make(chan error, 1)
@@ -288,7 +288,7 @@ func TestRun(t *testing.T) {
 		backend := &replacingTaskBackend{FakeBackend: &agenttest.FakeBackend{WireFactory: claudecode.New().NewWire}, closing: make(chan struct{}), release: make(chan struct{}), abort: make(chan struct{})}
 		r := newTestAgentRuntime(t, nil, "", agent.Backends{harness.Claude: backend})
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "")
-		tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{}, "", "", 0)
+		tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{}, "", 0)
 		setState(tk, task.StateWaiting)
 		var workers sync.WaitGroup
 		t.Cleanup(func() {

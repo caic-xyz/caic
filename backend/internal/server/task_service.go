@@ -81,7 +81,7 @@ type taskService struct {
 	authStore *auth.Store
 	fakeCI    FakeCIHook
 	runtimes  *runtime.Router
-	tailscale *tailscale.APIKey
+	tailscale *tailscale.Credential
 	metrics   metrics.Recorder
 	history   *taskHistory
 
@@ -626,10 +626,6 @@ func taskInfoTailscaleURL(s *taskrun.Snapshot) string {
 	if s.TailscaleFQDN != "" {
 		return "https://" + s.TailscaleFQDN
 	}
-	// TODO: Dead code; see runtime.ConnectionInfo.TailscaleAuthURL.
-	if s.TailscaleAuthURL != "" {
-		return s.TailscaleAuthURL
-	}
 	if s.Tailscale {
 		return "true"
 	}
@@ -648,7 +644,7 @@ func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq, ima
 		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "task-scoped MCP is unavailable"}
 	}
 	if req.Tailscale {
-		if _, err := tailscaleUntil(ctx, s.tailscale); err != nil {
+		if _, err := s.tailscale.Until(ctx); err != nil {
 			return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: err.Error()}
 		}
 	}
@@ -1008,7 +1004,7 @@ func (s *taskService) forkTask(ctx context.Context, entry *taskmgr.Entry, req *v
 		ts = *req.Tailscale
 	}
 	if ts {
-		if _, err := tailscaleUntil(ctx, s.tailscale); err != nil {
+		if _, err := s.tailscale.Until(ctx); err != nil {
 			return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: err.Error()}
 		}
 	}
@@ -1569,16 +1565,6 @@ func taskFileError(err error) error {
 	}
 }
 
-// tailscaleUntil reports when new tasks stop being able to enable Tailscale,
-// or why they cannot now. Tailscale requires an API access token so that
-// instances join with a pre-authorized key instead of browser authentication.
-func tailscaleUntil(ctx context.Context, k *tailscale.APIKey) (time.Time, error) {
-	if k == nil {
-		return time.Time{}, tailscale.ErrNoAPIKey
-	}
-	return k.Until(ctx)
-}
-
 // inheritedTailscale resolves Tailscale for a delegated child. Task-scoped
 // callers cannot override inherited settings, so the child drops Tailscale
 // when it is unavailable instead of failing the delegation.
@@ -1586,6 +1572,6 @@ func (s *taskService) inheritedTailscale(ctx context.Context, source bool) bool 
 	if !source {
 		return false
 	}
-	_, err := tailscaleUntil(ctx, s.tailscale)
+	_, err := s.tailscale.Until(ctx)
 	return err == nil
 }

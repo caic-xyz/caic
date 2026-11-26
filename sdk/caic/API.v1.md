@@ -19,6 +19,9 @@ Type notation: `JSONValue` means any valid JSON value.
 | POST | `/api/caic/v1/server/preferences` | Updates server settings and preferences. | `UpdatePreferencesReq` | `PreferencesResp` |
 | GET | `/api/caic/v1/server/harnesses` | Lists available coding agent harnesses. |  | `HarnessInfo[] \| null` |
 | POST | `/api/caic/v1/server/harnesses/{harness}/refresh` | Refreshes one coding agent model inventory, bypassing its cache. | `RefreshHarnessReq` | `HarnessInfo` |
+| GET | `/api/caic/v1/server/tailscale-key` | Describes the active Tailscale API access token without revealing it. Requires administrator authority. |  | `TailscaleKeyResp` |
+| POST | `/api/caic/v1/server/tailscale-key` | Verifies a Tailscale API access token with Tailscale and saves it in place of the configured one. Requires administrator authority. | `SetTailscaleKeyReq` | `TailscaleKeyResp` |
+| POST | `/api/caic/v1/server/tailscale-key/remove` | Removes the saved Tailscale API access token, falling back to the configured one. Requires administrator authority. |  | `TailscaleKeyResp` |
 | POST | `/api/caic/v1/server/runtimes/{runtime}/image/refresh` | Rebuilds one runtime's specialized image and updates its installed coding agents. | `ImageRefreshReq` | `ImageRefreshStatus` |
 | GET | `/api/caic/v1/server/runtimes/{runtime}/image/refresh` | Returns one runtime's specialized image refresh progress. |  | `ImageRefreshStatus` |
 | GET | `/api/caic/v1/server/caches` | Lists well-known cache configurations. |  | `WellKnownCachesResp` |
@@ -493,6 +496,17 @@ SyncTarget selects where to push changes.
 | `branch` | Push to the task's own branch (default). |
 | `default` | Push existing commits to the repo's default branch. |
 
+### TailscaleKeySource
+
+TailscaleKeySource identifies where the active Tailscale API access token
+comes from.
+
+| Value | Description |
+|-------|-------------|
+| `config` | TAILSCALE_API_KEY from config.toml or the environment |
+| `none` |  |
+| `saved` | saved by an administrator |
+
 ### TaskBackgroundItemKind
 
 TaskBackgroundItemKind identifies the kind of running background work.
@@ -868,6 +882,28 @@ RefreshHarnessReq is the request for POST /api/caic/v1/server/harnesses/{harness
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
+
+### TailscaleKeyResp
+
+TailscaleKeyResp describes the active Tailscale API access token without
+revealing it.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `source` | `TailscaleKeySource` |  | yes |
+| `keyID` | `string` | KeyID is the token's ID in the Tailscale admin console; empty when Source is none or the token is malformed. |  |
+| `expiresAt` | `ISOTimestamp` | ExpiresAt is zero when the token never expires or its expiry is unknown. |  |
+| `availableUntil` | `ISOTimestamp` | AvailableUntil is when new tasks stop being able to enable Tailscale, ahead of ExpiresAt. Zero when Error is set or the token never expires. |  |
+| `error` | `string` | Error is why new tasks cannot enable Tailscale now; empty when they can. |  |
+| `configKeyID` | `string` | ConfigKeyID identifies the configured token that removing a saved token falls back to; empty when none is configured. |  |
+
+### SetTailscaleKeyReq
+
+SetTailscaleKeyReq is the request for POST /api/caic/v1/server/tailscale-key.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `apiKey` | `string` | tskey-api-<keyID>-<secret> | yes |
 
 ### ImageRefreshReq
 

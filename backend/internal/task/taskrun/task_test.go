@@ -1220,7 +1220,7 @@ func TestTask(t *testing.T) {
 			func(i int) { tk.SetRepoBranch(1, "extra-"+strconv.Itoa(i)) },
 			func(i int) {
 				id := runtime.ID("ctr-" + strconv.Itoa(i))
-				tk.SetRuntimeConnectionInfo(id, runtime.ConnectionTarget{SSHHost: string(id)}, "host.example", "https://auth.example", 5900+i)
+				tk.SetRuntimeConnectionInfo(id, runtime.ConnectionTarget{SSHHost: string(id)}, "host.example", 5900+i)
 			},
 			func(i int) { tk.SetVNCPort(6000 + i) },
 			func(i int) { tk.SetRelayOffset(int64(i)) },
@@ -2104,7 +2104,7 @@ func TestTask(t *testing.T) {
 				t.Fatalf("DiffStat = %+v, want empty (relay reported no uncommitted changes)", got)
 			}
 			// Adoption records the branch diff from a fresh host snapshot.
-			tk.SetRuntimeConnectionInfo("test-runtime:adopted", runtime.ConnectionTarget{}, "", "", 0)
+			tk.SetRuntimeConnectionInfo("test-runtime:adopted", runtime.ConnectionTarget{}, "", 0)
 			r, _ := mustTaskRun(t, tk)
 			if _, err := r.RecordRepositorySummary(t.Context(), tk, &repo.GitSnapshot{
 				Read:     repo.NewGitRead(tk.RuntimeInstanceID()),

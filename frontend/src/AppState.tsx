@@ -41,6 +41,7 @@ import type {
   Warning as ServerWarning,
   WarningCategory,
   WarningDetail,
+  TailscaleKeyResp,
 } from "@sdk/types.gen";
 
 import { observeNetworkChanges } from "@gomodedev/gomode/web/NetworkChanges";
@@ -57,6 +58,7 @@ import { taskPath, taskIdFromPath, taskPathForTask } from "./taskPath";
 import { antigravityConversationTranscriptPath, taskViewURL } from "./runtimePath";
 import { evictTaskDiff, invalidateTaskDiff, taskDiffCache } from "./diffCache";
 import { api } from "./api";
+import { availableUntilMs } from "./tailscaleKey";
 import { ImageDraftOwner, type DraftImage } from "./images";
 import { harnessLabel } from "./harnessLabels";
 
@@ -427,13 +429,7 @@ function createAppStore() {
     if (firstRuntime && !availableRuntimes.some((rt) => rt.name === selectedRuntimeName())) {
       setSelectedRuntimeName(firstRuntime.name);
     }
-    setTailscaleAvailableUntil(
-      !config.tailscaleAvailable
-        ? null
-        : config.tailscaleAvailableUntil
-          ? Date.parse(config.tailscaleAvailableUntil)
-          : Number.POSITIVE_INFINITY,
-    );
+    setTailscaleAvailableUntil(availableUntilMs(config.tailscaleAvailable, config.tailscaleAvailableUntil));
     setUSBAvailable(config.usbAvailable);
     setDisplayAvailable(config.displayAvailable);
     setSudoAvailable(config.sudoAvailable);
@@ -759,6 +755,9 @@ function createAppStore() {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     onCleanup(() => clearInterval(timer));
   }
+  // An administrator replaced or removed the server's Tailscale API access token.
+  const applyTailscaleKey = (status: TailscaleKeyResp) =>
+    setTailscaleAvailableUntil(availableUntilMs(!status.error, status.availableUntil));
   // The server's Tailscale API access token can expire while the page is open.
   const tailscaleAvailable = createMemo(() => {
     const until = tailscaleAvailableUntil();
@@ -1883,6 +1882,7 @@ function createAppStore() {
     submitTask,
     // capability toggles
     tailscaleAvailable,
+    applyTailscaleKey,
     tailscaleEnabled,
     setTailscaleEnabled,
     usbAvailable,

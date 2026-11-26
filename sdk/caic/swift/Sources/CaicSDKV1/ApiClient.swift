@@ -413,6 +413,18 @@ public final class ApiClient {
     public func refreshHarness(harness: String, req: RefreshHarnessReq) async throws -> HarnessInfo {
         try await request("POST", path: "/api/caic/v1/server/harnesses/\(harness)/refresh", body: try encoder.encode(req))
     }
+    /// Describes the active Tailscale API access token without revealing it. Requires administrator authority.
+    public func getTailscaleKey() async throws -> TailscaleKeyResp {
+        try await request("GET", path: "/api/caic/v1/server/tailscale-key")
+    }
+    /// Verifies a Tailscale API access token with Tailscale and saves it in place of the configured one. Requires administrator authority.
+    public func setTailscaleKey(req: SetTailscaleKeyReq) async throws -> TailscaleKeyResp {
+        try await request("POST", path: "/api/caic/v1/server/tailscale-key", body: try encoder.encode(req))
+    }
+    /// Removes the saved Tailscale API access token, falling back to the configured one. Requires administrator authority.
+    public func removeTailscaleKey() async throws -> TailscaleKeyResp {
+        try await request("POST", path: "/api/caic/v1/server/tailscale-key/remove")
+    }
     /// Rebuilds one runtime's specialized image and updates its installed coding agents.
     public func startImageRefresh(runtime: String, req: ImageRefreshReq) async throws -> ImageRefreshStatus {
         try await request("POST", path: "/api/caic/v1/server/runtimes/\(runtime)/image/refresh", body: try encoder.encode(req))

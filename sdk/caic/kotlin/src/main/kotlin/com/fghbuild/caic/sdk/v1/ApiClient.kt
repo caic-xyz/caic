@@ -122,6 +122,12 @@ class ApiClient(
     suspend fun listHarnesses(): List<HarnessInfo>? = request("GET", "/api/caic/v1/server/harnesses")
     /** Refreshes one coding agent model inventory, bypassing its cache. */
     suspend fun refreshHarness(harness: String, req: RefreshHarnessReq): HarnessInfo = request("POST", "/api/caic/v1/server/harnesses/$harness/refresh", json.encodeToString(req))
+    /** Describes the active Tailscale API access token without revealing it. Requires administrator authority. */
+    suspend fun getTailscaleKey(): TailscaleKeyResp = request("GET", "/api/caic/v1/server/tailscale-key")
+    /** Verifies a Tailscale API access token with Tailscale and saves it in place of the configured one. Requires administrator authority. */
+    suspend fun setTailscaleKey(req: SetTailscaleKeyReq): TailscaleKeyResp = request("POST", "/api/caic/v1/server/tailscale-key", json.encodeToString(req))
+    /** Removes the saved Tailscale API access token, falling back to the configured one. Requires administrator authority. */
+    suspend fun removeTailscaleKey(): TailscaleKeyResp = request("POST", "/api/caic/v1/server/tailscale-key/remove")
     /** Rebuilds one runtime's specialized image and updates its installed coding agents. */
     suspend fun startImageRefresh(runtime: String, req: ImageRefreshReq): ImageRefreshStatus = request("POST", "/api/caic/v1/server/runtimes/$runtime/image/refresh", json.encodeToString(req))
     /** Returns one runtime's specialized image refresh progress. */

@@ -32,9 +32,6 @@
 # Environment variables added to those inherited by the server process. Each key
 # falls back to the host environment when omitted here.
 [core.env]
-# Tailscale API key: required for Tailscale ephemeral node.
-# Obtain from https://login.tailscale.com/admin/settings/keys
-# TAILSCALE_API_KEY = "tskey-..."
 # Gemini API key for title generation when provider is "gemini".
 # Obtain from https://aistudio.google.com/app/apikey
 # GEMINI_API_KEY = "AIza..."
@@ -47,6 +44,8 @@
 # username, email address, or caic account ID. The matching account may sign in
 # later; signing in first never grants authority. Restart after changing this.
 # The application cannot change this role or disable this account.
+# Get a GitHub account ID with:
+#   curl -s https://api.github.com/users/<login> | jq .id
 #super_admin = ""  # e.g. "github:123456"
 
 # HTTP listen address for the web UI. Defaults to localhost only; prefix with

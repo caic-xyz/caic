@@ -48,7 +48,7 @@ type serverHandlers struct {
 	serverCtx         context.Context
 	workers           *backgroundWorkers
 	runtimes          *caicruntime.Router
-	tailscale         *tailscale.APIKey
+	tailscale         *tailscale.Credential
 	forgeMgr          *forgemgr.Manager
 	prefs             *preferences.Store
 	checkouts         *repo.Registry
@@ -86,7 +86,7 @@ func (h *serverHandlers) getConfig(ctx context.Context, _ *api.EmptyReq) (*v1.Co
 		GitHubAppEnabled:     h.forgeMgr.GitHubApp() != nil,
 		MCPOAuthAvailable:    h.mcpOAuthAvailable,
 	}
-	if until, err := tailscaleUntil(ctx, h.tailscale); err == nil {
+	if until, err := h.tailscale.Until(ctx); err == nil {
 		cfg.TailscaleAvailable = true
 		cfg.TailscaleAvailableUntil = until
 	}
@@ -773,6 +773,67 @@ func repoDTO(log *slog.Logger, checkout *repo.Checkout, repoStatus *ci.RepoStatu
 	return dto
 }
 
+func (h *serverHandlers) getTailscaleKey(ctx context.Context, _ *api.EmptyReq) (*v1.TailscaleKeyResp, error) {
+	if err := h.authorizeAdmin(ctx); err != nil {
+		return nil, err
+	}
+	return h.tailscaleKey(ctx), nil
+}
+
+func (h *serverHandlers) setTailscaleKey(ctx context.Context, req *v1.SetTailscaleKeyReq) (*v1.TailscaleKeyResp, error) {
+	if err := h.authorizeAdmin(ctx); err != nil {
+		return nil, err
+	}
+	if err := h.tailscale.Save(ctx, strings.TrimSpace(req.APIKey)); err != nil {
+		if errors.Is(err, tailscale.ErrUnusableKey) {
+			return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: err.Error()}
+		}
+		return nil, err
+	}
+	return h.tailscaleKey(ctx), nil
+}
+
+func (h *serverHandlers) removeTailscaleKey(ctx context.Context, _ *api.EmptyReq) (*v1.TailscaleKeyResp, error) {
+	if err := h.authorizeAdmin(ctx); err != nil {
+		return nil, err
+	}
+	if err := h.tailscale.Remove(ctx); err != nil {
+		return nil, err
+	}
+	return h.tailscaleKey(ctx), nil
+}
+
+func (h *serverHandlers) tailscaleKey(ctx context.Context) *v1.TailscaleKeyResp {
+	st := h.tailscale.Status(ctx)
+	resp := &v1.TailscaleKeyResp{
+		Source:         v1.TailscaleKeySource(st.Source),
+		KeyID:          st.KeyID,
+		ExpiresAt:      st.Expiry,
+		AvailableUntil: st.Until,
+		ConfigKeyID:    st.ConfigKeyID,
+	}
+	if st.Err != nil {
+		resp.Error = st.Err.Error()
+	}
+	return resp
+}
+
+// authorizeAdmin admits the auth-free local operator and a user who is an
+// active administrator now, not merely when the session was issued.
+func (h *serverHandlers) authorizeAdmin(ctx context.Context) error {
+	p := requestPrincipalFromContext(ctx)
+	if p.kind == principalLocal {
+		return nil
+	}
+	if p.kind == principalUser && h.authStore != nil {
+		current, active := h.authStore.ActiveUser(p.user.ID)
+		if active && current.AccountEpoch == p.user.AccountEpoch && current.Role.IsAdmin() {
+			return nil
+		}
+	}
+	return &api.Error{Status: http.StatusForbidden, Code: api.CodeForbidden, Message: "administrator authority required"}
+}
+
 // routes returns the handler for server configuration, preferences, and repo
 // endpoints. Patterns are relative to the /api/caic/v1 version prefix, stripped
 // at mount time. config and version are also registered publicly on the root
@@ -785,6 +846,9 @@ func (h *serverHandlers) routes() http.Handler {
 	m.HandleFunc("POST /server/preferences", handle(h.updatePreferences))
 	m.HandleFunc("GET /server/harnesses", handle(h.listHarnesses))
 	m.HandleFunc("POST /server/harnesses/{harness}/refresh", handle(h.refreshHarness))
+	m.HandleFunc("GET /server/tailscale-key", handle(h.getTailscaleKey))
+	m.HandleFunc("POST /server/tailscale-key", handle(h.setTailscaleKey))
+	m.HandleFunc("POST /server/tailscale-key/remove", handle(h.removeTailscaleKey))
 	m.HandleFunc("POST /server/runtimes/{runtime}/image/refresh", handle(h.startImageRefresh))
 	m.HandleFunc("GET /server/runtimes/{runtime}/image/refresh", handle(h.getImageRefresh))
 	m.HandleFunc("GET /server/caches", handle(h.listCaches))

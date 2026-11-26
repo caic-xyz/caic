@@ -398,3 +398,12 @@
   white-space: nowrap;
   clip-path: inset(50%);
 }
+
+.tailscaleForm {
+  margin-top: 0.75rem;
+}
+
+.tailscaleCreate {
+  align-self: center;
+  font-size: 0.9rem;
+}

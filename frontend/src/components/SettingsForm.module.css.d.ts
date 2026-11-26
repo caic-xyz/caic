@@ -36,5 +36,7 @@ declare const classes: {
   readonly "settingsSection": string;
   readonly "settingsSectionTitle": string;
   readonly "shortField": string;
+  readonly "tailscaleCreate": string;
+  readonly "tailscaleForm": string;
 };
 export default classes;

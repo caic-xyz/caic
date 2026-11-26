@@ -112,13 +112,12 @@ type Task struct {
 	// Mutable task metadata. These fields are populated at construction, setup, or
 	// import. After a task is published in the Manager registry, access them
 	// through Task methods so readers and async lifecycle goroutines synchronize.
-	Repos            []repo.Mount // index 0 = primary; empty = no-repo
-	TailscaleFQDN    string       // Tailscale FQDN assigned to the instance (empty if not available).
-	TailscaleAuthURL string       // Tailscale browser auth URL when no pre-auth key was available. TODO: Dead code; see runtime.ConnectionInfo.TailscaleAuthURL.
-	RelayOffset      int64        // Committed relay output bytes in the current generation, for reconnect.
-	SudoPassword     string       // Random sudo password; empty if sudo is not enabled.
-	VNCPort          int          // VNC WebSocket port inside the instance (0 = no VNC). Set during launch.
-	GitHubToken      bool         // Inject GitHub token into the instance's environment.
+	Repos         []repo.Mount // index 0 = primary; empty = no-repo
+	TailscaleFQDN string       // Tailscale FQDN assigned to the instance (empty if not available).
+	RelayOffset   int64        // Committed relay output bytes in the current generation, for reconnect.
+	SudoPassword  string       // Random sudo password; empty if sudo is not enabled.
+	VNCPort       int          // VNC WebSocket port inside the instance (0 = no VNC). Set during launch.
+	GitHubToken   bool         // Inject GitHub token into the instance's environment.
 
 	inputMu sync.Mutex // Serializes follow-up delivery attempts.
 
@@ -304,7 +303,7 @@ func (t *Task) RuntimeConnectionTarget() runtime.ConnectionTarget {
 }
 
 // SetRuntimeConnectionInfo records runtime instance metadata and agent connection details.
-func (t *Task) SetRuntimeConnectionInfo(id runtime.ID, target runtime.ConnectionTarget, tailscaleFQDN, tailscaleAuthURL string, vncPort int) {
+func (t *Task) SetRuntimeConnectionInfo(id runtime.ID, target runtime.ConnectionTarget, tailscaleFQDN string, vncPort int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.runtimeInstanceID != id {
@@ -313,7 +312,6 @@ func (t *Task) SetRuntimeConnectionInfo(id runtime.ID, target runtime.Connection
 	t.runtimeInstanceID = id
 	t.runtimeConnection = target
 	t.TailscaleFQDN = tailscaleFQDN
-	t.TailscaleAuthURL = tailscaleAuthURL
 	t.VNCPort = vncPort
 }
 
@@ -695,7 +693,6 @@ type Snapshot struct {
 	RuntimeInstanceID  runtime.ID
 	Tailscale          bool
 	TailscaleFQDN      string
-	TailscaleAuthURL   string
 	USB                bool
 	Display            bool
 	Sudo               bool
@@ -1596,7 +1593,6 @@ func (t *Task) snapshotLocked() Snapshot {
 		RuntimeInstanceID:  t.runtimeInstanceID,
 		Tailscale:          t.Tailscale,
 		TailscaleFQDN:      t.TailscaleFQDN,
-		TailscaleAuthURL:   t.TailscaleAuthURL,
 		USB:                t.USB,
 		Display:            t.Display,
 		Sudo:               t.Sudo,
