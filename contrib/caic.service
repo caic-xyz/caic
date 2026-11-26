@@ -26,6 +26,9 @@ Environment=CONTAINER_HOST=unix://%t/podman/podman.sock
 EnvironmentFile=-%h/.config/systemd/user/caic.env
 # caic imports PATH and SSH_AUTH_SOCK from the user's shell by default.
 # Set core.shell_env=false to use only the service environment.
+# On Debian and Ubuntu releases that ship this socket path, uncomment if
+# SSH_AUTH_SOCK is missing from the service environment.
+# Environment=SSH_AUTH_SOCK=%t/openssh_agent
 Restart=always
 RestartSec=1s
 
@@ -37,13 +40,9 @@ OOMScoreAdjust=100
 
 # --- Security Hardening ---
 
-# Filesystem isolation
-# Caic stores state and manages repositories under the configurable home-rooted workspace.
-ProtectSystem=strict
-ReadWritePaths=%h
-PrivateTmp=true
-ProtectControlGroups=true
-ProtectKernelTunables=true
+# Keep filesystem namespacing off in this user unit. It implicitly enables UID
+# mapping, which makes OpenSSH reject root-owned host configuration fragments.
+# Process visibility
 ProtectProc=invisible
 ProcSubset=pid
 
