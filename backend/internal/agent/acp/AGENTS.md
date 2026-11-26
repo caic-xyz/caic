@@ -30,6 +30,12 @@ the turn's `usage_update` measured the summarization request, so the context
 meter stays unknown until the next usage report. A cancelled, refused, or
 failed response emits none.
 
+A harness may also compact on its own, as agy does, with no ACP notification.
+When a `usage_update` reports `used` below a quarter of the previous report's
+since the session or the last boundary started, both parsers emit a
+`compact_boundary` before that UsageMessage, with both sizes. A smaller drop
+goes undetected.
+
 ACP streams text and thought as chunks without a message identity. Shared ACP
 buffers a run of consecutive chunks of one kind until any other message or
 input ends it, then emits the run's final TextMessage or ThinkingMessage right

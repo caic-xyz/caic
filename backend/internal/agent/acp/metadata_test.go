@@ -272,6 +272,83 @@ func TestMetadataParser(t *testing.T) {
 			})
 		}
 	})
+	t.Run("InferredCompactionBoundary", func(t *testing.T) {
+		t.Parallel()
+		const (
+			prompt    = `{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"s","prompt":[{"type":"text","text":"hi"}]}}`
+			compact   = `{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"s","prompt":[{"type":"text","text":"/compact"}]}}`
+			completed = `{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}`
+			resume    = `{"jsonrpc":"2.0","id":4,"method":"session/load","params":{"sessionId":"s","cwd":"/w"}}`
+			resumed   = `{"jsonrpc":"2.0","id":4,"result":{"models":{"currentModelId":"m"}}}`
+		)
+		used := func(n string) string {
+			return `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"usage_update","used":` + n + `,"size":1048576}}}`
+		}
+		type record struct {
+			input bool
+			line  string
+		}
+		for _, tc := range []struct {
+			name    string
+			records []record
+			// want lists each boundary's reported sizes; zero is unreported.
+			want   [][2]int64
+			tokens int
+		}{
+			// Minimized from a task log where agy auto-compacted mid-turn.
+			{"auto", []record{{true, prompt}, {false, used("525589")}, {false, used("24906")}, {false, used("42810")}}, [][2]int64{{525589, 24906}}, 42810},
+			{"repeated", []record{{true, prompt}, {false, used("525589")}, {false, used("24906")}, {false, used("529054")}, {false, used("23134")}}, [][2]int64{{525589, 24906}, {529054, 23134}}, 23134},
+			{"shallow drop", []record{{true, prompt}, {false, used("525589")}, {false, used("131398")}}, nil, 131398},
+			{"first report", []record{{true, prompt}, {false, used("0")}}, nil, 0},
+			// The explicit boundary already discarded the context it measured.
+			{"after explicit", []record{{true, compact}, {false, used("525589")}, {false, completed}, {true, prompt}, {false, used("9134")}}, [][2]int64{{0, 0}}, 9134},
+			{"after session load", []record{{true, prompt}, {false, used("525589")}, {false, completed}, {true, resume}, {false, resumed}, {true, prompt}, {false, used("9134")}}, nil, 9134},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				for name, parser := range map[string]agent.MessageParser{"full": testBackend().NewWire(), "metadata": testBackend().NewMetadataParser()} {
+					t.Run(name, func(t *testing.T) {
+						t.Parallel()
+						var meter agent.ContextMeter
+						var got [][2]int64
+						var boundary bool
+						for _, r := range tc.records {
+							parse := parser.ParseOutput
+							if r.input {
+								parse = parser.ParseInput
+							}
+							msgs, err := parse([]byte(r.line))
+							if err != nil {
+								t.Fatal(err)
+							}
+							for _, m := range msgs {
+								meter.Observe(m, "s")
+								if boundary {
+									// A boundary precedes the report or result that settles it.
+									switch m.(type) {
+									case *agent.UsageMessage, *agent.ResultMessage:
+									default:
+										t.Fatalf("boundary followed by %T", m)
+									}
+									boundary = false
+								}
+								if s, ok := m.(*agent.SystemMessage); ok && s.Subtype == agent.SystemSubtypeCompactBoundary {
+									got = append(got, [2]int64{s.ContextTokensBefore, s.ContextTokensAfter})
+									boundary = true
+								}
+							}
+						}
+						if !reflect.DeepEqual(got, tc.want) {
+							t.Fatalf("boundaries = %v, want %v", got, tc.want)
+						}
+						if meter.Tokens() != tc.tokens {
+							t.Fatalf("context = %d, want %d", meter.Tokens(), tc.tokens)
+						}
+					})
+				}
+			})
+		}
+	})
 	t.Run("request ownership and usage", func(t *testing.T) {
 		t.Parallel()
 		for name, parser := range map[string]agent.MessageParser{"full": testBackend().NewWire(), "metadata": testBackend().NewMetadataParser()} {

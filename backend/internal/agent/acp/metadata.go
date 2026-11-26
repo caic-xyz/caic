@@ -29,6 +29,9 @@ type metadataState struct {
 	mu       sync.Mutex
 	session  agent.SessionMetadata
 	requests map[int64]pendingRequest
+	// used is the root session's latest native occupancy since its context
+	// last started; zero is unknown. See inferredCompaction.
+	used int
 }
 
 func (w *metadataState) ParseInput(line []byte) ([]agent.Message, error) {
@@ -148,6 +151,9 @@ func (w *metadataState) parseOutput(line []byte, probe *agent.JSONRPCEnvelope) (
 				// turn's result, as Claude, Codex, and Pi report it. The
 				// prompt's usage_update measured the summarization request, so
 				// the boundary leaves the resulting size unknown.
+				w.mu.Lock()
+				w.used = 0
+				w.mu.Unlock()
 				return []agent.Message{&agent.SystemMessage{MessageType: "system", Subtype: agent.SystemSubtypeCompactBoundary}, result}, true, nil
 			}
 			return []agent.Message{result}, true, nil
@@ -176,11 +182,15 @@ func (w *metadataState) parseOutput(line []byte, probe *agent.JSONRPCEnvelope) (
 		if err != nil {
 			return nil, true, err
 		}
+		started := request.method == acp.MethodSessionNew || request.method == acp.MethodSessionLoad || request.method == acp.MethodSessionResume
 		w.mu.Lock()
 		w.session.Update(metadata)
 		known := w.session
+		if started {
+			w.used = 0
+		}
 		w.mu.Unlock()
-		if request.method == acp.MethodSessionNew || request.method == acp.MethodSessionLoad || request.method == acp.MethodSessionResume {
+		if started {
 			return []agent.Message{&agent.InitMessage{SessionID: known.SessionID, Cwd: request.cwd, ReportedModel: known.ReportedModel, ReportedEffort: known.ReportedEffort, Version: known.AgentVersion}}, true, nil
 		}
 		report := &agent.SessionMetadataMessage{SessionMetadata: metadata}
@@ -210,8 +220,14 @@ func (w *metadataState) parseOutput(line []byte, probe *agent.JSONRPCEnvelope) (
 	}
 	switch acp.UpdateType(typ) {
 	case acp.UpdateUsageUpdate:
-		msgs, err := usageUpdate(update)
-		return msgs, true, err
+		usage, err := usageUpdate(update)
+		if err != nil {
+			return nil, true, err
+		}
+		if boundary := w.inferredCompaction(usage); boundary != nil {
+			return []agent.Message{boundary, usage}, true, nil
+		}
+		return []agent.Message{usage}, true, nil
 	case acp.UpdateConfigOptionUpdate:
 		metadata := agent.SessionMetadata{SessionID: sid}
 		if err := parseConfigOptions(update, &metadata, w.config.EffortID); err != nil {
@@ -336,7 +352,32 @@ func applyConfigValue(metadata *agent.SessionMetadata, id acp.ConfigOptionID, va
 	return nil
 }
 
-func usageUpdate(update []byte) ([]agent.Message, error) {
+// inferredCompaction returns a compaction boundary when usage reports an
+// occupancy compactionDropFactor times smaller than the previous report's,
+// else nil.
+//
+// An ACP harness may compact on its own, as agy does near half of its window,
+// and ACP has no notification for it: the only evidence is the next
+// usage_update's smaller used. Without this boundary, the transcript shows no
+// compaction and history indexes the context before and after it as one. A
+// compaction that shrinks the context by less than compactionDropFactor goes
+// undetected.
+func (w *metadataState) inferredCompaction(usage *agent.UsageMessage) *agent.SystemMessage {
+	if usage.ContextUsed == nil {
+		return nil
+	}
+	after := *usage.ContextUsed
+	w.mu.Lock()
+	before := w.used
+	w.used = after
+	w.mu.Unlock()
+	if after >= before/compactionDropFactor {
+		return nil
+	}
+	return &agent.SystemMessage{MessageType: "system", Subtype: agent.SystemSubtypeCompactBoundary, ContextTokensBefore: int64(before), ContextTokensAfter: int64(after)}
+}
+
+func usageUpdate(update []byte) (*agent.UsageMessage, error) {
 	var size int
 	rawSize, err := agent.JSONField(update, "size")
 	if err != nil {
@@ -377,7 +418,7 @@ func usageUpdate(update []byte) ([]agent.Message, error) {
 			usage.CumulativeCostUSD = &amount
 		}
 	}
-	return []agent.Message{usage}, nil
+	return usage, nil
 }
 
 // compactPrompt reports whether session/prompt params send exactly the
@@ -468,3 +509,13 @@ func (w *metadataState) normalizeMetadata(m *agent.SessionMetadata) error {
 	m.ReportedModel, err = w.config.Models.Decode(m.ReportedModel)
 	return err
 }
+
+// compactionDropFactor is how many times smaller a usage report's occupancy
+// must be than the previous report's for inferredCompaction to infer a
+// compaction.
+//
+// Task logs of agy auto-compacting near half of its 1048576-token window show
+// used falling from about 525000 to 21000-25000, 4-5% of the previous report.
+// About 1100 other recorded agy, dsh, and OpenCode usage reports never
+// decrease.
+const compactionDropFactor = 4

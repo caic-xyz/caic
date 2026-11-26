@@ -89,6 +89,11 @@ summarization call's cost once. agy's changelog in the 1.5.14 binary says
 command is a prompt, not summary instructions; caic rejects custom compaction
 instructions.
 
+agy also compacts automatically, mid-turn, near half of its window. Task logs
+with a 1048576-token window show `used` falling from about 525000 to 21000-25000
+between two `usage_update`s, with only a thought chunk between them and no
+other evidence. Shared ACP infers the boundary from that drop.
+
 ## Native subagents
 
 agy delegates with its `invoke_subagent` tool. In
