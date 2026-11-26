@@ -926,6 +926,10 @@ public struct Config: Codable {
     public let version: String?
     public let displayName: String
     public let tailscaleAvailable: Bool
+    /// TailscaleAvailableUntil is when new tasks stop being able to enable
+    /// Tailscale, ahead of the API access token expiry. Zero when Tailscale is
+    /// unavailable or the token never expires.
+    public let tailscaleAvailableUntil: ISOTimestamp?
     public let usbAvailable: Bool
     public let displayAvailable: Bool
     public let sudoAvailable: Bool
@@ -937,11 +941,12 @@ public struct Config: Codable {
     public let mcpOAuthAvailable: Bool
     public let runtimes: [RuntimeInfo]?
 
-    public init(imageConstraints: ImageConstraints, version: String? = nil, displayName: String, tailscaleAvailable: Bool, usbAvailable: Bool, displayAvailable: Bool, sudoAvailable: Bool, gitHubTokenAvailable: Bool, voiceGateway: VoiceGatewayMetadata, gitHubAppEnabled: Bool? = nil, authProviders: [String]? = nil, mcpOAuthAvailable: Bool, runtimes: [RuntimeInfo]? = nil) {
+    public init(imageConstraints: ImageConstraints, version: String? = nil, displayName: String, tailscaleAvailable: Bool, tailscaleAvailableUntil: ISOTimestamp? = nil, usbAvailable: Bool, displayAvailable: Bool, sudoAvailable: Bool, gitHubTokenAvailable: Bool, voiceGateway: VoiceGatewayMetadata, gitHubAppEnabled: Bool? = nil, authProviders: [String]? = nil, mcpOAuthAvailable: Bool, runtimes: [RuntimeInfo]? = nil) {
         self.imageConstraints = imageConstraints
         self.version = version
         self.displayName = displayName
         self.tailscaleAvailable = tailscaleAvailable
+        self.tailscaleAvailableUntil = tailscaleAvailableUntil
         self.usbAvailable = usbAvailable
         self.displayAvailable = displayAvailable
         self.sudoAvailable = sudoAvailable
@@ -2959,7 +2964,7 @@ public struct ForkTaskReq: Codable {
     public let effort: String?
     /// Additional repos to map into the fork.
     public let extraRepos: [RepoSpec]?
-    /// Override Tailscale; nil means inherit from source.
+    /// Override Tailscale; nil means inherit from source. Enabling it requires Config.TailscaleAvailable.
     public let tailscale: Bool?
     /// Override USB; nil means inherit from source.
     public let usb: Bool?

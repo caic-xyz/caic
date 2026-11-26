@@ -29,6 +29,7 @@ import (
 	"github.com/gomodedev/gomode/httpserver"
 
 	agentbackends "github.com/caic-xyz/caic/backend/internal/agent/backends"
+	"github.com/caic-xyz/caic/backend/internal/tailscale"
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun/taskruntest"
 	"github.com/caic-xyz/caic/internal/testlog"
@@ -1037,6 +1038,28 @@ func TestHandleCreateTask(t *testing.T) {
 		}
 	})
 
+	t.Run("TailscaleUnavailable", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}}})
+		registerRouterCheckout(t, s.taskMgr.Checkouts, "myrepo", newRouterTestCheckout(t.TempDir()))
+		handler := handlePrompt(testTaskHandlers(s).taskSvc.createTask)
+
+		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"claude","tailscale":true}`)
+		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/tasks", body)
+		w := httptest.NewRecorder()
+		handler(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
+		}
+		if e := decodeError(t, w); e.Message != tailscale.ErrNoAPIKey.Error() {
+			t.Errorf("message = %q, want the missing API key reason", e.Message)
+		}
+		if n := len(testEntries(s)); n != 0 {
+			t.Errorf("tasks = %d, want 0", n)
+		}
+	})
+
 	t.Run("MissingRepo", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
@@ -2032,6 +2055,13 @@ func TestLoadPurgedTasks(t *testing.T) {
 			if !e.Task().Display {
 				t.Error("Display = false, want true")
 			}
+		}
+		// Forking inherits Tailscale, which a server without an API access
+		// token refuses rather than falling back to browser authentication.
+		_, err := testTaskHandlers(s).taskSvc.forkTask(t.Context(), entries[0], &v1.ForkTaskReq{Prompt: v1.Prompt{Text: "fork"}}, nil)
+		var apiErr *api.Error
+		if !errors.As(err, &apiErr) || apiErr.Status != http.StatusBadRequest || apiErr.Message != tailscale.ErrNoAPIKey.Error() {
+			t.Errorf("forkTask() error = %v, want the missing API key reason", err)
 		}
 	})
 }

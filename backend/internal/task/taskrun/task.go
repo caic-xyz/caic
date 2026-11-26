@@ -114,7 +114,7 @@ type Task struct {
 	// through Task methods so readers and async lifecycle goroutines synchronize.
 	Repos            []repo.Mount // index 0 = primary; empty = no-repo
 	TailscaleFQDN    string       // Tailscale FQDN assigned to the instance (empty if not available).
-	TailscaleAuthURL string       // Tailscale browser auth URL when no pre-auth key was available.
+	TailscaleAuthURL string       // Tailscale browser auth URL when no pre-auth key was available. TODO: Dead code; see runtime.ConnectionInfo.TailscaleAuthURL.
 	RelayOffset      int64        // Committed relay output bytes in the current generation, for reconnect.
 	SudoPassword     string       // Random sudo password; empty if sudo is not enabled.
 	VNCPort          int          // VNC WebSocket port inside the instance (0 = no VNC). Set during launch.

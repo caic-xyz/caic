@@ -187,7 +187,8 @@ function createAppStore() {
   const [selectedRuntimeName, setSelectedRuntimeName] = createSignal("");
   const [featuresOpen, setFeaturesOpen] = createSignal(false);
   const [usage, setUsage] = createSignal<UsageResp | null>(null);
-  const [tailscaleAvailable, setTailscaleAvailable] = createSignal(false);
+  // Epoch ms after which new tasks cannot enable Tailscale; null when unavailable, Infinity when the server token never expires.
+  const [tailscaleAvailableUntil, setTailscaleAvailableUntil] = createSignal<number | null>(null);
   const [tailscaleEnabled, setTailscaleEnabled] = createSignal(false);
   const [usbAvailable, setUSBAvailable] = createSignal(false);
   const [usbEnabled, setUSBEnabled] = createSignal(false);
@@ -426,7 +427,13 @@ function createAppStore() {
     if (firstRuntime && !availableRuntimes.some((rt) => rt.name === selectedRuntimeName())) {
       setSelectedRuntimeName(firstRuntime.name);
     }
-    setTailscaleAvailable(config.tailscaleAvailable);
+    setTailscaleAvailableUntil(
+      !config.tailscaleAvailable
+        ? null
+        : config.tailscaleAvailableUntil
+          ? Date.parse(config.tailscaleAvailableUntil)
+          : Number.POSITIVE_INFINITY,
+    );
     setUSBAvailable(config.usbAvailable);
     setDisplayAvailable(config.displayAvailable);
     setSudoAvailable(config.sudoAvailable);
@@ -752,6 +759,11 @@ function createAppStore() {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     onCleanup(() => clearInterval(timer));
   }
+  // The server's Tailscale API access token can expire while the page is open.
+  const tailscaleAvailable = createMemo(() => {
+    const until = tailscaleAvailableUntil();
+    return until !== null && now() < until;
+  });
 
   function dismissSelectedTaskOnNotFound(id: string, err: unknown): boolean {
     if ((err as { status?: number }).status !== 404 || !taskSnapshotComplete()) return false;
@@ -1441,7 +1453,7 @@ function createAppStore() {
                 ...(r.branch ? { baseBranch: r.branch } : {}),
               }))
             : undefined,
-        tailscale: forkTailscale(),
+        tailscale: forkTailscale() && tailscaleAvailable(),
         usb: forkUSB(),
         display: forkDisplay(),
         sudo: forkSudo(),
@@ -1491,7 +1503,7 @@ function createAppStore() {
     try {
       const model = selectedModel();
       const effort = selectedEffort();
-      const ts = tailscaleEnabled();
+      const ts = tailscaleEnabled() && tailscaleAvailable();
       const usb = usbEnabled();
       const disp = displayEnabled();
       const sudo = sudoEnabled();

@@ -547,6 +547,12 @@ export interface Config {
   version?: string;
   displayName: string;
   tailscaleAvailable: boolean;
+  /**
+   * TailscaleAvailableUntil is when new tasks stop being able to enable
+   * Tailscale, ahead of the API access token expiry. Zero when Tailscale is
+   * unavailable or the token never expires.
+   */
+  tailscaleAvailableUntil?: ISOTimestamp;
   usbAvailable: boolean;
   displayAvailable: boolean;
   sudoAvailable: boolean;
@@ -1453,7 +1459,7 @@ export interface ForkTaskReq {
   effort?: string;
   /** Additional repos to map into the fork. */
   extraRepos?: RepoSpec[];
-  /** Override Tailscale; nil means inherit from source. */
+  /** Override Tailscale; nil means inherit from source. Enabling it requires Config.TailscaleAvailable. */
   tailscale?: boolean;
   /** Override USB; nil means inherit from source. */
   usb?: boolean;

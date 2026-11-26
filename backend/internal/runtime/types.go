@@ -194,8 +194,18 @@ type Mount struct {
 
 // ConnectionInfo describes connection details returned by a runtime instance.
 type ConnectionInfo struct {
-	AgentTarget      ConnectionTarget
-	TailscaleFQDN    string
+	AgentTarget   ConnectionTarget
+	TailscaleFQDN string
+	// TailscaleAuthURL is the browser authentication URL of an instance that
+	// joined Tailscale without a pre-authorized auth key.
+	//
+	// TODO: Dead code. md fails Launch and Fork when it cannot mint a
+	// pre-authorized auth key instead of falling back to browser
+	// authentication, so md.StartResult.TailscaleAuthURL stays empty. Delete
+	// this field with its copy in mdruntime.Backend.Connect, the
+	// TailscaleAuthURL fields of taskrun's Task, Snapshot, and setupResult, the
+	// SetRuntimeConnectionInfo parameter, and the auth URL branches of
+	// apiconv.tailscaleURLFromSnapshot and server.taskInfoTailscaleURL.
 	TailscaleAuthURL string
 }
 

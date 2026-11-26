@@ -592,6 +592,7 @@ Config reports server capabilities to the frontend.
 | `version` | `string` |  |  |
 | `displayName` | `string` |  | yes |
 | `tailscaleAvailable` | `boolean` |  | yes |
+| `tailscaleAvailableUntil` | `ISOTimestamp` | TailscaleAvailableUntil is when new tasks stop being able to enable Tailscale, ahead of the API access token expiry. Zero when Tailscale is unavailable or the token never expires. |  |
 | `usbAvailable` | `boolean` |  | yes |
 | `displayAvailable` | `boolean` |  | yes |
 | `sudoAvailable` | `boolean` |  | yes |
@@ -1544,7 +1545,7 @@ ForkTaskReq is the request body for POST /api/caic/v1/tasks/{id}/fork.
 | `model` | `string` | Override model; empty means inherit from source. |  |
 | `effort` | `string` | Override thinking effort; empty means inherit from source. |  |
 | `extraRepos` | `RepoSpec[]` | Additional repos to map into the fork. |  |
-| `tailscale` | `boolean` | Override Tailscale; nil means inherit from source. |  |
+| `tailscale` | `boolean` | Override Tailscale; nil means inherit from source. Enabling it requires Config.TailscaleAvailable. |  |
 | `usb` | `boolean` | Override USB; nil means inherit from source. |  |
 | `display` | `boolean` | Override virtual display; nil means inherit from source. |  |
 | `sudo` | `boolean` | Override sudo; nil means inherit from source. |  |

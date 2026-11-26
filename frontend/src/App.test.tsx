@@ -1804,6 +1804,40 @@ describe("App keyboard shortcuts", () => {
   });
 });
 
+describe("App Tailscale availability", () => {
+  it("withdraws Tailscale when the server token nears expiry", async () => {
+    vi.useFakeTimers();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    vi.mocked(api.getConfig).mockResolvedValue({
+      imageConstraints: {
+        allowedMediaTypes: ["image/png", "image/jpeg", "image/gif", "image/webp"],
+        maxImageBytes: 10485760,
+        maxPromptImageBytes: 20971520,
+      },
+      displayName: "test",
+      tailscaleAvailable: true,
+      tailscaleAvailableUntil: new Date(Date.now() + 60_000).toISOString() as ISOTimestamp,
+      usbAvailable: false,
+      displayAvailable: false,
+      sudoAvailable: false,
+      gitHubTokenAvailable: false,
+      mcpOAuthAvailable: false,
+      voiceGateway: { mode: "disabled" },
+    });
+    renderApp();
+    await user.click(await screen.findByRole("button", { name: "Show features" }));
+    await user.click(await screen.findByRole("checkbox", { name: "Enable Tailscale networking" }));
+
+    vi.advanceTimersByTime(61_000);
+
+    expect(screen.getByRole("checkbox", { name: "Tailscale is not available on this server" })).toBeDisabled();
+    await user.type(screen.getByTestId("prompt-input"), "No tailnet");
+    await user.click(screen.getByTestId("submit-task"));
+    await waitFor(() => expect(api.createTask).toHaveBeenCalledOnce());
+    expect(vi.mocked(api.createTask).mock.calls[0]?.[0]).not.toHaveProperty("tailscale");
+  });
+});
+
 describe("App repo chips: No repository", () => {
   it("notifies when a waiting task's backend rate limit clears", async () => {
     const blockedTask = makeTask({

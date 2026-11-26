@@ -41,6 +41,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/server"
+	"github.com/caic-xyz/caic/backend/internal/tailscale"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
@@ -150,6 +151,14 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		repoCh <- repoDiscoveryResult{paths, err}
 		return nil
 	})
+	tailscaleKey := tailscale.NewAPIKey(ctx, appLog.With("cmp", "tailscale"), cfg.Runtime.TailscaleAPIKey)
+	if tailscaleKey != nil {
+		// Read the token's expiry while startup continues; it logs the outcome.
+		discovery.Go(func() error {
+			_, _ = tailscaleKey.Until(discoveryCtx)
+			return nil
+		})
+	}
 	settings, err := loadSettings(appLog, filepath.Join(cfg.Dirs.ConfigDir, "settings.json"))
 	if err != nil {
 		return nil, fmt.Errorf("load settings: %w", err)
@@ -373,7 +382,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		Checkouts:                  checkoutRegistry,
 		CheckoutRoot:               absRoot,
 		RepoStatus:                 repoStatus,
-		Tailscale:                  cfg.Runtime.TailscaleAPIKey != "",
+		Tailscale:                  tailscaleKey,
 		Preferences:                prefsStore,
 		AuthStore:                  authStore,
 		SessionSecret:              sessionSecret,

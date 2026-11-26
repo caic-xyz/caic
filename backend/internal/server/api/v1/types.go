@@ -181,19 +181,23 @@ type ImageConstraints struct {
 
 // Config reports server capabilities to the frontend.
 type Config struct {
-	ImageConstraints     ImageConstraints     `json:"imageConstraints"`
-	Version              string               `json:"version,omitempty"`
-	DisplayName          string               `json:"displayName"`
-	TailscaleAvailable   bool                 `json:"tailscaleAvailable"`
-	USBAvailable         bool                 `json:"usbAvailable"`
-	DisplayAvailable     bool                 `json:"displayAvailable"`
-	SudoAvailable        bool                 `json:"sudoAvailable"`
-	GitHubTokenAvailable bool                 `json:"gitHubTokenAvailable"`
-	VoiceGateway         VoiceGatewayMetadata `json:"voiceGateway"`
-	GitHubAppEnabled     bool                 `json:"gitHubAppEnabled,omitempty"`
-	AuthProviders        []string             `json:"authProviders,omitempty"` // e.g. ["github","gitlab"]
-	MCPOAuthAvailable    bool                 `json:"mcpOAuthAvailable"`
-	Runtimes             []RuntimeInfo        `json:"runtimes,omitempty"`
+	ImageConstraints   ImageConstraints `json:"imageConstraints"`
+	Version            string           `json:"version,omitempty"`
+	DisplayName        string           `json:"displayName"`
+	TailscaleAvailable bool             `json:"tailscaleAvailable"`
+	// TailscaleAvailableUntil is when new tasks stop being able to enable
+	// Tailscale, ahead of the API access token expiry. Zero when Tailscale is
+	// unavailable or the token never expires.
+	TailscaleAvailableUntil time.Time            `json:"tailscaleAvailableUntil,omitzero"`
+	USBAvailable            bool                 `json:"usbAvailable"`
+	DisplayAvailable        bool                 `json:"displayAvailable"`
+	SudoAvailable           bool                 `json:"sudoAvailable"`
+	GitHubTokenAvailable    bool                 `json:"gitHubTokenAvailable"`
+	VoiceGateway            VoiceGatewayMetadata `json:"voiceGateway"`
+	GitHubAppEnabled        bool                 `json:"gitHubAppEnabled,omitempty"`
+	AuthProviders           []string             `json:"authProviders,omitempty"` // e.g. ["github","gitlab"]
+	MCPOAuthAvailable       bool                 `json:"mcpOAuthAvailable"`
+	Runtimes                []RuntimeInfo        `json:"runtimes,omitempty"`
 }
 
 // VoiceGatewayMode is the advertised service-side voice gateway mode.
@@ -794,7 +798,7 @@ type ForkTaskReq struct {
 	Model       string     `json:"model,omitempty"`       // Override model; empty means inherit from source.
 	Effort      string     `json:"effort,omitempty"`      // Override thinking effort; empty means inherit from source.
 	ExtraRepos  []RepoSpec `json:"extraRepos,omitempty"`  // Additional repos to map into the fork.
-	Tailscale   *bool      `json:"tailscale,omitempty"`   // Override Tailscale; nil means inherit from source.
+	Tailscale   *bool      `json:"tailscale,omitempty"`   // Override Tailscale; nil means inherit from source. Enabling it requires Config.TailscaleAvailable.
 	USB         *bool      `json:"usb,omitempty"`         // Override USB; nil means inherit from source.
 	Display     *bool      `json:"display,omitempty"`     // Override virtual display; nil means inherit from source.
 	Sudo        *bool      `json:"sudo,omitempty"`        // Override sudo; nil means inherit from source.

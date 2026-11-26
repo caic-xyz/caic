@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/server/mcpschema"
+	"github.com/caic-xyz/caic/backend/internal/tailscale"
 
 	"github.com/caic-xyz/md"
 	"github.com/caic-xyz/md/git"
@@ -80,6 +81,7 @@ type taskService struct {
 	authStore *auth.Store
 	fakeCI    FakeCIHook
 	runtimes  *runtime.Router
+	tailscale *tailscale.APIKey
 	metrics   metrics.Recorder
 	history   *taskHistory
 
@@ -624,6 +626,7 @@ func taskInfoTailscaleURL(s *taskrun.Snapshot) string {
 	if s.TailscaleFQDN != "" {
 		return "https://" + s.TailscaleFQDN
 	}
+	// TODO: Dead code; see runtime.ConnectionInfo.TailscaleAuthURL.
 	if s.TailscaleAuthURL != "" {
 		return s.TailscaleAuthURL
 	}
@@ -643,6 +646,11 @@ func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq, ima
 	}
 	if req.CaicMCP && !s.taskMgr.TaskMCPAvailable() {
 		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "task-scoped MCP is unavailable"}
+	}
+	if req.Tailscale {
+		if _, err := tailscaleUntil(ctx, s.tailscale); err != nil {
+			return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: err.Error()}
+		}
 	}
 	var ownerID string
 	if u, ok := auth.UserFromContext(ctx); ok {
@@ -776,7 +784,7 @@ func (s *taskService) createDelegatedTask(ctx context.Context, sourceID ksid.ID,
 		Prompt:              agent.Prompt{Text: req.InitialPrompt.Text},
 		GitHubToken:         githubToken,
 		ResolvedGitHubToken: s.resolveGitHubTokenForOwner(source.OwnerID, githubToken),
-		Tailscale:           source.Tailscale,
+		Tailscale:           s.inheritedTailscale(ctx, source.Tailscale),
 		USB:                 source.USB,
 		Display:             source.Display,
 		Sudo:                source.Sudo,
@@ -995,9 +1003,14 @@ func (s *taskService) forkTask(ctx context.Context, entry *taskmgr.Entry, req *v
 	if req.GitHubToken != nil {
 		gh = *req.GitHubToken
 	}
-	tailscale := source.Tailscale
+	ts := source.Tailscale
 	if req.Tailscale != nil {
-		tailscale = *req.Tailscale
+		ts = *req.Tailscale
+	}
+	if ts {
+		if _, err := tailscaleUntil(ctx, s.tailscale); err != nil {
+			return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: err.Error()}
+		}
 	}
 	usb := source.USB
 	if req.USB != nil {
@@ -1021,7 +1034,7 @@ func (s *taskService) forkTask(ctx context.Context, entry *taskmgr.Entry, req *v
 		ExtraRepos:          extraRepos,
 		GitHubToken:         gh,
 		ResolvedGitHubToken: s.resolveGitHubContainerToken(ctx, gh),
-		Tailscale:           tailscale,
+		Tailscale:           ts,
 		USB:                 usb,
 		Display:             display,
 		Sudo:                sudo,
@@ -1065,7 +1078,7 @@ func (s *taskService) forkDelegatedTask(ctx context.Context, delegatingTaskID ks
 		Prompt:              agent.Prompt{Text: req.Prompt.Text},
 		GitHubToken:         githubToken,
 		ResolvedGitHubToken: s.resolveGitHubTokenForOwner(delegatingTask.OwnerID, githubToken),
-		Tailscale:           source.Tailscale,
+		Tailscale:           s.inheritedTailscale(ctx, source.Tailscale),
 		USB:                 source.USB,
 		Display:             source.Display,
 		Sudo:                source.Sudo,
@@ -1554,4 +1567,25 @@ func taskFileError(err error) error {
 	default:
 		return &api.Error{Status: http.StatusBadGateway, Code: api.CodeInternalError, Message: err.Error()}
 	}
+}
+
+// tailscaleUntil reports when new tasks stop being able to enable Tailscale,
+// or why they cannot now. Tailscale requires an API access token so that
+// instances join with a pre-authorized key instead of browser authentication.
+func tailscaleUntil(ctx context.Context, k *tailscale.APIKey) (time.Time, error) {
+	if k == nil {
+		return time.Time{}, tailscale.ErrNoAPIKey
+	}
+	return k.Until(ctx)
+}
+
+// inheritedTailscale resolves Tailscale for a delegated child. Task-scoped
+// callers cannot override inherited settings, so the child drops Tailscale
+// when it is unavailable instead of failing the delegation.
+func (s *taskService) inheritedTailscale(ctx context.Context, source bool) bool {
+	if !source {
+		return false
+	}
+	_, err := tailscaleUntil(ctx, s.tailscale)
+	return err == nil
 }

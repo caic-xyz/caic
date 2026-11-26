@@ -32,6 +32,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
+	"github.com/caic-xyz/caic/backend/internal/tailscale"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/metrics"
 	"github.com/gomodedev/gomode/autoupdate"
@@ -43,28 +44,28 @@ type serverHandlers struct {
 	updater         *autoupdate.Updater
 	updateInstalled func()
 
-	log                *slog.Logger
-	serverCtx          context.Context
-	workers            *backgroundWorkers
-	runtimes           *caicruntime.Router
-	tailscaleAvailable bool
-	forgeMgr           *forgemgr.Manager
-	prefs              *preferences.Store
-	checkouts          *repo.Registry
-	checkoutRoot       string
-	repoStatus         *ci.RepoStatusStore
-	taskMgr            *taskmgr.Manager
-	cacheSizes         *CacheSizeStore
-	metrics            *metrics.Store
-	systemStats        *systemStats
-	harnessModels      *HarnessModels
-	imageRefresh       *ImageRefresh
-	authStore          *auth.Store
-	githubOAuth        *oauthclient.ProviderConfig
-	gitlabOAuth        *oauthclient.ProviderConfig
-	googleOAuth        *oauthclient.ProviderConfig
-	mcpOAuthAvailable  bool
-	voiceGateway       v1.VoiceGatewayMetadata
+	log               *slog.Logger
+	serverCtx         context.Context
+	workers           *backgroundWorkers
+	runtimes          *caicruntime.Router
+	tailscale         *tailscale.APIKey
+	forgeMgr          *forgemgr.Manager
+	prefs             *preferences.Store
+	checkouts         *repo.Registry
+	checkoutRoot      string
+	repoStatus        *ci.RepoStatusStore
+	taskMgr           *taskmgr.Manager
+	cacheSizes        *CacheSizeStore
+	metrics           *metrics.Store
+	systemStats       *systemStats
+	harnessModels     *HarnessModels
+	imageRefresh      *ImageRefresh
+	authStore         *auth.Store
+	githubOAuth       *oauthclient.ProviderConfig
+	gitlabOAuth       *oauthclient.ProviderConfig
+	googleOAuth       *oauthclient.ProviderConfig
+	mcpOAuthAvailable bool
+	voiceGateway      v1.VoiceGatewayMetadata
 }
 
 func (h *serverHandlers) getConfig(ctx context.Context, _ *api.EmptyReq) (*v1.Config, error) {
@@ -77,7 +78,6 @@ func (h *serverHandlers) getConfig(ctx context.Context, _ *api.EmptyReq) (*v1.Co
 		ImageConstraints:     v1.ImageUploadConstraints(),
 		Version:              h.version,
 		DisplayName:          displayName,
-		TailscaleAvailable:   h.tailscaleAvailable,
 		USBAvailable:         runtime.GOOS == "linux",
 		DisplayAvailable:     true,
 		SudoAvailable:        true,
@@ -85,6 +85,10 @@ func (h *serverHandlers) getConfig(ctx context.Context, _ *api.EmptyReq) (*v1.Co
 		VoiceGateway:         h.voiceGateway,
 		GitHubAppEnabled:     h.forgeMgr.GitHubApp() != nil,
 		MCPOAuthAvailable:    h.mcpOAuthAvailable,
+	}
+	if until, err := tailscaleUntil(ctx, h.tailscale); err == nil {
+		cfg.TailscaleAvailable = true
+		cfg.TailscaleAvailableUntil = until
 	}
 	if h.authStore != nil {
 		cfg.AuthProviders = h.authProviders()

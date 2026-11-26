@@ -1553,6 +1553,12 @@ data class Config(
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val version: String? = null,
     val displayName: String,
     val tailscaleAvailable: Boolean,
+    /**
+     * TailscaleAvailableUntil is when new tasks stop being able to enable
+     * Tailscale, ahead of the API access token expiry. Zero when Tailscale is
+     * unavailable or the token never expires.
+     */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val tailscaleAvailableUntil: Instant? = null,
     val usbAvailable: Boolean,
     val displayAvailable: Boolean,
     val sudoAvailable: Boolean,
@@ -2491,7 +2497,7 @@ data class ForkTaskReq(
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val effort: String? = null,
     /** Additional repos to map into the fork. */
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val extraRepos: List<RepoSpec>? = null,
-    /** Override Tailscale; nil means inherit from source. */
+    /** Override Tailscale; nil means inherit from source. Enabling it requires Config.TailscaleAvailable. */
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val tailscale: Boolean? = null,
     /** Override USB; nil means inherit from source. */
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val usb: Boolean? = null,

@@ -38,6 +38,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	"github.com/caic-xyz/caic/backend/internal/tailscale"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
@@ -181,6 +182,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (_ *Router, retE
 		authStore:  d.AuthStore,
 		fakeCI:     d.FakeCI,
 		runtimes:   d.Runtimes,
+		tailscale:  d.Tailscale,
 		metrics:    d.Metrics,
 		focusEpoch: ksid.NewID().String(),
 	}
@@ -221,30 +223,30 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (_ *Router, retE
 			runtimes: d.Runtimes,
 		},
 		serverHandlers: &serverHandlers{
-			version:            d.Version,
-			updater:            d.Updater,
-			updateInstalled:    d.UpdateInstalled,
-			log:                log.With("handler", "server"),
-			serverCtx:          ctx,
-			workers:            workers,
-			runtimes:           d.Runtimes,
-			tailscaleAvailable: d.Tailscale,
-			forgeMgr:           d.ForgeMgr,
-			prefs:              d.Preferences,
-			checkouts:          d.Checkouts,
-			checkoutRoot:       d.CheckoutRoot,
-			repoStatus:         d.RepoStatus,
-			taskMgr:            d.TaskMgr,
-			cacheSizes:         d.CacheSizes,
-			metrics:            d.Metrics,
-			systemStats:        systemStats,
-			harnessModels:      d.HarnessModels,
-			imageRefresh:       d.ImageRefresh,
-			authStore:          d.AuthStore,
-			githubOAuth:        d.GitHubOAuth,
-			gitlabOAuth:        d.GitLabOAuth,
-			googleOAuth:        d.GoogleOAuth,
-			voiceGateway:       voiceMetadata,
+			version:         d.Version,
+			updater:         d.Updater,
+			updateInstalled: d.UpdateInstalled,
+			log:             log.With("handler", "server"),
+			serverCtx:       ctx,
+			workers:         workers,
+			runtimes:        d.Runtimes,
+			tailscale:       d.Tailscale,
+			forgeMgr:        d.ForgeMgr,
+			prefs:           d.Preferences,
+			checkouts:       d.Checkouts,
+			checkoutRoot:    d.CheckoutRoot,
+			repoStatus:      d.RepoStatus,
+			taskMgr:         d.TaskMgr,
+			cacheSizes:      d.CacheSizes,
+			metrics:         d.Metrics,
+			systemStats:     systemStats,
+			harnessModels:   d.HarnessModels,
+			imageRefresh:    d.ImageRefresh,
+			authStore:       d.AuthStore,
+			githubOAuth:     d.GitHubOAuth,
+			gitlabOAuth:     d.GitLabOAuth,
+			googleOAuth:     d.GoogleOAuth,
+			voiceGateway:    voiceMetadata,
 		},
 		taskHandlers: &taskHandlers{
 			workers:     workers,
@@ -662,7 +664,7 @@ type Dependencies struct {
 	Checkouts                  *repo.Registry
 	CheckoutRoot               string
 	RepoStatus                 *ci.RepoStatusStore
-	Tailscale                  bool
+	Tailscale                  *tailscale.APIKey // nil without TAILSCALE_API_KEY
 	Preferences                *preferences.Store
 	AuthStore                  *auth.Store
 	SessionSecret              []byte
