@@ -5102,7 +5102,12 @@ func TestManager(t *testing.T) {
 						selected = backend.FakeBackend
 					}
 					info := &runtimetest.FakeInfo{Meta: map[string]string{"md-agent-retained-alert\x00caic.id": id.String(), "md-agent-retained-alert\x00caic.harness": string(harness.Codex)}}
-					m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, info), Backends: map[harness.Name]agent.Backend{harness.Codex: selected}})
+					cfg := Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, info), Backends: map[harness.Name]agent.Backend{harness.Codex: selected}}
+					if mode == "early_exit" {
+						// Readiness must observe the exit, however slowly the runner reaps it.
+						cfg.EnsureSessionTimeout = time.Minute
+					}
+					m := newTestManager(t, cfg)
 					t.Cleanup(backend.stop)
 					m.relay = fakeRelayReader{
 						statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) { return true, "alive", nil },

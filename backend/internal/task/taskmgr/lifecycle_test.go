@@ -499,13 +499,15 @@ func TestLifecycle(t *testing.T) {
 			for _, stage := range []string{"attach", "readiness"} {
 				t.Run(string(state)+"/"+stage, func(t *testing.T) {
 					t.Parallel()
-					var backend agent.Backend = &agenttest.FakeBackend{HarnessName: harness.Codex}
+					cfg := Config{ServerCtx: t.Context(), Backends: agent.Backends{harness.Codex: &agenttest.FakeBackend{HarnessName: harness.Codex}}}
 					if stage == "readiness" {
 						b := &reconnectInputBackend{FakeBackend: &agenttest.FakeBackend{HarnessName: harness.Codex}, exitImmediately: true}
 						t.Cleanup(b.stop)
-						backend = b
+						cfg.Backends[harness.Codex] = b
+						// Readiness must observe the exit, however slowly the runner reaps it.
+						cfg.EnsureSessionTimeout = time.Minute
 					}
-					m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: agent.Backends{harness.Codex: backend}})
+					m := newTestManager(t, cfg)
 					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
 					tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "restore-gate"), runtime.ConnectionTarget{SSHHost: "restore-gate"}, "", 0)
 					tk.SetSessionMetadata(agent.SessionMetadata{SessionID: "saved-session"})
