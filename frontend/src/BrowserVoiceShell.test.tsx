@@ -10,7 +10,7 @@ import { VoiceTaskUpdates } from "./BrowserVoiceShell";
 import { voiceSession } from "@gomodedev/gomode/web/VoiceSession";
 import { getVoiceTaskNumber } from "./voiceTaskState";
 
-const injectTextMock = vi.spyOn(voiceSession, "injectText");
+const announceMock = vi.spyOn(voiceSession, "announce");
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -26,12 +26,12 @@ describe("VoiceTaskUpdates", () => {
     voiceSession.setState((s) => ({ ...s, connected: true }));
     const [tasks, setTasks] = createSignal<[Task, ...Task[]]>([task("a-task", "Existing work")]);
     const view = render(() => <VoiceTaskUpdates tasks={tasks} session={voiceSession} />);
-    expect(injectTextMock).not.toHaveBeenCalled();
+    expect(announceMock).not.toHaveBeenCalled();
     expect(getVoiceTaskNumber("a-task")).toBe(1);
 
     setTasks((current) => [...current, task("b-task", "New work")]);
     await waitFor(() => expect(getVoiceTaskNumber("b-task")).toBe(2));
-    expect(injectTextMock).not.toHaveBeenCalled();
+    expect(announceMock).not.toHaveBeenCalled();
     expect(getVoiceTaskNumber("b-task")).toBe(2);
     view.unmount();
     expect(getVoiceTaskNumber("b-task")).toBeUndefined();

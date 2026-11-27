@@ -2714,6 +2714,11 @@ func TestBuildHandler(t *testing.T) {
 			if w.Code != want {
 				t.Fatalf("request %d status = %d, want %d", i+1, w.Code, want)
 			}
+			if want == http.StatusTooManyRequests {
+				if got := w.Header().Get("Retry-After"); got != "60" && got != "59" {
+					t.Fatalf("Retry-After = %q, want the rest of the 1-minute window", got)
+				}
+			}
 		}
 	})
 

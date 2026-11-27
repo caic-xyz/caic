@@ -9,7 +9,9 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gomodedev/gomode/httpserver"
 	"github.com/maruel/ksid"
@@ -119,10 +121,13 @@ func (h *mcpHandlers) allowMCPRequest(w http.ResponseWriter, r *http.Request) bo
 	if h.rateLimiter == nil {
 		return true
 	}
-	if h.rateLimiter.Allow(h.mcpRateKey(r)) {
+	wait, ok := h.rateLimiter.Allow(h.mcpRateKey(r))
+	if ok {
 		return true
 	}
-	w.Header().Set("Retry-After", "60")
+	// Retry-After holds whole seconds; round up so a retry lands after the reset.
+	seconds := max(1, (wait+time.Second-1)/time.Second)
+	w.Header().Set("Retry-After", strconv.FormatInt(int64(seconds), 10))
 	http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 	return false
 }
