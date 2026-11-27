@@ -1,4 +1,4 @@
-// Tests one turn's summary, user wait, exact details, context link, running state, section names, timeline loading, failure, and placement, previous/next controls, and ←/→ navigation.
+// Tests one turn's summary, user wait, waits for answers apart from turn time, exact details, context link, running state, section names, timeline loading, failure, and placement, previous/next controls, and ←/→ navigation.
 
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { Show } from "solid-js";
@@ -36,7 +36,7 @@ function turn(number: number): HistoryTurn {
 
 const turns: readonly HistoryTurn[] = [
   { ...turn(1), effort: "high", waitMs: 123_000, cost: { usd: 0.12345, source: "estimated" }, contextTokens: 43_200 },
-  { ...turn(2), changeStat: { files: 3, linesAdded: 14, linesDeleted: 2, binaryFiles: 0 } },
+  { ...turn(2), askMs: 20_000, changeStat: { files: 3, linesAdded: 14, linesDeleted: 2, binaryFiles: 0 } },
   { ...turn(3), durationAPIMs: 0, usage: { ...turn(3).usage, reasoningOutputTokens: 300 } },
 ];
 
@@ -270,10 +270,49 @@ describe("TurnDetail", () => {
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Previous turn" }));
     await user.tab();
     await user.tab();
-    expect(document.activeElement).toBe(strip.getByRole("link", { name: "Turn 2, 80.000 s" }));
+    expect(document.activeElement).toBe(strip.getByRole("link", { name: "Turn 2, 60.000 s" }));
     await user.keyboard("{ArrowRight}");
     await waitFor(() => expect(document.activeElement).toBe(strip.getByRole("link", { name: "Turn 3, 80.000 s" })));
     expect(strip.getAllByRole("link").filter((link) => link.tabIndex === 0)).toEqual([document.activeElement]);
+  });
+
+  it("keeps the wait for the user's answers out of the turn time", () => {
+    renderTurn(2, false, null);
+
+    expect(screen.getByTestId("turn-summary-line")).toHaveTextContent(/^1:00 turn · /);
+    expect(screen.getByTestId("turn-answer-wait")).toHaveTextContent("Waited 0:20 for your answers");
+    expect(detail("Turn time")).toBe("60.000 s");
+    expect(detail("Awaiting your answers")).toBe("20.000 s");
+  });
+
+  it("stops a running turn's time while its question is open", async () => {
+    const now = Date.now();
+    const running: HistoryRunningTurn = {
+      number: 4,
+      sectionID: "1",
+      startedAt: new Date(now - 30_000).toISOString() as ISOTimestamp,
+      askMs: 5_000,
+      askingSince: new Date(now - 10_000).toISOString() as ISOTimestamp,
+    };
+    responses.push(async () =>
+      Response.json({
+        ...timelineOf(4),
+        endedAt: undefined,
+        durationMs: 1_000,
+        spans: [{ kind: "model", startMs: 0 }],
+      }),
+    );
+    renderTurn(4, false, running);
+
+    expect(await screen.findByTestId("turn-timeline")).toBeInTheDocument();
+    // 30 s since the start, less 5 s answered and 10 s awaiting the open one.
+    expect(screen.getByTestId("turn-summary-line")).toHaveTextContent(/^Awaiting you · 0:15 so far/);
+    expect(screen.getByTestId("turn-answer-wait")).toHaveTextContent(/^Waited 0:1[56] for your answers$/);
+    expect(
+      within(screen.getByTestId("turn-strip")).getByRole("link", {
+        name: /^Turn 4, awaiting you, 15\.\d{3} s so far$/,
+      }),
+    ).toHaveAttribute("aria-current", "page");
   });
 
   it("omits unknown values instead of reporting zeros", () => {

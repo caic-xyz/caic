@@ -59,7 +59,8 @@ const sections: readonly HistorySection[] = [
 
 const turns: readonly HistoryTurn[] = [
   turn(1, "1", 20_000, 60_000),
-  turn(2, "1", 40_000, 140_000),
+  // The turn waited 10 s for the user's answers, which turn time excludes.
+  { ...turn(2, "1", 50_000, 140_000), askMs: 10_000 },
   { ...turn(3, "2", 80_000, 0), cost: undefined },
 ];
 
@@ -145,7 +146,8 @@ describe("ContextDetail", () => {
     ]);
     expect(detail("Model")).toBe("test-model");
     expect(detail("Turn time")).toBe("60.000 s");
-    expect(detail("Time awaiting user")).toBe("2.000 s");
+    // Prompt waits and answer waits are both the user's time.
+    expect(detail("Time awaiting user")).toBe("12.000 s");
     expect(detail("Messages")).toBe("4");
     expect(detail("Tool calls")).toBe("7");
     expect(detail("Cache read tokens")).toBe("20,000");

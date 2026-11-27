@@ -917,6 +917,10 @@ object HarnessSerializer : KSerializer<Harness> {
 sealed interface HistoryTurnSpanKind {
     val value: String
     @Serializable
+    data object Ask : HistoryTurnSpanKind {
+        override val value = "ask"
+    }
+    @Serializable
     data object Background : HistoryTurnSpanKind {
         override val value = "background"
     }
@@ -942,6 +946,7 @@ object HistoryTurnSpanKindSerializer : KSerializer<HistoryTurnSpanKind> {
     override fun deserialize(decoder: Decoder): HistoryTurnSpanKind {
         val v = decoder.decodeString()
         return when (v) {
+            "ask" -> HistoryTurnSpanKind.Ask
             "background" -> HistoryTurnSpanKind.Background
             "model" -> HistoryTurnSpanKind.Model
             "subagent" -> HistoryTurnSpanKind.Subagent
@@ -3664,7 +3669,10 @@ data class HistoryRoute(
  * starting prompt before root output accepted it. A turn without any root
  * prompt or activity starts at its result. At is the result. DurationMS is the
  * harness-reported turn duration, else the time from StartedAt to At, as in
- * the task's turn metrics. WaitMS is the time from At to the prompt at
+ * the task's turn metrics. AskMS is the part of DurationMS that the turn spent
+ * only waiting for the user's answers: a root question is open, from its ask
+ * to its answer or the result, and no other tool call, subagent, or background
+ * command of the turn runs. The agent's own time is DurationMS minus AskMS. WaitMS is the time from At to the prompt at
  * WaitInput, which starts the next turn.
  * Effort is the root reasoning effort reported by the last init.
  * ContextTokens is the root context size when the turn ended, as the task's
@@ -3684,6 +3692,7 @@ data class HistoryTurn(
     val usage: EventUsage,
     val durationMs: Long,
     @SerialName("durationAPIMs") val durationAPIMs: Long,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val askMs: Long? = null,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val waitInput: HistoryPosition? = null,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val waitMs: Long? = null,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val changeStat: EventChangeStat? = null,
@@ -3698,13 +3707,18 @@ data class HistoryTurn(
  * so the turn keeps both when it completes. SectionID is the context it runs
  * in; compaction can move it to a later one. A turn stops running when the
  * harness process exits without ending it: the turn does not complete, and a
- * later root prompt or activity resumes it from the same start.
+ * later root prompt or activity resumes it from the same start. AskMS is the
+ * time the turn has only waited for the user's answers so far, as in
+ * HistoryTurn. AskingSince is when the current such wait started, absent when
+ * no question is open or other work runs; AskMS excludes that wait.
  */
 @Serializable
 data class HistoryRunningTurn(
     val number: Int,
     @SerialName("sectionID") val sectionID: String,
     val startedAt: Instant,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val askMs: Long? = null,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val askingSince: Instant? = null,
 )
 
 /** HistoryToolTiming aggregates completed tools across root and child actors. */

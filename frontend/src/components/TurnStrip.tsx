@@ -16,6 +16,7 @@ import {
 import type { HistoryRunningTurn, HistoryTurn } from "@sdk/types.gen";
 import { createLiveDuration } from "../liveDuration";
 import { durationTickStep, formatExactSeconds, formatTotalDuration } from "../timing";
+import { runningTurnTimeMs, turnTimeMs } from "../turnTime";
 import styles from "./TurnStrip.module.css";
 
 // Below the sparse bar's minimum width plus its gap, bars drop the gap and
@@ -88,8 +89,9 @@ export function createRunningElapsed(running: Accessor<HistoryRunningTurn | null
 // because task URLs with and without their slug name the same turn.
 export default function TurnStrip(props: {
   turns: readonly HistoryTurn[];
-  // The running turn follows the completed turns; its bar is runningMs long,
-  // on the clock of the view that shows the turn's other running figures.
+  // The running turn follows the completed turns. runningMs is its wall time
+  // on the clock of the view that shows the turn's other running figures; its
+  // bar draws the turn time within it, which stops while a question is open.
   running: HistoryRunningTurn | null;
   runningMs: number | null;
   // The turn shown beside the strip, or null in the overview and context views.
@@ -97,9 +99,10 @@ export default function TurnStrip(props: {
   href: (turn: number) => string;
   lane?: TurnStripLane;
 }) {
-  const elapsed = () => (props.running ? props.runningMs : null);
+  const elapsed = () =>
+    props.running && props.runningMs !== null ? runningTurnTimeMs(props.running, props.runningMs) : null;
   const longest = createMemo(() =>
-    props.turns.reduce((max, turn) => Math.max(max, turn.durationMs), Math.max(1_000, elapsed() ?? 0)),
+    props.turns.reduce((max, turn) => Math.max(max, turnTimeMs(turn)), Math.max(1_000, elapsed() ?? 0)),
   );
   // The axis tops out at the first round step at or above the longest turn.
   const step = () => durationTickStep(longest(), durationParts);
@@ -279,9 +282,9 @@ export default function TurnStrip(props: {
               bar(
                 turn.number,
                 turn,
-                () => `Turn ${turn.number}, ${formatExactSeconds(turn.durationMs)}`,
-                () => `Turn ${turn.number} · ${formatTotalDuration(turn.durationMs)}`,
-                () => turn.durationMs / top(),
+                () => `Turn ${turn.number}, ${formatExactSeconds(turnTimeMs(turn))}`,
+                () => `Turn ${turn.number} · ${formatTotalDuration(turnTimeMs(turn))}`,
+                () => turnTimeMs(turn) / top(),
                 false,
               )
             }
@@ -291,8 +294,10 @@ export default function TurnStrip(props: {
               bar(
                 running.number,
                 null,
-                () => `Turn ${running.number}, running, ${formatExactSeconds(elapsed() ?? 0)} so far`,
-                () => `Turn ${running.number} · running · ${formatTotalDuration(elapsed() ?? 0)}`,
+                () =>
+                  `Turn ${running.number}, ${running.askingSince ? "awaiting you" : "running"}, ${formatExactSeconds(elapsed() ?? 0)} so far`,
+                () =>
+                  `Turn ${running.number} · ${running.askingSince ? "awaiting you" : "running"} · ${formatTotalDuration(elapsed() ?? 0)}`,
                 () => (elapsed() ?? 0) / top(),
                 true,
               )

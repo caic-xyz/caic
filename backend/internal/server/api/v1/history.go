@@ -116,7 +116,10 @@ type HistorySection struct {
 // starting prompt before root output accepted it. A turn without any root
 // prompt or activity starts at its result. At is the result. DurationMS is the
 // harness-reported turn duration, else the time from StartedAt to At, as in
-// the task's turn metrics. WaitMS is the time from At to the prompt at
+// the task's turn metrics. AskMS is the part of DurationMS that the turn spent
+// only waiting for the user's answers: a root question is open, from its ask
+// to its answer or the result, and no other tool call, subagent, or background
+// command of the turn runs. The agent's own time is DurationMS minus AskMS. WaitMS is the time from At to the prompt at
 // WaitInput, which starts the next turn.
 // Effort is the root reasoning effort reported by the last init.
 // ContextTokens is the root context size when the turn ended, as the task's
@@ -134,6 +137,7 @@ type HistoryTurn struct {
 	Usage         EventUsage       `json:"usage"`
 	DurationMS    int64            `json:"durationMs"`
 	DurationAPIMS int64            `json:"durationAPIMs"`
+	AskMS         int64            `json:"askMs,omitempty"`
 	WaitInput     *HistoryPosition `json:"waitInput,omitempty"`
 	WaitMS        *int64           `json:"waitMs,omitempty"`
 	ChangeStat    *EventChangeStat `json:"changeStat,omitempty"`
@@ -147,11 +151,16 @@ type HistoryTurn struct {
 // so the turn keeps both when it completes. SectionID is the context it runs
 // in; compaction can move it to a later one. A turn stops running when the
 // harness process exits without ending it: the turn does not complete, and a
-// later root prompt or activity resumes it from the same start.
+// later root prompt or activity resumes it from the same start. AskMS is the
+// time the turn has only waited for the user's answers so far, as in
+// HistoryTurn. AskingSince is when the current such wait started, absent when
+// no question is open or other work runs; AskMS excludes that wait.
 type HistoryRunningTurn struct {
-	Number    int       `json:"number"`
-	SectionID string    `json:"sectionID"`
-	StartedAt time.Time `json:"startedAt"`
+	Number      int        `json:"number"`
+	SectionID   string     `json:"sectionID"`
+	StartedAt   time.Time  `json:"startedAt"`
+	AskMS       int64      `json:"askMs,omitempty"`
+	AskingSince *time.Time `json:"askingSince,omitempty"`
 }
 
 // HistoryTurnSpanKind names the lane of a turn timeline span.
@@ -159,9 +168,12 @@ type HistoryTurnSpanKind string
 
 // Turn timeline span kinds.
 const (
+	// HistoryTurnSpanKindAsk is the root agent waiting for the user's answer to
+	// its question. It has no EndMS while the question is open.
+	HistoryTurnSpanKindAsk HistoryTurnSpanKind = "ask"
 	// HistoryTurnSpanKindBackground is a detached command started in the turn.
 	HistoryTurnSpanKindBackground HistoryTurnSpanKind = "background"
-	// HistoryTurnSpanKindModel is turn time that no root tool call covers. It is
+	// HistoryTurnSpanKindModel is turn time that no root tool call or question covers. It is
 	// inferred: harnesses report a model call only when it ends, so this time
 	// also contains harness overhead between calls. In a running turn, the
 	// model span after the last root tool call is provisional and has no EndMS.

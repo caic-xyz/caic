@@ -1,4 +1,4 @@
-// Tests turn timelines: concurrent and child tools, subagents, outliving commands, queued turns, per-call usage across harnesses, tool totals, and caps.
+// Tests turn timelines: concurrent and child tools, subagents, outliving commands, queued turns, questions awaiting the user, per-call usage across harnesses, tool totals, and caps.
 
 package history
 
@@ -474,6 +474,82 @@ func testRunningTurn(t *testing.T) {
 		}
 		if last := got.Spans[len(got.Spans)-1]; last.EndMS == nil || *last.EndMS != 5_000 {
 			t.Fatalf("completed: last span = %+v, want a model span ending at the result", last)
+		}
+	})
+	t.Run("a question waits for the user apart from the agent's time", func(t *testing.T) {
+		t.Parallel()
+		// Minimized from a task log: Claude asks through AskUserQuestion, the
+		// turn stays open, and the answer arrives as the question's tool result.
+		ask := func(id string) *agent.AskMessage { return &agent.AskMessage{ToolUseID: id} }
+		f := newLiveTimeline(t)
+		f.add(at(1_000, prompt()), at(2_000, ask("q")))
+		since := time.UnixMilli(2_000).UTC()
+		want := &v1.HistoryRunningTurn{Number: 1, SectionID: "1", StartedAt: time.UnixMilli(1_000).UTC(), AskingSince: &since}
+		if r := f.running(); !reflect.DeepEqual(r, want) {
+			t.Fatalf("asking: running = %+v, want %+v", r, want)
+		}
+		// The open question covers the rest of the axis, not model time.
+		got := timeline(f, 1, 4_000)
+		wantSpans := []spanShape{
+			{Kind: v1.HistoryTurnSpanKindModel, Start: 0, End: new(int64(1_000))},
+			{Kind: v1.HistoryTurnSpanKindAsk, Start: 1_000, ToolUseID: "q"},
+		}
+		if s := shapes(got.Spans); !reflect.DeepEqual(s, wantSpans) || got.ModelMS != 1_000 || len(got.Tools) != 0 {
+			t.Fatalf("asking: model = %d, tools = %+v, spans = %+v\nwant %+v", got.ModelMS, got.Tools, s, wantSpans)
+		}
+
+		f.add(at(6_000, done("q", &root)), at(6_500, ask("late")))
+		want = &v1.HistoryRunningTurn{Number: 1, SectionID: "1", StartedAt: time.UnixMilli(1_000).UTC(), AskMS: 4_000}
+		since = time.UnixMilli(6_500).UTC()
+		want.AskingSince = &since
+		if r := f.running(); !reflect.DeepEqual(r, want) {
+			t.Fatalf("answered: running = %+v, want %+v", r, want)
+		}
+		// A question still open at the result waits until it.
+		f.add(at(7_000, result()))
+		_, _, meta, err := f.source.Sections(t.Context(), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if turn := meta.Turns[0]; turn.DurationMS != 6_000 || turn.AskMS != 4_500 {
+			t.Fatalf("completed: duration = %d, ask = %d; want 6000, 4500", turn.DurationMS, turn.AskMS)
+		}
+		got = timeline(f, 1, 60_000)
+		wantSpans = []spanShape{
+			{Kind: v1.HistoryTurnSpanKindModel, Start: 0, End: new(int64(1_000))},
+			{Kind: v1.HistoryTurnSpanKindAsk, Start: 1_000, End: new(int64(5_000)), Status: "completed", ToolUseID: "q"},
+			{Kind: v1.HistoryTurnSpanKindModel, Start: 5_000, End: new(int64(5_500))},
+			{Kind: v1.HistoryTurnSpanKindAsk, Start: 5_500, ToolUseID: "late"},
+		}
+		if s := shapes(got.Spans); !reflect.DeepEqual(s, wantSpans) || got.ModelMS != 1_500 {
+			t.Fatalf("completed: model = %d, spans = %+v\nwant %+v", got.ModelMS, s, wantSpans)
+		}
+	})
+	t.Run("work running beside a question is the agent's time", func(t *testing.T) {
+		t.Parallel()
+		// Minimized from a task log: Claude starts a background subagent, then
+		// asks; the subagent works for an hour of the question's four.
+		f := newLiveTimeline(t)
+		spawned := &agent.NativeSubagentMessage{Subagent: agent.NativeSubagent{ID: "agent-1", ToolUseID: "bg", Status: agent.NativeSubagentStatusRunning, Background: true}}
+		f.add(at(1_000, prompt()), at(2_000, use("bg", "Agent", &root), spawned), at(2_500, done("bg", &root)), at(3_000, &agent.AskMessage{ToolUseID: "q"}))
+		want := &v1.HistoryRunningTurn{Number: 1, SectionID: "1", StartedAt: time.UnixMilli(1_000).UTC()}
+		if r := f.running(); !reflect.DeepEqual(r, want) {
+			t.Fatalf("subagent working: running = %+v, want %+v", r, want)
+		}
+		finished := &agent.NativeSubagentMessage{Subagent: agent.NativeSubagent{ID: "agent-1", Status: agent.NativeSubagentStatusCompleted}}
+		f.add(at(7_000, finished))
+		since := time.UnixMilli(7_000).UTC()
+		want.AskingSince = &since
+		if r := f.running(); !reflect.DeepEqual(r, want) {
+			t.Fatalf("idle: running = %+v, want %+v", r, want)
+		}
+		f.add(at(10_000, done("q", &root)), at(11_000, result()))
+		_, _, meta, err := f.source.Sections(t.Context(), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if turn := meta.Turns[0]; turn.DurationMS != 10_000 || turn.AskMS != 3_000 {
+			t.Fatalf("completed: duration = %d, ask = %d; want 10000, 3000", turn.DurationMS, turn.AskMS)
 		}
 	})
 	t.Run("a command that outlives its turn ends later", func(t *testing.T) {

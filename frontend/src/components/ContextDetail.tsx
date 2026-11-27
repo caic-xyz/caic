@@ -8,6 +8,7 @@ import type { HistoryRunningTurn, HistorySection, HistoryTurn } from "@sdk/types
 import { contextEndDetail } from "../contextEnd";
 import { formatChangeStat, formatMoney, formatTime, formatTokens, formatUSD } from "../formatting";
 import { formatExactSeconds, formatTotalDuration } from "../timing";
+import { turnTimeMs } from "../turnTime";
 import ActionButton from "./ActionButton";
 import ChartDataTable from "./ChartDataTable";
 import { PerformanceBody, PerformanceSection, useArrowStepping } from "./PerformanceDetail";
@@ -69,9 +70,10 @@ function totalsOf(turns: readonly HistoryTurn[]): Totals {
         : null,
   };
   for (const turn of turns) {
-    totals.durationMs += turn.durationMs;
+    totals.durationMs += turnTimeMs(turn);
     totals.apiMs += turn.durationAPIMs;
-    totals.waitMs += turn.waitMs ?? 0;
+    // The user's time covers both prompting and answering questions.
+    totals.waitMs += (turn.waitMs ?? 0) + (turn.askMs ?? 0);
     totals.inputTokens += turn.usage.inputTokens;
     totals.cacheWriteTokens += turn.usage.cacheCreationInputTokens;
     totals.cacheReadTokens += turn.usage.cacheReadInputTokens;
@@ -179,7 +181,7 @@ export default function ContextDetail(props: {
   const growthRows = () =>
     turns().map((turn) => [
       String(turn.number),
-      formatExactSeconds(turn.durationMs),
+      formatExactSeconds(turnTimeMs(turn)),
       turn.contextTokens ? turn.contextTokens.toLocaleString() : "Unknown",
       turn.usage.contextWindow ? turn.usage.contextWindow.toLocaleString() : "Unknown",
       turn.usage.inputTokens.toLocaleString(),

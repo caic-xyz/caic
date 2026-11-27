@@ -13,17 +13,19 @@ import { boundTooltipText } from "../tooltipText";
 import Table from "./Table";
 import styles from "./TurnTimeline.module.css";
 
-type LaneID = "model" | "tools" | "subagents" | "childTools" | "background";
+type LaneID = "model" | "tools" | "ask" | "subagents" | "childTools" | "background";
 
 const laneNames: Record<LaneID, string> = {
   model: "Model",
   tools: "Tools",
+  ask: "Awaiting you",
   subagents: "Subagents",
   childTools: "Subagent tools",
   background: "Background",
 };
-const laneOrder: readonly LaneID[] = ["model", "tools", "subagents", "childTools", "background"];
+const laneOrder: readonly LaneID[] = ["model", "tools", "ask", "subagents", "childTools", "background"];
 const omittedNouns: Record<HistoryTurnSpanKind, [string, string]> = {
+  ask: ["question", "questions"],
   model: ["model gap", "model gaps"],
   tool: ["tool call", "tool calls"],
   subagent: ["subagent", "subagents"],
@@ -56,6 +58,8 @@ interface Lane {
 
 function laneOf(span: HistoryTurnSpan): LaneID {
   switch (span.kind) {
+    case "ask":
+      return "ask";
     case "model":
       return "model";
     case "subagent":
@@ -79,6 +83,7 @@ function endText(span: HistoryTurnSpan, duration: number, running: boolean): str
   if (span.endMs === undefined) {
     if (provisional(span)) return `so far ${formatExactSeconds(duration - span.startMs)}`;
     if (span.kind === "tool") return running ? "still running" : "open at turn end";
+    if (span.kind === "ask") return running ? "still waiting" : "unanswered at turn end";
     return span.status === "running" ? "still running" : "end unknown";
   }
   if (span.endMs > duration && !running) return `ends ${formatExactSeconds(span.endMs - duration)} after the turn`;
@@ -92,6 +97,7 @@ function outcome(span: HistoryTurnSpan): string {
 
 function spanName(span: HistoryTurnSpan): string {
   if (span.kind === "model") return "Model time";
+  if (span.kind === "ask") return "Question";
   const label = span.label || (span.kind === "background" ? span.commandID : span.activityID) || span.kind;
   return span.detail ? `${label} ${span.detail}` : label;
 }
@@ -106,6 +112,7 @@ function spanTarget(span: HistoryTurnSpan, turnStart: number): TranscriptTarget 
       return { toolKey: null, nativeID: null, ownerAgentID: null, at: turnStart + (span.endMs ?? span.startMs) - 1 };
     case "subagent":
       return { toolKey: null, nativeID: span.activityID ?? null, ownerAgentID: null, at };
+    case "ask":
     case "tool":
     case "background":
       return {
@@ -127,6 +134,8 @@ function spanKey(span: HistoryTurnSpan): string {
       return `subagent:${span.activityID ?? span.startMs}`;
     case "background":
       return `background:${span.commandID ?? span.startMs}`;
+    case "ask":
+      return `ask:${span.toolUseID ? toolIdentity(span.source, span.toolUseID) : span.startMs}`;
     case "tool":
       return `tool:${span.toolUseID ? toolIdentity(span.source, span.toolUseID) : span.startMs}`;
   }
@@ -179,6 +188,9 @@ function timelineLanes(timeline: HistoryTurnTimeline, duration: number, running:
     if (list) list.push(item);
     else byLane.set(lane, [item]);
   }
+  // Root tool calls and questions cover the turn time the model does not;
+  // questions take theirs out of the tool lane's share.
+  const askMs = (byLane.get("ask") ?? []).reduce((sum, item) => sum + item.end - item.span.startMs, 0);
   const lanes: Lane[] = [];
   for (const lane of laneOrder) {
     const spans = byLane.get(lane) ?? [];
@@ -189,10 +201,12 @@ function timelineLanes(timeline: HistoryTurnTimeline, duration: number, running:
       lane === "model"
         ? formatTotalDuration(timeline.modelMs)
         : lane === "tools"
-          ? `${count} ${count === 1 ? "call" : "calls"} · ${formatTotalDuration(duration - timeline.modelMs)}`
-          : lane === "childTools"
-            ? `${count} ${count === 1 ? "call" : "calls"}`
-            : String(count);
+          ? `${count} ${count === 1 ? "call" : "calls"} · ${formatTotalDuration(Math.max(0, duration - timeline.modelMs - askMs))}`
+          : lane === "ask"
+            ? `${count} ${count === 1 ? "question" : "questions"} · ${formatTotalDuration(askMs)}`
+            : lane === "childTools"
+              ? `${count} ${count === 1 ? "call" : "calls"}`
+              : String(count);
     lanes.push({ key: lane, summary, rows: pack(spans, duration), spans });
   }
   return lanes;

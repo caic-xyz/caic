@@ -31,6 +31,7 @@ function sameTurn(a: HistoryTurn, b: HistoryTurn | undefined): boolean {
     a.effort === b.effort &&
     a.durationMs === b.durationMs &&
     a.durationAPIMs === b.durationAPIMs &&
+    a.askMs === b.askMs &&
     a.waitMs === b.waitMs &&
     sameFacts(a.waitInput, b.waitInput) &&
     sameFacts(a.usage, b.usage) &&

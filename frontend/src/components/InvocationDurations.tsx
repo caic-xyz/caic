@@ -5,6 +5,7 @@ import { A, useLocation } from "@solidjs/router";
 import type { HistorySection, HistoryTurn } from "@sdk/types.gen";
 import { taskContextPath, taskPathFromPathname, taskTurnPath } from "../taskPath";
 import { formatTotalDuration } from "../timing";
+import { turnTimeMs } from "../turnTime";
 import Duration from "./Duration";
 import styles from "./InvocationDurations.module.css";
 
@@ -12,7 +13,7 @@ import styles from "./InvocationDurations.module.css";
 // the time links to the turn's Performance view.
 export function TurnDurationLink(props: { turn: HistoryTurn }) {
   const location = useLocation();
-  const duration = () => formatTotalDuration(props.turn.durationMs);
+  const duration = () => formatTotalDuration(turnTimeMs(props.turn));
   return (
     <A
       href={taskTurnPath(taskPathFromPathname(location.pathname), props.turn.number)}

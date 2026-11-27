@@ -1242,6 +1242,7 @@ export function validateHistoryTurn(raw: ValidatorInput): HistoryTurn {
     usage: validateEventUsage(obj["usage"]),
     durationMs: asNumber(obj["durationMs"], "HistoryTurn.durationMs"),
     durationAPIMs: asNumber(obj["durationAPIMs"], "HistoryTurn.durationAPIMs"),
+    ...(Object.prototype.hasOwnProperty.call(obj, "askMs") ? { askMs: asNumber(obj["askMs"], "HistoryTurn.askMs") } : {}),
     ...(Object.prototype.hasOwnProperty.call(obj, "waitInput") ? { waitInput: validateHistoryPosition(obj["waitInput"]) } : {}),
     ...(Object.prototype.hasOwnProperty.call(obj, "waitMs") ? { waitMs: asNumber(obj["waitMs"], "HistoryTurn.waitMs") } : {}),
     ...(Object.prototype.hasOwnProperty.call(obj, "changeStat") ? { changeStat: validateEventChangeStat(obj["changeStat"]) } : {}),
@@ -1259,6 +1260,8 @@ export function validateHistoryRunningTurn(raw: ValidatorInput): HistoryRunningT
     number: asNumber(obj["number"], "HistoryRunningTurn.number"),
     sectionID: asString(obj["sectionID"], "HistoryRunningTurn.sectionID"),
     startedAt: asString(obj["startedAt"], "HistoryRunningTurn.startedAt") as ISOTimestamp,
+    ...(Object.prototype.hasOwnProperty.call(obj, "askMs") ? { askMs: asNumber(obj["askMs"], "HistoryRunningTurn.askMs") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "askingSince") ? { askingSince: asString(obj["askingSince"], "HistoryRunningTurn.askingSince") as ISOTimestamp } : {}),
   };
 }
 

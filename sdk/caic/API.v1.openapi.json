@@ -6247,8 +6247,15 @@
       },
       "HistoryRunningTurn": {
         "type": "object",
-        "description": "HistoryRunningTurn is the root turn in progress: a root prompt or root\nactivity started it, and no root result has ended it yet. Number is one past\nthe last completed HistoryTurn, and StartedAt follows the HistoryTurn rules,\nso the turn keeps both when it completes. SectionID is the context it runs\nin; compaction can move it to a later one. A turn stops running when the\nharness process exits without ending it: the turn does not complete, and a\nlater root prompt or activity resumes it from the same start.",
+        "description": "HistoryRunningTurn is the root turn in progress: a root prompt or root\nactivity started it, and no root result has ended it yet. Number is one past\nthe last completed HistoryTurn, and StartedAt follows the HistoryTurn rules,\nso the turn keeps both when it completes. SectionID is the context it runs\nin; compaction can move it to a later one. A turn stops running when the\nharness process exits without ending it: the turn does not complete, and a\nlater root prompt or activity resumes it from the same start. AskMS is the\ntime the turn has only waited for the user's answers so far, as in\nHistoryTurn. AskingSince is when the current such wait started, absent when\nno question is open or other work runs; AskMS excludes that wait.",
         "properties": {
+          "askMs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "askingSince": {
+            "description": "ISOTimestamp"
+          },
           "number": {
             "type": "integer",
             "format": "int64"
@@ -6384,8 +6391,12 @@
       },
       "HistoryTurn": {
         "type": "object",
-        "description": "HistoryTurn retains numeric invocation facts independently of transcript\nlifetime. SectionID associates the turn with its context. Pricing is obtained\nseparately through getHistoryCosts using the embedded exact position.\n\nNumber counts root turns from 1 across every context section of the task;\ndelegated child results are not turns. StartedAt is the first root prompt or\nroot activity after the previous root result, as in the task's turn metrics.\nA turn the harness queues by itself, such as one delivering the end of\nbackground work, starts at its first root activity. Compaction keeps the\nstart; a context clear discards it, and so does a failed delivery of the\nstarting prompt before root output accepted it. A turn without any root\nprompt or activity starts at its result. At is the result. DurationMS is the\nharness-reported turn duration, else the time from StartedAt to At, as in\nthe task's turn metrics. WaitMS is the time from At to the prompt at\nWaitInput, which starts the next turn.\nEffort is the root reasoning effort reported by the last init.\nContextTokens is the root context size when the turn ended, as the task's\ncontext meter measures it: the native occupancy when the harness reports it,\nelse the input context of the last root API call. Zero means unknown.",
+        "description": "HistoryTurn retains numeric invocation facts independently of transcript\nlifetime. SectionID associates the turn with its context. Pricing is obtained\nseparately through getHistoryCosts using the embedded exact position.\n\nNumber counts root turns from 1 across every context section of the task;\ndelegated child results are not turns. StartedAt is the first root prompt or\nroot activity after the previous root result, as in the task's turn metrics.\nA turn the harness queues by itself, such as one delivering the end of\nbackground work, starts at its first root activity. Compaction keeps the\nstart; a context clear discards it, and so does a failed delivery of the\nstarting prompt before root output accepted it. A turn without any root\nprompt or activity starts at its result. At is the result. DurationMS is the\nharness-reported turn duration, else the time from StartedAt to At, as in\nthe task's turn metrics. AskMS is the part of DurationMS that the turn spent\nonly waiting for the user's answers: a root question is open, from its ask\nto its answer or the result, and no other tool call, subagent, or background\ncommand of the turn runs. The agent's own time is DurationMS minus AskMS. WaitMS is the time from At to the prompt at\nWaitInput, which starts the next turn.\nEffort is the root reasoning effort reported by the last init.\nContextTokens is the root context size when the turn ended, as the task's\ncontext meter measures it: the native occupancy when the harness reports it,\nelse the input context of the last root API call. Zero means unknown.",
         "properties": {
+          "askMs": {
+            "type": "integer",
+            "format": "int64"
+          },
           "at": {
             "description": "ISOTimestamp"
           },
@@ -6646,12 +6657,13 @@
       "HistoryTurnSpanKind": {
         "type": "string",
         "enum": [
+          "ask",
           "background",
           "model",
           "subagent",
           "tool"
         ],
-        "description": "HistoryTurnSpanKind names the lane of a turn timeline span.\n\n- `background`: HistoryTurnSpanKindBackground is a detached command started in the turn.\n- `model`: HistoryTurnSpanKindModel is turn time that no root tool call covers. It is inferred: harnesses report a model call only when it ends, so this time also contains harness overhead between calls. In a running turn, the model span after the last root tool call is provisional and has no EndMS.\n- `subagent`: HistoryTurnSpanKindSubagent is a native subagent started in the turn.\n- `tool`: HistoryTurnSpanKindTool is a tool call by the root agent or a child actor."
+        "description": "HistoryTurnSpanKind names the lane of a turn timeline span.\n\n- `ask`: HistoryTurnSpanKindAsk is the root agent waiting for the user's answer to its question. It has no EndMS while the question is open.\n- `background`: HistoryTurnSpanKindBackground is a detached command started in the turn.\n- `model`: HistoryTurnSpanKindModel is turn time that no root tool call or question covers. It is inferred: harnesses report a model call only when it ends, so this time also contains harness overhead between calls. In a running turn, the model span after the last root tool call is provisional and has no EndMS.\n- `subagent`: HistoryTurnSpanKindSubagent is a native subagent started in the turn.\n- `tool`: HistoryTurnSpanKindTool is a tool call by the root agent or a child actor."
       },
       "HistoryTurnTimeline": {
         "type": "object",

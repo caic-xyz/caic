@@ -6,6 +6,7 @@
   --lane-child-tools: var(--color-chart-child-tool);
   --lane-subagents: var(--color-plan);
   --lane-background: var(--color-chart-command);
+  --lane-ask: var(--color-warning);
   --span-height: 0.75rem;
 
   margin: 0.75rem 0 0;
@@ -86,6 +87,10 @@
 
 .lane[data-lane="background"] {
   --lane-color: var(--lane-background);
+}
+
+.lane[data-lane="ask"] {
+  --lane-color: var(--lane-ask);
 }
 
 .laneLabel {

@@ -1,4 +1,4 @@
-// Tests timeline lanes and exact text, short-turn gridlines, a running turn's provisional time and in-place growth, keyboard span activation, conversation reveal, and transcript highlighting.
+// Tests timeline lanes and exact text, questions apart from tool time, short-turn gridlines, a running turn's provisional time and in-place growth, keyboard span activation, conversation reveal, and transcript highlighting.
 
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { render, screen, waitFor, within } from "@solidjs/testing-library";
@@ -130,6 +130,28 @@ describe("TurnTimeline", () => {
     const table = within(screen.getByRole("region", { name: "Timeline spans" }));
     const row = table.getByRole("button", { name: "npm run dev" }).closest("tr");
     expect(row).toHaveTextContent("Backgroundnpm run dev35.000 s3,660.000 s (after the turn)");
+  });
+
+  it("puts the wait for the user's answer in its own lane, out of the tools' time", () => {
+    renderTimeline(
+      true,
+      {
+        ...timeline,
+        modelMs: 20_000,
+        spans: [
+          { kind: "model", startMs: 0, endMs: 5_000 },
+          { kind: "ask", startMs: 5_000, endMs: 35_000, status: "completed", toolUseID: "ask" },
+          { kind: "tool", startMs: 35_000, endMs: 45_000, label: "Edit", status: "completed", toolUseID: "edit" },
+          { kind: "model", startMs: 45_000, endMs: 60_000 },
+        ],
+        omitted: [],
+      },
+      null,
+    );
+
+    const lanes = screen.getAllByTestId("turn-timeline-lane").map((lane) => lane.firstElementChild?.textContent);
+    expect(lanes).toEqual(["Model 0:20", "Tools 1 call · 0:10", "Awaiting you 1 question · 0:30"]);
+    expect(span(/^Awaiting you: Question, at 5\.000 s, lasts 30\.000 s$/)).toBeInTheDocument();
   });
 
   it("marks a running turn's latest model time provisional and grows in place", async () => {

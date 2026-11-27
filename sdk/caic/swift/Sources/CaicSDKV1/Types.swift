@@ -512,6 +512,7 @@ public struct HistoryTurnSpanKind: Codable, Equatable, Hashable {
 
     public init(_ value: String) { self.value = value }
 
+    public static let Ask = HistoryTurnSpanKind("ask")
     public static let Background = HistoryTurnSpanKind("background")
     public static let Model = HistoryTurnSpanKind("model")
     public static let Subagent = HistoryTurnSpanKind("subagent")
@@ -5352,7 +5353,10 @@ public struct HistoryRoute: Codable {
 /// starting prompt before root output accepted it. A turn without any root
 /// prompt or activity starts at its result. At is the result. DurationMS is the
 /// harness-reported turn duration, else the time from StartedAt to At, as in
-/// the task's turn metrics. WaitMS is the time from At to the prompt at
+/// the task's turn metrics. AskMS is the part of DurationMS that the turn spent
+/// only waiting for the user's answers: a root question is open, from its ask
+/// to its answer or the result, and no other tool call, subagent, or background
+/// command of the turn runs. The agent's own time is DurationMS minus AskMS. WaitMS is the time from At to the prompt at
 /// WaitInput, which starts the next turn.
 /// Effort is the root reasoning effort reported by the last init.
 /// ContextTokens is the root context size when the turn ended, as the task's
@@ -5370,13 +5374,14 @@ public struct HistoryTurn: Codable {
     public let usage: EventUsage
     public let durationMs: Int
     public let durationAPIMs: Int
+    public let askMs: Int?
     public let waitInput: HistoryPosition?
     public let waitMs: Int?
     public let changeStat: EventChangeStat?
     public let cost: EventCost?
     public let contextTokens: Int?
 
-    public init(recordID: Int, index: UInt32, number: Int, sectionID: String, startedAt: ISOTimestamp, at: ISOTimestamp, model: String, effort: String? = nil, usage: EventUsage, durationMs: Int, durationAPIMs: Int, waitInput: HistoryPosition? = nil, waitMs: Int? = nil, changeStat: EventChangeStat? = nil, cost: EventCost? = nil, contextTokens: Int? = nil) {
+    public init(recordID: Int, index: UInt32, number: Int, sectionID: String, startedAt: ISOTimestamp, at: ISOTimestamp, model: String, effort: String? = nil, usage: EventUsage, durationMs: Int, durationAPIMs: Int, askMs: Int? = nil, waitInput: HistoryPosition? = nil, waitMs: Int? = nil, changeStat: EventChangeStat? = nil, cost: EventCost? = nil, contextTokens: Int? = nil) {
         self.recordID = recordID
         self.index = index
         self.number = number
@@ -5388,6 +5393,7 @@ public struct HistoryTurn: Codable {
         self.usage = usage
         self.durationMs = durationMs
         self.durationAPIMs = durationAPIMs
+        self.askMs = askMs
         self.waitInput = waitInput
         self.waitMs = waitMs
         self.changeStat = changeStat
@@ -5402,16 +5408,23 @@ public struct HistoryTurn: Codable {
 /// so the turn keeps both when it completes. SectionID is the context it runs
 /// in; compaction can move it to a later one. A turn stops running when the
 /// harness process exits without ending it: the turn does not complete, and a
-/// later root prompt or activity resumes it from the same start.
+/// later root prompt or activity resumes it from the same start. AskMS is the
+/// time the turn has only waited for the user's answers so far, as in
+/// HistoryTurn. AskingSince is when the current such wait started, absent when
+/// no question is open or other work runs; AskMS excludes that wait.
 public struct HistoryRunningTurn: Codable {
     public let number: Int
     public let sectionID: String
     public let startedAt: ISOTimestamp
+    public let askMs: Int?
+    public let askingSince: ISOTimestamp?
 
-    public init(number: Int, sectionID: String, startedAt: ISOTimestamp) {
+    public init(number: Int, sectionID: String, startedAt: ISOTimestamp, askMs: Int? = nil, askingSince: ISOTimestamp? = nil) {
         self.number = number
         self.sectionID = sectionID
         self.startedAt = startedAt
+        self.askMs = askMs
+        self.askingSince = askingSince
     }
 }
 

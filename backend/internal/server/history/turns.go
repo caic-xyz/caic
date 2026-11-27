@@ -1,4 +1,4 @@
-// Builds one root turn's timeline, completed or still running, from projected tool events, indexed lifecycles, and journaled per-call usage, with inferred model gaps, per-tool time, and caps.
+// Builds one root turn's timeline, completed or still running, from projected tool and question events, indexed lifecycles, and journaled per-call usage, with inferred model gaps, per-tool time, and caps.
 
 package history
 
@@ -271,6 +271,11 @@ func (b *turnBuilder) observe(e *v1.HistoryEvent) {
 		}
 		b.spans = append(b.spans, span)
 	}
+	// A root question waits until the tool result carrying the answer.
+	if ask := m.Ask; ask != nil && !historyChild(&m.Source) && ask.ToolUseID != "" && b.within(m.Ts) {
+		b.open[scopedTool(&m.Source, ask.ToolUseID)] = len(b.spans)
+		b.spans = append(b.spans, v1.HistoryTurnSpan{Kind: v1.HistoryTurnSpanKindAsk, StartMS: m.Ts - b.start, Source: m.Source, ToolUseID: ask.ToolUseID})
+	}
 	if result := m.ToolResult; result != nil {
 		key := scopedTool(&m.Source, result.ToolUseID)
 		i, ok := b.open[key]
@@ -304,8 +309,8 @@ func (b *turnBuilder) offset(at *time.Time) *int64 {
 	return &ms
 }
 
-// timeline adds the inferred model spans, prices the calls, and bounds the
-// result. A running turn's axis ends at the later of now and its latest
+// timeline adds the inferred model spans in the time no root tool call or
+// question covers, prices the calls, and bounds the result. A running turn's axis ends at the later of now and its latest
 // observation.
 func (b *turnBuilder) timeline(now time.Time, pricer usage.ModelPricer) v1.HistoryTurnTimeline {
 	if b.running {
@@ -317,7 +322,7 @@ func (b *turnBuilder) timeline(now time.Time, pricer usage.ModelPricer) v1.Histo
 	var busy [][2]int64
 	for i := range b.spans {
 		span := &b.spans[i]
-		if span.Kind != v1.HistoryTurnSpanKindTool || historyChild(&span.Source) {
+		if span.Kind != v1.HistoryTurnSpanKindTool && span.Kind != v1.HistoryTurnSpanKindAsk || historyChild(&span.Source) {
 			continue
 		}
 		end := duration

@@ -54,6 +54,13 @@ type sectionIndex struct {
 	promptWait     int // Turn whose wait the pending prompt ended, or -1.
 	startAt        time.Time
 	startPos       v1.HistoryPosition
+	// asks holds the open root questions' tool use IDs. askIdle reports that
+	// the pending turn only waits for answers since askMark; askMS sums its
+	// earlier such waits.
+	asks    map[string]struct{}
+	askIdle bool
+	askMS   int64
+	askMark int64
 	// halted reports that the harness process exited during the pending turn:
 	// its start stands, but the turn no longer runs until root input or
 	// activity resumes it.
@@ -82,7 +89,7 @@ func newSectionIndex() sectionIndex {
 	return sectionIndex{
 		current: v1.HistorySection{ID: "1", Skills: []v1.EventSkillLoad{}},
 		tools:   map[toolKey]toolStart{}, totals: map[string]v1.HistoryToolTiming{},
-		activities: map[string]v1.HistoryActivity{}, activityOrigins: map[string]v1.HistoryPosition{}, backgroundCommands: []v1.HistoryBackgroundCommand{}, backgroundIndex: map[string]int{}, transcripts: map[string]struct{}{}, routing: map[activityRoute]uint64{}, pendingScopes: map[string]map[string]uint64{}, transcriptOrigins: map[transcriptOrigin]transcriptObservation{}, runningPositions: map[string]transcriptObservation{}, lifecycleAnchors: map[string]time.Time{}, waiting: -1, promptWait: -1,
+		activities: map[string]v1.HistoryActivity{}, activityOrigins: map[string]v1.HistoryPosition{}, backgroundCommands: []v1.HistoryBackgroundCommand{}, backgroundIndex: map[string]int{}, transcripts: map[string]struct{}{}, routing: map[activityRoute]uint64{}, pendingScopes: map[string]map[string]uint64{}, transcriptOrigins: map[transcriptOrigin]transcriptObservation{}, runningPositions: map[string]transcriptObservation{}, lifecycleAnchors: map[string]time.Time{}, waiting: -1, promptWait: -1, asks: map[string]struct{}{},
 		turns: []v1.HistoryTurn{}, lastResultFact: -1, actorRecords: map[string][]uint64{}, delegationRecords: map[delegationScope][]uint64{},
 	}
 }
@@ -93,6 +100,7 @@ func (s *sectionIndex) append(e *v1.HistoryEvent) {
 		s.revision++
 	}
 	p := eventPosition(e)
+	s.accrueAsk(m.Ts)
 	s.observeTool(m)
 	s.observeActivity(e)
 	rootBoundary := !historyChild(&m.Source) && (m.Init != nil || m.System != nil && (m.System.Subtype == "compact_boundary" || m.System.Subtype == "context_cleared"))
@@ -212,6 +220,7 @@ func (s *sectionIndex) append(e *v1.HistoryEvent) {
 		if m.SkillLoad != nil {
 			s.addSkill(*m.SkillLoad)
 		}
+		s.observeAsk(m)
 		if m.Result != nil && !historyChild(&m.Source) {
 			r := m.Result
 			model := r.Usage.ReportedModel
@@ -227,7 +236,7 @@ func (s *sectionIndex) append(e *v1.HistoryEvent) {
 				duration = max(0, m.Ts-s.startAt.UnixMilli())
 				s.facts[len(s.facts)-1].duration = float64(duration) / 1000
 			}
-			s.turns = append(s.turns, v1.HistoryTurn{HistoryPosition: p, Number: len(s.turns) + 1, SectionID: s.current.ID, StartedAt: s.startAt, At: historyTime(m.Ts), Model: model, Effort: s.effort, Usage: r.Usage, DurationMS: duration, DurationAPIMS: int64(math.Round(r.DurationAPI * 1000)), Cost: r.Cost, ContextTokens: s.contextMeter.Tokens()})
+			s.turns = append(s.turns, v1.HistoryTurn{HistoryPosition: p, Number: len(s.turns) + 1, SectionID: s.current.ID, StartedAt: s.startAt, At: historyTime(m.Ts), Model: model, Effort: s.effort, Usage: r.Usage, DurationMS: duration, DurationAPIMS: int64(math.Round(r.DurationAPI * 1000)), AskMS: min(s.askMS, duration), Cost: r.Cost, ContextTokens: s.contextMeter.Tokens()})
 			s.turnStarts = append(s.turnStarts, s.startPos)
 			s.waiting = len(s.turns) - 1
 			s.clearPrompt()
@@ -250,6 +259,7 @@ func (s *sectionIndex) append(e *v1.HistoryEvent) {
 			s.afterBackgroundPrompt = len(m.Result.PendingToolUseIDs) != 0
 		}
 	}
+	s.noteAskIdle(m.Ts)
 	s.last = p
 	s.indexRecords(e)
 }
@@ -329,6 +339,10 @@ func (s *sectionIndex) close(e *v1.HistoryEvent) {
 // does.
 func (s *sectionIndex) clearPrompt() {
 	s.halted = false
+	clear(s.asks)
+	s.askIdle = false
+	s.askMS = 0
+	s.askMark = 0
 	s.promptPos = v1.HistoryPosition{}
 	s.promptAccepted = false
 	s.promptWait = -1
@@ -365,12 +379,85 @@ func (s *sectionIndex) observeTurnEnd(msg agent.Message) {
 	}
 }
 
+// observeAsk tracks the root agent's open questions: each is open from its
+// ask event to the tool result that carries the user's answer.
+func (s *sectionIndex) observeAsk(m *v1.EventMessage) {
+	if historyChild(&m.Source) {
+		return
+	}
+	if m.Ask != nil && m.Ask.ToolUseID != "" && m.Ts > 0 {
+		if _, ok := s.asks[m.Ask.ToolUseID]; !ok {
+			s.asks[m.Ask.ToolUseID] = struct{}{}
+			s.revision++
+		}
+	}
+	if m.ToolResult != nil {
+		if _, ok := s.asks[m.ToolResult.ToolUseID]; ok {
+			delete(s.asks, m.ToolResult.ToolUseID)
+			s.revision++
+		}
+	}
+}
+
+// accrueAsk adds the wait since askMark to askMS when the turn only waited
+// for answers until the event at ts. Only events change that state, so it
+// holds between them.
+func (s *sectionIndex) accrueAsk(ts int64) {
+	if s.askIdle && ts > s.askMark {
+		s.askMS += ts - s.askMark
+		s.askMark = ts
+	}
+}
+
+// noteAskIdle records whether the turn only waits for answers after the event
+// at ts. A change alters the running turn, so it revises the metadata.
+func (s *sectionIndex) noteAskIdle(ts int64) {
+	idle := len(s.asks) > 0 && s.idle()
+	if idle == s.askIdle {
+		return
+	}
+	s.askIdle = idle
+	if idle && ts > 0 {
+		s.askMark = ts
+	}
+	s.revision++
+}
+
+// idle reports that the turn does nothing but wait for answers: no tool call
+// of this turn other than a question, subagent, or background command runs.
+// Work that runs while a question is open is the agent's time, not the user's.
+// A tool call from an earlier turn that never got a result does not count.
+func (s *sectionIndex) idle() bool {
+	start := s.startAt.UnixMilli()
+	for key, tool := range s.tools {
+		if _, ok := s.asks[key.id]; !ok && tool.ts >= start {
+			return false
+		}
+	}
+	for id := range s.activities {
+		if s.activities[id].Status == string(v1.EventNativeSubagentStatusRunning) {
+			return false
+		}
+	}
+	for i := range s.backgroundCommands {
+		if s.backgroundCommands[i].Status == "running" {
+			return false
+		}
+	}
+	return true
+}
+
 // runningTurn reports the turn in progress, if any.
 func (s *sectionIndex) runningTurn() *v1.HistoryRunningTurn {
 	if s.startPos.RecordID == 0 || s.halted {
 		return nil
 	}
-	return &v1.HistoryRunningTurn{Number: len(s.turns) + 1, SectionID: s.current.ID, StartedAt: s.startAt}
+	turn := &v1.HistoryRunningTurn{Number: len(s.turns) + 1, SectionID: s.current.ID, StartedAt: s.startAt, AskMS: s.askMS}
+	if s.askIdle {
+		since := historyTime(s.askMark)
+		turn.AskingSince = &since
+	}
+	return turn
 }
 
 func (s *sectionIndex) addSkill(load v1.EventSkillLoad) {
@@ -693,6 +780,7 @@ func (s *sectionIndex) hostExited(at time.Time) {
 	for i := range s.backgroundCommands {
 		s.retireCommand(i)
 	}
+	s.noteAskIdle(at.UnixMilli())
 }
 
 // retire folds a card that the harness stopped listing without an outcome: a

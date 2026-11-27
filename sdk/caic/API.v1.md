@@ -388,8 +388,9 @@ HistoryTurnSpanKind names the lane of a turn timeline span.
 
 | Value | Description |
 |-------|-------------|
+| `ask` | HistoryTurnSpanKindAsk is the root agent waiting for the user's answer to its question. It has no EndMS while the question is open. |
 | `background` | HistoryTurnSpanKindBackground is a detached command started in the turn. |
-| `model` | HistoryTurnSpanKindModel is turn time that no root tool call covers. It is inferred: harnesses report a model call only when it ends, so this time also contains harness overhead between calls. In a running turn, the model span after the last root tool call is provisional and has no EndMS. |
+| `model` | HistoryTurnSpanKindModel is turn time that no root tool call or question covers. It is inferred: harnesses report a model call only when it ends, so this time also contains harness overhead between calls. In a running turn, the model span after the last root tool call is provisional and has no EndMS. |
 | `subagent` | HistoryTurnSpanKindSubagent is a native subagent started in the turn. |
 | `tool` | HistoryTurnSpanKindTool is a tool call by the root agent or a child actor. |
 
@@ -2709,7 +2710,10 @@ start; a context clear discards it, and so does a failed delivery of the
 starting prompt before root output accepted it. A turn without any root
 prompt or activity starts at its result. At is the result. DurationMS is the
 harness-reported turn duration, else the time from StartedAt to At, as in
-the task's turn metrics. WaitMS is the time from At to the prompt at
+the task's turn metrics. AskMS is the part of DurationMS that the turn spent
+only waiting for the user's answers: a root question is open, from its ask
+to its answer or the result, and no other tool call, subagent, or background
+command of the turn runs. The agent's own time is DurationMS minus AskMS. WaitMS is the time from At to the prompt at
 WaitInput, which starts the next turn.
 Effort is the root reasoning effort reported by the last init.
 ContextTokens is the root context size when the turn ended, as the task's
@@ -2729,6 +2733,7 @@ else the input context of the last root API call. Zero means unknown.
 | `usage` | `EventUsage` |  | yes |
 | `durationMs` | `int64` |  | yes |
 | `durationAPIMs` | `int64` |  | yes |
+| `askMs` | `int64` |  |  |
 | `waitInput` | `HistoryPosition` |  |  |
 | `waitMs` | `int64` |  |  |
 | `changeStat` | `EventChangeStat` |  |  |
@@ -2743,13 +2748,18 @@ the last completed HistoryTurn, and StartedAt follows the HistoryTurn rules,
 so the turn keeps both when it completes. SectionID is the context it runs
 in; compaction can move it to a later one. A turn stops running when the
 harness process exits without ending it: the turn does not complete, and a
-later root prompt or activity resumes it from the same start.
+later root prompt or activity resumes it from the same start. AskMS is the
+time the turn has only waited for the user's answers so far, as in
+HistoryTurn. AskingSince is when the current such wait started, absent when
+no question is open or other work runs; AskMS excludes that wait.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `number` | `int` |  | yes |
 | `sectionID` | `string` |  | yes |
 | `startedAt` | `ISOTimestamp` |  | yes |
+| `askMs` | `int64` |  |  |
+| `askingSince` | `ISOTimestamp` |  |  |
 
 ### HistoryToolTiming
 

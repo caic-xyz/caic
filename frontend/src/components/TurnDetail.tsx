@@ -1,4 +1,4 @@
-// TurnDetail shows one turn's time, per-call tokens, tool time, resources, and cost beside the task's other turns, live while it runs, with ←/→ turn navigation.
+// TurnDetail shows one turn's time apart from its waits for the user's answers, per-call tokens, tool time, resources, and cost beside the task's other turns, live while it runs, with ←/→ turn navigation.
 
 import { createMemo, For, Show, type JSX } from "solid-js";
 import { A } from "@solidjs/router";
@@ -10,6 +10,7 @@ import { formatChangeStat, formatMoney, formatTime, formatTokens, formatUSD } fr
 import { durationTickStep, formatExactSeconds, formatTimingDuration, formatTotalDuration } from "../timing";
 import { useTaskTimeline } from "../TaskTimelineContext";
 import { createTurnTimelineLoad } from "../turnTimelineLoad";
+import { runningAskMs, runningTurnTimeMs, turnTimeMs } from "../turnTime";
 import ActionButton from "./ActionButton";
 import Button from "./Button";
 import { PerformanceBody, PerformanceSection, useArrowStepping } from "./PerformanceDetail";
@@ -77,12 +78,24 @@ export default function TurnDetail(props: {
     return Math.max(clock() ?? 0, ready?.durationMs ?? 0);
   };
   const viewedRunningMs = () => (props.viewed.state === "running" ? runningMs() : null);
+  // The running turn's own time and its waits for answers, within its wall time.
+  const runningTurn = () => (props.viewed.state === "running" ? props.running : null);
+  const runningTurnMs = () => {
+    const turn = runningTurn();
+    return turn ? runningTurnTimeMs(turn, viewedRunningMs() ?? 0) : 0;
+  };
+  const askMs = () => {
+    const turn = completed();
+    if (turn) return turn.askMs ?? 0;
+    const running = runningTurn();
+    return running ? runningAskMs(running, viewedRunningMs() ?? 0) : 0;
+  };
   // axisMs is the timeline's axis length, as TurnTimeline draws it.
   const axisMs = (ready: HistoryTurnTimeline) => viewedRunningMs() ?? ready.durationMs;
   const runningSummary = createMemo(() => {
     const parts: { value: string; label: string; cost: boolean }[] = [
-      { value: "Running", label: "", cost: false },
-      { value: formatTotalDuration(viewedRunningMs() ?? 0), label: "so far", cost: false },
+      { value: runningTurn()?.askingSince ? "Awaiting you" : "Running", label: "", cost: false },
+      { value: formatTotalDuration(runningTurnMs()), label: "so far", cost: false },
     ];
     const ready = timeline();
     if (ready) parts.push({ value: formatTokens(timelineTokens(ready)), label: "tokens", cost: false });
@@ -96,7 +109,7 @@ export default function TurnDetail(props: {
     const usage = turn.usage;
     const tokens = usage.inputTokens + usage.cacheCreationInputTokens + usage.cacheReadInputTokens + usage.outputTokens;
     const parts: { value: string; label: string; cost: boolean }[] = [
-      { value: formatTotalDuration(turn.durationMs), label: "turn", cost: false },
+      { value: formatTotalDuration(turnTimeMs(turn)), label: "turn", cost: false },
     ];
     if (turn.durationAPIMs > 0)
       parts.push({ value: formatTimingDuration(turn.durationAPIMs), label: "API", cost: false });
@@ -129,7 +142,8 @@ export default function TurnDetail(props: {
         {row("Model", turn.model || "Unknown", false)}
         {turn.effort ? row("Effort", turn.effort, false) : null}
         {row("Started", started(), false)}
-        {row("Turn time", exactDuration(turn.durationMs), false)}
+        {row("Turn time", exactDuration(turnTimeMs(turn)), false)}
+        {(turn.askMs ?? 0) > 0 ? row("Awaiting your answers", exactDuration(turn.askMs ?? 0), false) : null}
         {row("API time", exactDuration(turn.durationAPIMs), false)}
         {row("New input tokens", usage.inputTokens.toLocaleString(), false)}
         {row("Cache write tokens", usage.cacheCreationInputTokens.toLocaleString(), false)}
@@ -196,6 +210,11 @@ export default function TurnDetail(props: {
             )}
           </For>
         </p>
+        <Show when={askMs() > 0}>
+          <p class={styles.wait} data-testid="turn-answer-wait">
+            Waited <strong>{formatTimingDuration(askMs())}</strong> for your answers
+          </p>
+        </Show>
         <Show when={(completed()?.waitMs ?? 0) > 0}>
           <p class={styles.wait} data-testid="turn-user-wait">
             Then waited <strong>{formatTimingDuration(completed()?.waitMs ?? 0)}</strong> for the next prompt
@@ -235,7 +254,7 @@ export default function TurnDetail(props: {
               fallback={
                 <>
                   {row("Started", started(), false)}
-                  {row("Turn time", `Running, ${formatTotalDuration(viewedRunningMs() ?? 0)} so far`, false)}
+                  {row("Turn time", `Running, ${formatTotalDuration(runningTurnMs())} so far`, false)}
                   {contextRow()}
                 </>
               }
