@@ -32,6 +32,8 @@ export class APIError extends Error {
     public status: number,
     public code: ErrorCode,
     public details?: Record<string, unknown>,
+    /** The response's raw Retry-After header: delay seconds or an HTTP date. */
+    public retryAfter: string | null = null,
   ) {
     super(code);
   }
@@ -48,9 +50,18 @@ function makeRequester(fetchFn: FetchFn) {
     if (body !== undefined) init.body = JSON.stringify(body);
     const res = await fetchFn(path, init);
     if (!res.ok) {
-      const err = (await res.json()) as ErrorResponse;
-      const e = new APIError(res.status, err.error.code, err.details);
-      e.message = err.error.message;
+      // A body that is not the error model, such as a proxy's plain-text 429, keeps its status.
+      const retryAfter = res.headers.get("Retry-After");
+      const text = await res.text();
+      let e: APIError;
+      try {
+        const err = JSON.parse(text) as ErrorResponse;
+        e = new APIError(res.status, err.error.code, err.details, retryAfter);
+        e.message = err.error.message;
+      } catch {
+        e = new APIError(res.status, "UNKNOWN", undefined, retryAfter);
+        e.message = text;
+      }
       throw e;
     }
     return res.json() as Promise<T>;

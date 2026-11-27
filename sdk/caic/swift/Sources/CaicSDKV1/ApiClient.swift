@@ -248,6 +248,8 @@ public struct ApiError: Error {
     public let code: ErrorCode
     public let message: String
     public let details: [String: JSONValue]?
+    /// The response's raw Retry-After header: delay seconds or an HTTP date.
+    public let retryAfter: String?
 }
 
 public final class ApiClient {
@@ -288,10 +290,12 @@ public final class ApiClient {
         guard (200..<300).contains(httpResponse.statusCode) else {
             if let errResp = try? decoder.decode(ErrorResponse.self, from: data) {
                 throw ApiError(statusCode: httpResponse.statusCode, code: errResp.error.code,
-                               message: errResp.error.message, details: nil)
+                               message: errResp.error.message, details: nil,
+                               retryAfter: httpResponse.value(forHTTPHeaderField: "Retry-After"))
             }
             throw ApiError(statusCode: httpResponse.statusCode, code: ErrorCode.other("UNKNOWN"),
-                           message: String(data: data, encoding: .utf8) ?? "", details: nil)
+                           message: String(data: data, encoding: .utf8) ?? "", details: nil,
+                           retryAfter: httpResponse.value(forHTTPHeaderField: "Retry-After"))
         }
         return try decoder.decode(T.self, from: data)
     }
@@ -343,7 +347,8 @@ public final class ApiClient {
                 bytes.task.cancel()
                 throw ApiError(
                     statusCode: httpResponse.statusCode, code: ErrorCode.other("HTTP_ERROR"),
-                    message: "SSE connection failed with status \(httpResponse.statusCode)", details: nil)
+                    message: "SSE connection failed with status \(httpResponse.statusCode)", details: nil,
+                    retryAfter: httpResponse.value(forHTTPHeaderField: "Retry-After"))
             }
             return bytes
         }, onEventID: nil, maxSSEEventBytes: nil, decode: { _, data in

@@ -222,8 +222,8 @@ github.com/golangci/swaggoswag v0.0.0-20250504205917-77f2aca3143e h1:ai0EfmVYE2b
 github.com/golangci/swaggoswag v0.0.0-20250504205917-77f2aca3143e/go.mod h1:Vrn4B5oR9qRwM+f54koyeH3yzphlecwERs0el27Fr/s=
 github.com/golangci/unconvert v0.0.0-20250410112200-a129a6e6413e h1:gD6P7NEo7Eqtt0ssnqSJNNndxe69DOQ24A5h7+i3KpM=
 github.com/golangci/unconvert v0.0.0-20250410112200-a129a6e6413e/go.mod h1:h+wZwLjUTJnm/P2rwlbJdRPZXOzaT36/FwnPnY2inzc=
-github.com/gomodedev/gomode v0.5.1-0.20261127195603-4db9d3e1ba00 h1:KLrtuFAQwvoKOcej8vcAoNcK1afShN/m64Uqdz85dh8=
-github.com/gomodedev/gomode v0.5.1-0.20261127195603-4db9d3e1ba00/go.mod h1:VUYMJyX1WO2qvqsDDLW4MJK5lBjUWGloiomJfDHfYkI=
+github.com/gomodedev/gomode v0.5.1-0.20261127211756-3c885adc3549 h1:LiZeT4dMkLLzKLLSD+acL7Qw0aQrN0Xd1P3NgPtr/XA=
+github.com/gomodedev/gomode v0.5.1-0.20261127211756-3c885adc3549/go.mod h1:M41f5AsAEE9pnB75rpy6wwHx5jhEbrQ6w3fJYiXbyUk=
 github.com/google/go-cmp v0.5.2/go.mod h1:v8dTdLbMG2kIc/vJvl+f65V22dbkXbowE6jgT/gNBxE=
 github.com/google/go-cmp v0.5.4/go.mod h1:v8dTdLbMG2kIc/vJvl+f65V22dbkXbowE6jgT/gNBxE=
 github.com/google/go-cmp v0.5.6/go.mod h1:v8dTdLbMG2kIc/vJvl+f65V22dbkXbowE6jgT/gNBxE=
@@ -319,8 +319,8 @@ github.com/maratori/testableexamples v1.0.1 h1:HfOQXs+XgfeRBJ+Wz0XfH+FHnoY9TVqL6
 github.com/maratori/testableexamples v1.0.1/go.mod h1:XE2F/nQs7B9N08JgyRmdGjYVGqxWwClLPCGSQhXQSrQ=
 github.com/maratori/testpackage v1.1.2 h1:ffDSh+AgqluCLMXhM19f/cpvQAKygKAJXFl9aUjmbqs=
 github.com/maratori/testpackage v1.1.2/go.mod h1:8F24GdVDFW5Ew43Et02jamrVMNXLUNaOynhDssITGfc=
-github.com/maruel/apisdkgen v0.3.2-0.20261127194345-55c02fe2657b h1:2p0FlkyguE2yjBQ/3Oafeoj18P5me8nU6YusG5/aum4=
-github.com/maruel/apisdkgen v0.3.2-0.20261127194345-55c02fe2657b/go.mod h1:HmbSOAPMTz+EP/CswVeC08BxS4CsVLhoHU/wZId1TAA=
+github.com/maruel/apisdkgen v0.3.2-0.20261127211507-933834b80213 h1:HUjeyPYcyfj+4kDZL8ZKQE5N0aUKOkyZ3r8kBIm/IG8=
+github.com/maruel/apisdkgen v0.3.2-0.20261127211507-933834b80213/go.mod h1:HmbSOAPMTz+EP/CswVeC08BxS4CsVLhoHU/wZId1TAA=
 github.com/maruel/genai v0.11.5 h1:KBtYHS7ix9YKa9vEBbVy+/BlDt0VUwtFEng7IVT/tXg=
 github.com/maruel/genai v0.11.5/go.mod h1:s1k7dxL59wB8/LVPuqL4M5rfxUK6eVljdeJYWIjcgNg=
 github.com/maruel/genaipy v0.2.1 h1:CjnEqu4vt1+ZxThP37SBtYZ1R1xngo93sqSGEwSRXBs=

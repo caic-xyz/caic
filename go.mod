@@ -9,13 +9,13 @@ require (
 	github.com/coder/websocket v1.8.15
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/gofrs/flock v0.13.2
-	github.com/gomodedev/gomode v0.5.1-0.20261127195603-4db9d3e1ba00
+	github.com/gomodedev/gomode v0.5.1-0.20261127211756-3c885adc3549
 	github.com/google/go-cmp v0.7.0
 	github.com/huin/goupnp v1.3.0
 	github.com/invopop/jsonschema v0.14.0
 	github.com/klauspost/compress v1.20.3
 	github.com/lmittmann/tint v1.2.1
-	github.com/maruel/apisdkgen v0.3.2-0.20261127194345-55c02fe2657b
+	github.com/maruel/apisdkgen v0.3.2-0.20261127211507-933834b80213
 	github.com/maruel/genai v0.11.5
 	github.com/maruel/ksid v0.1.2
 	github.com/maruel/roundtrippers v0.5.1
