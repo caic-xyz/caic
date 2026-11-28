@@ -42,7 +42,5 @@ declare const classes: {
   readonly "uncommittedFileChange": string;
   readonly "uncommittedList": string;
   readonly "upstreamName": string;
-  readonly "wrapToggle": string;
-  readonly "wrapToggleActive": string;
 };
 export default classes;

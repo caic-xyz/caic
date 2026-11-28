@@ -28,7 +28,7 @@ for (const width of [390, 1280]) {
       } else if (new URL(route.request().url()).searchParams.get("path") === "/notes.md") {
         await route.fulfill({
           contentType: "text/html",
-          body: '# Notes\n\n<img src="/missing-preview.png" onerror="window.fileScriptExecuted=true"><script>window.fileScriptExecuted=true</script><style>body{display:none}</style><form method="post" action="/api/caic/v1/tasks"><button style="position:fixed;inset:0;opacity:0" formaction="/api/caic/v1/tasks/abc/purge" form="target">Submit</button></form>\n\n[Run](javascript:alert%281%29)',
+          body: `# Notes\n\n${longLine}\n\n<img src="/missing-preview.png" onerror="window.fileScriptExecuted=true"><script>window.fileScriptExecuted=true</script><style>body{display:none}</style><form method="post" action="/api/caic/v1/tasks"><button style="position:fixed;inset:0;opacity:0" formaction="/api/caic/v1/tasks/abc/purge" form="target">Submit</button></form>\n\n[Run](javascript:alert%281%29)`,
         });
       } else if (new URL(route.request().url()).searchParams.get("path") === "/report.bin") {
         await route.fulfill({ contentType: "application/octet-stream", body: Buffer.from([0, 1, 2]) });
@@ -74,7 +74,7 @@ for (const width of [390, 1280]) {
     const id = await createTaskAPI(
       api,
       uniquePrompt(
-        "Review [Screenshot](/home/user/src/caic/test-results/screenshot.png), [Readme](/home/user/src/caic/README.md), [Bracket](/home/user/src/caic/models/bracket.stl), [Print](/models/assembly.3mf), [Source](/notes.go), [Source line](/notes.go&line=2), [Binary](/report.bin), [PDF](/report.pdf), [Broken PDF](/broken.pdf), [Notes](/notes.md), and [Data](/home/user/src/artifacts).",
+        "Review [Screenshot](/home/user/src/caic/test-results/screenshot.png), [Readme](/home/user/src/caic/README.md), [Bracket](/home/user/src/caic/models/bracket.stl), [Print](/models/assembly.3mf), [Source](/notes.go), [Source line](/notes.go&line=2), [Binary](/report.bin), [PDF](/report.pdf), [Broken PDF](/broken.pdf), [Notes](/notes.md), [Notes source line](/notes.md&line=3), and [Data](/home/user/src/artifacts).",
       ),
     );
     await waitForTaskState(api, id, "waiting");
@@ -281,9 +281,10 @@ for (const width of [390, 1280]) {
       await page.keyboard.press("Escape");
     });
 
-    await test.step("Markdown content cannot execute scripts", async () => {
+    await test.step("rendered Markdown hides word wrap and cannot execute scripts", async () => {
       await page.getByRole("link", { name: "Notes", exact: true }).click();
       await expect(page.getByRole("heading", { name: "Notes" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Word wrap", exact: true })).toHaveCount(0);
       await expect(
         page.locator("article").locator("[onerror], form, [form], [formaction], a[href^='javascript:']"),
       ).toHaveCount(0);
@@ -303,6 +304,22 @@ for (const width of [390, 1280]) {
         );
       });
       expect(contained).toBe(true);
+      await page.keyboard.press("Escape");
+    });
+
+    await test.step("word wrap preserves a highlighted Markdown source line", async () => {
+      await page.getByRole("link", { name: "Notes source line", exact: true }).click();
+      await expect(page).toHaveURL(`/task/@${id}/view?path=${encodeURIComponent("/notes.md")}&line=3`);
+      const markedLine = page.getByTestId("document-pane").locator("mark");
+      await expect(markedLine).toHaveText(longLine);
+      const lineFragments = () => markedLine.evaluate((el) => el.getClientRects().length);
+      expect(await lineFragments()).toBe(1);
+      const wrap = page.getByRole("button", { name: "Word wrap", exact: true });
+      await expect(wrap).toHaveAttribute("aria-pressed", "false");
+      await wrap.click();
+      await expect(wrap).toHaveAttribute("aria-pressed", "true");
+      await expect(markedLine).toHaveText(longLine);
+      expect(await lineFragments()).toBeGreaterThan(1);
       await page.keyboard.press("Escape");
     });
 

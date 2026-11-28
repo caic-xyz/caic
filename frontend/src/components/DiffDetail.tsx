@@ -2,6 +2,7 @@
 
 import { createSignal, createEffect, For, Show, onMount, onCleanup, untrack } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
+import ActionButton from "./ActionButton";
 import TaskViewHeader from "./TaskViewHeader";
 import WrapTextIcon from "@material-symbols/svg-400/outlined/wrap_text.svg?solid";
 
@@ -132,16 +133,9 @@ export default function DiffDetail(props: Props) {
     <div class={styles.container}>
       <TaskViewHeader taskPath={props.taskPath} label="Diff controls">
         <span class={styles.headerMeta}>Repository changes</span>
-        <button
-          type="button"
-          class={`${styles.wrapToggle} ${lineWrap() ? styles.wrapToggleActive : ""}`}
-          aria-label={lineWrap() ? "Disable line wrap" : "Enable line wrap"}
-          aria-pressed={lineWrap()}
-          title={lineWrap() ? "Disable line wrap" : "Enable line wrap"}
-          onClick={() => setLineWrap((wrap) => !wrap)}
-        >
+        <ActionButton label="Word wrap" aria-pressed={lineWrap()} onClick={() => setLineWrap((wrap) => !wrap)}>
           <WrapTextIcon width={20} height={20} />
-        </button>
+        </ActionButton>
       </TaskViewHeader>
       <div class={styles.fileList}>
         <Show when={loading()}>

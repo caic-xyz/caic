@@ -1,4 +1,4 @@
-// End-to-end tests for repository-diff missing commits, file-path containment at any pane width, and patch retry focus.
+// End-to-end tests for repository-diff missing commits, word wrap, file-path containment, and patch retry focus.
 import { ok } from "node:assert/strict";
 import { createTaskAPI, expect, test, waitForTaskState } from "../helpers";
 import type { ErrorResponse, FileDiffResp, TaskDiffIndexResp } from "../../sdk/caic/ts/v1/types.gen";
@@ -14,6 +14,7 @@ for (const width of [390, 1280]) {
     const id = await createTaskAPI(api, "Inspect missing upstream commits");
     const sha = "abcdef1234567890abcdef1234567890abcdef12";
     const path = "backend/internal/service/upstream.go";
+    const addedLine = `+${"missing_upstream_line_".repeat(24)}`;
     let patchRequests = 0;
     await page.route(
       (url) => url.pathname === `/api/caic/v1/tasks/${id}/diff/index`,
@@ -51,7 +52,7 @@ for (const width of [390, 1280]) {
         const url = new URL(route.request().url());
         expect(url.searchParams.get("commit")).toBe(sha);
         expect(url.searchParams.get("path")).toBe(path);
-        await route.fulfill({ json: { diff: "@@ -0,0 +1 @@\n+missing upstream line" } satisfies FileDiffResp });
+        await route.fulfill({ json: { diff: `@@ -0,0 +1 @@\n${addedLine}` } satisfies FileDiffResp });
       },
     );
     await page.goto(`/task/@${id}/diff`);
@@ -62,9 +63,17 @@ for (const width of [390, 1280]) {
     const row = page.getByRole("button", { name: path });
     await row.focus();
     await row.press("Enter");
-    await expect(page.getByText("+missing upstream line")).toBeVisible();
+    const line = page.getByText(addedLine, { exact: true });
+    await expect(line).toBeVisible();
     expect(patchRequests).toBe(1);
     await expect.poll(async () => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const wrap = page.getByRole("button", { name: "Word wrap", exact: true });
+    await expect(wrap).toHaveAttribute("aria-pressed", "false");
+    const lineHeight = () => line.evaluate((el) => el.getBoundingClientRect().height);
+    const unwrappedHeight = await lineHeight();
+    await wrap.press("Space");
+    await expect(wrap).toHaveAttribute("aria-pressed", "true");
+    expect(await lineHeight()).toBeGreaterThan(unwrappedHeight);
 
     expect(errors).toEqual([]);
   });
