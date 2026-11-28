@@ -6,6 +6,13 @@ import { createPdfFixture } from "../../frontend/tests/pdf-fixture";
 for (const width of [390, 1280]) {
   test(`container files use viewer and raw handlers at ${width}px`, async ({ page, api, request, uniquePrompt }) => {
     await page.setViewportSize({ width, height: 900 });
+    const longLine = `// ${"long_identifier_".repeat(32)}`;
+    const sourceText = [
+      "package notes",
+      "// # Not a Markdown heading",
+      longLine,
+      ...Array<string>(140).fill("// detail"),
+    ].join("\n");
     const errors: string[] = [];
     const requests: string[] = [];
     let holdPdf = false;
@@ -17,7 +24,7 @@ for (const width of [390, 1280]) {
       if (new URL(route.request().url()).searchParams.get("path") === "/models/assembly.3mf") {
         await route.fulfill({ contentType: "model/3mf", body: Buffer.from(createPaintedBambu3mfFixture("8")) });
       } else if (new URL(route.request().url()).searchParams.get("path") === "/notes.go") {
-        await route.fulfill({ contentType: "text/plain", body: "package notes\n// # Not a Markdown heading" });
+        await route.fulfill({ contentType: "text/plain", body: sourceText });
       } else if (new URL(route.request().url()).searchParams.get("path") === "/notes.md") {
         await route.fulfill({
           contentType: "text/html",
@@ -92,9 +99,36 @@ for (const width of [390, 1280]) {
 
     await test.step("source and unsupported files open the same viewer", async () => {
       await page.getByRole("link", { name: "Source", exact: true }).click();
-      await expect(page.getByTestId("document-pane").locator("pre")).toHaveText(
-        "package notes\n// # Not a Markdown heading",
-      );
+      const source = page.getByTestId("document-pane").locator("pre");
+      await expect(source).toHaveText(sourceText);
+      const wrap = page.getByRole("button", { name: "Word wrap", exact: true });
+      await expect(wrap).toHaveAttribute("aria-pressed", "false");
+      const sourceLayout = () =>
+        source.evaluate((el: HTMLPreElement) => {
+          const viewport = el.parentElement;
+          if (!viewport) throw new Error("Missing source viewport");
+          return {
+            background: el.offsetWidth,
+            viewport: viewport.clientWidth,
+            scrollable: viewport.scrollWidth,
+            height: el.offsetHeight,
+          };
+        });
+      const unwrapped = await sourceLayout();
+      expect(unwrapped.scrollable).toBeGreaterThan(unwrapped.viewport);
+      expect(unwrapped.background).toBe(unwrapped.scrollable);
+      await wrap.focus();
+      await page.keyboard.press("Space");
+      await expect(wrap).toHaveAttribute("aria-pressed", "true");
+      await expect(wrap).toBeFocused();
+      const wrapped = await sourceLayout();
+      expect(wrapped.scrollable).toBe(wrapped.viewport);
+      expect(wrapped.background).toBe(wrapped.viewport);
+      expect(wrapped.height).toBeGreaterThan(unwrapped.height);
+      await expect(source).toHaveText(sourceText);
+      await page.keyboard.press("Space");
+      await expect(wrap).toHaveAttribute("aria-pressed", "false");
+      expect(await sourceLayout()).toEqual(unwrapped);
       await page.keyboard.press("Escape");
       await page.getByRole("link", { name: "Source line", exact: true }).click();
       await expect(page).toHaveURL(`/task/@${id}/view?path=${encodeURIComponent("/notes.go")}&line=2`);
@@ -102,6 +136,7 @@ for (const width of [390, 1280]) {
       await page.keyboard.press("Escape");
       await page.getByRole("link", { name: "Binary", exact: true }).click();
       await expect(page.getByText(/No preview for this file/)).toBeVisible();
+      await expect(wrap).toHaveCount(0);
       await expect(page.getByRole("link", { name: "raw file" })).toHaveAttribute(
         "href",
         `/api/caic/v1/tasks/${id}/raw?path=%2Freport.bin`,

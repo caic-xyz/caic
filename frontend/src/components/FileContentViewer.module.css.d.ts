@@ -20,7 +20,9 @@ declare const classes: {
   readonly "pdfContent": string;
   readonly "scrolling": string;
   readonly "source": string;
+  readonly "sourceContent": string;
   readonly "sourceLine": string;
+  readonly "sourceWrap": string;
   readonly "video": string;
 };
 export default classes;

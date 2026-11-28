@@ -1,4 +1,4 @@
-// Renders task-runtime directories, Markdown, images, native audio/video, lazy PDFs, bounded text, and unsupported downloads.
+// Renders task-runtime directories, Markdown, images, native audio/video, lazy PDFs, wrappable source text, and unsupported downloads.
 
 import { loadCode } from "../codeLoad";
 import {
@@ -18,6 +18,8 @@ import { taskViewMode } from "../taskView";
 import { Dynamic } from "solid-js/web";
 import FolderIcon from "@material-symbols/svg-400/outlined/folder.svg?solid";
 import FileIcon from "@material-symbols/svg-400/outlined/draft.svg?solid";
+import WrapTextIcon from "@material-symbols/svg-400/outlined/wrap_text.svg?solid";
+import ActionButton from "./ActionButton";
 import ImagePreview from "./ImagePreview";
 import FileViewerHeader from "./FileViewerHeader";
 
@@ -40,7 +42,8 @@ interface Props {
 
 // SourceText reveals and marks the line a link names. Splitting the text into
 // three parts keeps one element instead of one per line.
-function SourceText(props: { text: string; line: number | null }) {
+function SourceText(props: { text: string; line: number | null; wrap: boolean }) {
+  const classList = () => ({ [styles.sourceWrap]: props.wrap });
   const split = createMemo(() => {
     if (props.line === null) return null;
     const lines = props.text.split("\n");
@@ -53,9 +56,17 @@ function SourceText(props: { text: string; line: number | null }) {
     };
   });
   return (
-    <Show when={split()} keyed fallback={<pre class={styles.source}>{props.text}</pre>}>
+    <Show
+      when={split()}
+      keyed
+      fallback={
+        <pre class={styles.source} classList={classList()}>
+          {props.text}
+        </pre>
+      }
+    >
       {(parts) => (
-        <pre class={styles.source}>
+        <pre class={styles.source} classList={classList()}>
           {parts.before}
           <mark class={styles.sourceLine} ref={(el: HTMLElement) => el.scrollIntoView({ block: "center" })}>
             {parts.target}
@@ -156,6 +167,7 @@ export default function FileContentViewer(props: Props) {
   const fullscreen = () => taskViewMode(location.pathname, location.search) === "fullscreen";
   let abort: AbortController | undefined;
   const [imageError, setImageError] = createSignal(false);
+  const [wrap, setWrap] = createSignal(false);
   onCleanup(() => abort?.abort());
   const [file] = createResource(
     () => ({ taskId: props.taskId, path: props.path }),
@@ -171,6 +183,7 @@ export default function FileContentViewer(props: Props) {
     const preview = file.state === "ready" ? file() : null;
     return preview?.kind === "text" ? preview : null;
   });
+  const sourceFile = () => (props.line !== null || !isMarkdownPath(props.path)) && textFile();
   const doc = createMemo(() => splitFrontMatter(textFile()?.text ?? ""));
   const dirListing = createMemo(() => {
     const preview = file.state === "ready" ? file() : null;
@@ -186,9 +199,16 @@ export default function FileContentViewer(props: Props) {
         taskPath={props.taskPath}
         path={props.path}
         directory={dirListing() !== null}
-      />
+      >
+        <Show when={sourceFile()}>
+          <ActionButton label="Word wrap" aria-pressed={wrap()} onClick={() => setWrap((value) => !value)}>
+            <WrapTextIcon width={20} height={20} />
+          </ActionButton>
+        </Show>
+      </FileViewerHeader>
       <div
         class={`${styles.content} ${textFile() || dirListing() || (file.state === "ready" && file()?.kind === "pdf") ? styles.flowContent : ""} ${file.state === "ready" && file()?.kind === "pdf" ? styles.pdfContent : ""}`}
+        classList={{ [styles.sourceContent]: Boolean(sourceFile()) }}
       >
         <Switch>
           <Match when={file.state === "errored"}>
@@ -230,20 +250,20 @@ export default function FileContentViewer(props: Props) {
           <Match when={file.state === "ready" && file()?.kind === "unsupported"}>
             <div class={styles.notice}>No preview for this file. Open the raw file to download it.</div>
           </Match>
-          <Match when={(props.line !== null || !isMarkdownPath(props.path)) && textFile()} keyed>
+          <Match when={sourceFile()} keyed>
             {(source) => (
               <>
                 <Show when={isMarkdownPath(props.path)}>
                   <div class={styles.notice}>Source view: the link names line {props.line}.</div>
                 </Show>
-                <SourceText text={source.text} line={props.line ?? null} />
+                <SourceText text={source.text} line={props.line ?? null} wrap={wrap()} />
                 <Show when={source.truncated}>
                   <div class={styles.notice}>File truncated: only the first 1 MiB is shown.</div>
                 </Show>
               </>
             )}
           </Match>
-          <Match when={props.line === null && isMarkdownPath(props.path) && textFile()}>
+          <Match when={textFile()}>
             <MarkdownTaskContext.Provider value={taskId}>
               <article class={styles.page}>
                 <Show when={doc().frontMatter} keyed>

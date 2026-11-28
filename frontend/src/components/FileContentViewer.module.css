@@ -1,4 +1,4 @@
-/* Styles for task-runtime Markdown, plain-text, image, audio/video, PDF, and download previews. */
+/* Styles for task-runtime Markdown, wrappable source text, image, audio/video, PDF, and download previews. */
 
 .container {
   display: flex;
@@ -71,6 +71,9 @@
 }
 
 .source {
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 100%;
   padding: 1rem;
   margin: 0;
   font-family: monospace;
@@ -78,6 +81,12 @@
   line-height: 1.5;
   color: var(--color-text-primary);
   background: var(--color-bg-code);
+}
+
+.sourceWrap {
+  width: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .frontMatterSource {
@@ -155,8 +164,8 @@
     overflow: visible;
   }
 
-  .source {
-    overflow-x: auto;
+  .scrolling .sourceContent {
+    overflow: auto;
   }
 }
 
