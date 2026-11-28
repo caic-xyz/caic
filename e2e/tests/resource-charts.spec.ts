@@ -179,21 +179,10 @@ for (const history of ["clustered", "live"] as const) {
         await expect(cpu.locator('[aria-label="dot"] circle')).toHaveCount(3);
       }
 
-      // PlotHost replaces the SVG as samples arrive. Read its box in one browser
-      // evaluation so a redraw cannot detach it between lookup and measurement.
-      let box = { x: 0, y: 0, width: 0, height: 0 };
-      await expect
-        .poll(async () => {
-          box = await cpu.evaluate((svg) => {
-            const { x, y, width, height } = svg.getBoundingClientRect();
-            return { x, y, width, height };
-          });
-          return box.width > 0 && box.height > 0;
-        })
-        .toBe(true);
-
       // Read the crosshair and its table from the same browser snapshot.
       async function readAt(edge: "left" | "right"): Promise<string> {
+        // A visible chart can still have its midpoint below the viewport.
+        await cpu.scrollIntoViewIfNeeded();
         // Aim at the rendered edge dots instead of a fixed offset: the retained
         // sample count grows, so the sample spacing shrinks and a fixed offset
         // drifts onto a neighbouring sample. Plot shifts rendered dots by half a
@@ -209,11 +198,11 @@ for (const history of ["clustered", "live"] as const) {
           return {
             x: which === "left" ? Math.min(...xs) - 1 : Math.max(...xs) + 1,
             y: rect.y + rect.height / 2,
-            box: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+            box: { x: rect.x, y: rect.y, width: rect.width },
           };
         }, edge);
         if (!aim) return "missing sample dots";
-        box = aim.box;
+        const { box } = aim;
         await page.mouse.move(box.x - 2, box.y - 2);
         await page.mouse.move(aim.x, aim.y);
         const snapshot = await cpu.evaluate((svg) => {
