@@ -1,52 +1,132 @@
-// Tests that a frontend bundle older than any bundled input is reported stale.
+// Tests frontend bundle reuse, fingerprint invalidation, and retry after a failed build.
+
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
-import { bundleStamp, staleBundle } from "./bundle";
+import { staleBundle } from "../scripts/frontend_bundle";
 
-const inputs = [
-  "frontend/index.html",
-  "frontend/public/sw.js",
-  "frontend/src/app.ts",
-  "package.json",
-  "sdk/caic/ts/v1/types.gen.ts",
-  "vite.config.ts",
-];
+const lockfile = "pnpm-lock.yaml";
+const asset = "frontend/public/sw.js";
+const sdk = "sdk/caic/ts/v1/api.gen.ts";
+const sdkConfig = "sdk/caic/ts/tsconfig.json";
+const compressedEntry = "backend/frontend/dist/index.html.br";
 
-function tree(t: TestContext): string {
+function tree(t: TestContext) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "caic-bundle-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  for (const file of [...inputs, "frontend/src/app.test.ts", bundleStamp]) {
-    fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
-    fs.writeFileSync(path.join(root, file), "");
-    fs.utimesSync(path.join(root, file), 1_000, 1_000);
+  function write(file: string, contents: string): void {
+    const target = path.join(root, file);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, contents);
   }
-  fs.utimesSync(path.join(root, bundleStamp), 2_000, 2_000);
-  return root;
+  for (const file of [
+    "frontend/index.html",
+    asset,
+    "frontend/src/app.ts",
+    "frontend/src/app.test.ts",
+    "node_modules/@gomodedev/gomode/package.json",
+    "node_modules/@gomodedev/gomode/sdk/gomode/ts/api.gen.ts",
+    "node_modules/@gomodedev/gomode/sdk/mcp/ts/api.gen.ts",
+    "node_modules/@gomodedev/gomode/sdk/oauth/ts/api.gen.ts",
+    "node_modules/@gomodedev/gomode/sdk/voicegateway/ts/api.gen.ts",
+    "node_modules/@gomodedev/gomode/web/assets/sample.json",
+    "node_modules/@gomodedev/gomode/web/src/app.ts",
+    lockfile,
+    "pnpm-workspace.yaml",
+    "pyproject.toml",
+    "scripts/css_module_types.mjs",
+    "scripts/precompress_dist.py",
+    sdk,
+    sdkConfig,
+    "tsconfig.json",
+    "uv.lock",
+    "vite.config.ts",
+  ]) {
+    write(file, "");
+  }
+  write("package.json", '{"type":"module"}');
+  fs.copyFileSync(
+    path.resolve(import.meta.dirname, "../scripts/frontend_bundle.ts"),
+    path.join(root, "scripts/frontend_bundle.ts"),
+  );
+  write(
+    "bin/vite.mjs",
+    `import fs from "node:fs";
+const dist = "backend/frontend/dist";
+fs.rmSync(dist, { recursive: true, force: true });
+fs.mkdirSync(dist + "/.vite", { recursive: true });
+fs.writeFileSync(${JSON.stringify(compressedEntry)}, "bundle");
+fs.appendFileSync("builds", ".");`,
+  );
+  write("bin/uv.mjs", 'if (process.env.CAIC_TEST_COMPRESS_FAIL === "1") process.exitCode = 1;');
+  for (const tool of ["vite", "uv"]) {
+    if (process.platform === "win32") write(`bin/${tool}.cmd`, `@"%CAIC_TEST_NODE%" "bin/${tool}.mjs"\r\n`);
+    else {
+      write(`bin/${tool}`, `#!/bin/sh\nexec "$CAIC_TEST_NODE" bin/${tool}.mjs\n`);
+      fs.chmodSync(path.join(root, "bin", tool), 0o755);
+    }
+  }
+  function build(failCompression: boolean): void {
+    const result = spawnSync(process.execPath, ["scripts/frontend_bundle.ts"], {
+      cwd: root,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${path.join(root, "bin")}${path.delimiter}${process.env.PATH ?? ""}`,
+        CAIC_TEST_NODE: process.execPath,
+        CAIC_TEST_COMPRESS_FAIL: failCompression ? "1" : "0",
+      },
+    });
+    assert.equal(result.status, failCompression ? 1 : 0, result.stderr);
+  }
+  return { root, write, build };
 }
 
-test("staleBundle", async (t) => {
-  await t.test("accepts a bundle built after every input", (t) => {
-    assert.equal(staleBundle(tree(t)), null);
-  });
+test("reuses an unchanged build even if timestamps or tests change", (t) => {
+  const { root, write, build } = tree(t);
+  write(compressedEntry, "prebuilt checkout");
+  assert.notEqual(staleBundle(root), null);
+  build(false);
+  write(sdk, "");
+  write("frontend/src/app.test.ts", "test-only change");
+  build(false);
+  assert.equal(staleBundle(root), null);
+  assert.equal(fs.readFileSync(path.join(root, "builds"), "utf8"), ".");
+});
 
-  await t.test("reports an input edited after the build", (t) => {
-    const root = tree(t);
-    fs.utimesSync(path.join(root, "frontend/src/app.ts"), 3_000, 3_000);
-    assert.equal(staleBundle(root), "frontend/src/app.ts changed after the last frontend build");
-  });
+test("rebuilds when SDKs, the lockfile, or the asset inventory change", (t) => {
+  const { root, write, build } = tree(t);
+  build(false);
+  write(sdk, "new SDK");
+  assert.equal(staleBundle(root), "frontend build inputs changed");
+  build(false);
+  write(sdkConfig, '{"compilerOptions":{"target":"ESNext"}}');
+  assert.equal(staleBundle(root), "frontend build inputs changed");
+  build(false);
+  write(lockfile, "new lockfile");
+  assert.equal(staleBundle(root), "frontend build inputs changed");
+  build(false);
+  fs.unlinkSync(path.join(root, asset));
+  fs.rmdirSync(path.join(root, "frontend/public"));
+  assert.equal(staleBundle(root), "frontend build inputs changed");
+  build(false);
+  fs.unlinkSync(path.join(root, compressedEntry));
+  assert.equal(staleBundle(root), "frontend build output changed");
+  build(false);
+  assert.equal(staleBundle(root), null);
+  assert.equal(fs.readFileSync(path.join(root, "builds"), "utf8"), "......");
+});
 
-  await t.test("ignores edited tests, which are not bundled", (t) => {
-    const root = tree(t);
-    fs.utimesSync(path.join(root, "frontend/src/app.test.ts"), 3_000, 3_000);
-    assert.equal(staleBundle(root), null);
-  });
-
-  await t.test("reports a missing bundle", (t) => {
-    const root = tree(t);
-    fs.rmSync(path.join(root, bundleStamp));
-    assert.equal(staleBundle(root), `${bundleStamp} is missing`);
-  });
+test("retries compression failures without accepting the partial output", (t) => {
+  const { root, write, build } = tree(t);
+  build(false);
+  write(sdk, "new SDK");
+  build(true);
+  assert.notEqual(staleBundle(root), null);
+  build(false);
+  assert.equal(staleBundle(root), null);
+  assert.equal(fs.readFileSync(path.join(root, "builds"), "utf8"), "...");
 });

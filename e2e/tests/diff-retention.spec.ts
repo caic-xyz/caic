@@ -1,5 +1,5 @@
 // Browser coverage and heap measurements for collapsed and cached diff payloads.
-// Heap measurements: pnpm exec playwright test --config e2e/playwright.config.ts e2e/tests/diff-retention.spec.ts --grep 'heap workload' --workers=1.
+// Heap measurements: CI=1 CAIC_E2E_BENCHMARKS=1 make test-e2e FILES=e2e/tests/diff-retention.spec.ts.
 // Run against each production build separately; reported CDP usedSize is measured heap, not the cache's conservative payload estimate.
 
 import { createTaskAPI, expect, test, waitForTaskState } from "../helpers";
@@ -25,7 +25,7 @@ for (const workload of [
   { name: "giant", files: 1, size: 2_000_000 },
   { name: "cache", files: 32, size: 750_000 },
 ]) {
-  test(`diff retained heap workload ${workload.name}`, async ({ page, api }, testInfo) => {
+  test(`diff retained heap workload ${workload.name}`, { tag: "@benchmark" }, async ({ page, api }, testInfo) => {
     const id = await createTaskAPI(api, `Diff retention ${workload.name}`);
     await waitForTaskState(api, id, "waiting");
     const paths = Array.from({ length: workload.files }, (_, index) => `retention-${index}.txt`);

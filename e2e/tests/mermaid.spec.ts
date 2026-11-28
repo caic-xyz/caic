@@ -109,9 +109,8 @@ for (const width of [390, 1280]) {
   });
 }
 
-// pnpm exec playwright test --config e2e/playwright.config.ts \
-//   e2e/tests/mermaid.spec.ts --grep benchmark --repeat-each=5 --workers=1
-test("benchmark cold diagram loading", async ({ page, api, uniquePrompt }) => {
+// CI=1 CAIC_E2E_BENCHMARKS=1 make test-e2e FILES=e2e/tests/mermaid.spec.ts ROUNDS=5
+test("benchmark cold diagram loading", { tag: "@benchmark" }, async ({ page, api, uniquePrompt }) => {
   const source =
     "flowchart LR\nBrowser[Browser client] --> API[Backend API]\nAPI --> Agent[Coding agent]\nAgent --> Container[Isolated container]\nContainer --> Repository[Git repository]";
   const id = await createTaskAPI(api, `${uniquePrompt("Architecture:")}\n\n\`\`\`mermaid\n${source}\n\`\`\`\n`);

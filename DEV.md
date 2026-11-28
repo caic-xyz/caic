@@ -18,9 +18,9 @@ make build
 
 Run `make fix`, `make verify`, and `make test` from the repository root.
 Run `make test-e2e` for browser coverage, or one spec with
-`make test-e2e FILES=e2e/tests/account-menu.spec.ts`. Both build the frontend
-first: the fake server serves the built bundle, and Playwright refuses a bundle
-older than its inputs.
+`make test-e2e FILES=e2e/tests/account-menu.spec.ts`. Both run SDK generation,
+then reuse the frontend bundle if its inputs and output still match the
+fingerprint recorded by the last successful build.
 
 The checkout and tool caches must be writable. On Linux, relay tests also
 require child processes to write `/proc/self/oom_score_adj`.

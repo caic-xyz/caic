@@ -164,8 +164,7 @@ playwright-browser: frontend-deps
 # The tracked images encode the development container's font stack, so publish
 # them from that container.
 screenshots-update: export CAIC_E2E_VISUALS := 1
-screenshots-update: frontend-deps generate-sdks playwright-browser
-	@pnpm --silent build
+screenshots-update: frontend-build playwright-browser
 	@uv run --locked python scripts/visual_screenshots.py
 
 upgrade:

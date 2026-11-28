@@ -1,7 +1,7 @@
 // Browser coverage for task-card resource levels, resource-chart snapshots, and live crosshair readings.
 
 import { createServer, type ServerResponse } from "node:http";
-import { createTaskAPI, expect, test } from "../helpers";
+import { createTaskAPI, expect, test, waitForTaskState } from "../helpers";
 import type { EventStats } from "../../sdk/caic/ts/v1/types.gen";
 import { validateEventStats, validateHistoryStats } from "../../sdk/caic/ts/v1/validate.gen";
 
@@ -100,6 +100,7 @@ test("task CPU configured ceilings and metadata failures stay distinct", async (
 for (const history of ["clustered", "live"] as const) {
   test(`resource charts read ${history} samples through the crosshair`, async ({ page, api }) => {
     const id = await createTaskAPI(api, "Seed the resource charts");
+    if (history === "clustered") await waitForTaskState(api, id, "waiting");
 
     const { through } = (await api.getHistoryManifest(id)).bootstrap;
     // Reproduce stream restarts: the first two samples are only 1 ms apart
@@ -123,31 +124,20 @@ for (const history of ["clustered", "live"] as const) {
     const snapshot = () =>
       `event: statsSnapshot\ndata: ${JSON.stringify(validateHistoryStats({ samples, retained: 60 }))}\n\nevent: checkpoint\ndata: ${JSON.stringify({ cursor: "fixture", through })}\n\n`;
     const clients = new Set<ServerResponse>();
-    const server =
-      history === "live"
-        ? createServer((_request, response) => {
-            response.writeHead(200, { "Content-Type": "text/event-stream", "Access-Control-Allow-Origin": "*" });
-            clients.add(response);
-            response.on("close", () => clients.delete(response));
-            response.write(snapshot());
-          })
-        : null;
+    // Keep the snapshot stream open so a disconnect banner cannot move the chart.
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { "Content-Type": "text/event-stream", "Access-Control-Allow-Origin": "*" });
+      clients.add(response);
+      response.on("close", () => clients.delete(response));
+      response.write(snapshot());
+    });
     try {
-      if (server) {
-        await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-        const address = server.address();
-        if (!address || typeof address === "string") throw new Error("Stats fixture server did not start");
-        await page.route(`**/api/caic/v1/tasks/${id}/history/events?*`, (route) =>
-          route.fulfill({ status: 307, headers: { location: `http://127.0.0.1:${address.port}/events` } }),
-        );
-      } else {
-        await page.route(`**/api/caic/v1/tasks/${id}/history/events?*`, (route) =>
-          route.fulfill({
-            contentType: "text/event-stream",
-            body: snapshot(),
-          }),
-        );
-      }
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Stats fixture server did not start");
+      await page.route(`**/api/caic/v1/tasks/${id}/history/events?*`, (route) =>
+        route.fulfill({ status: 307, headers: { location: `http://127.0.0.1:${address.port}/events` } }),
+      );
 
       await page.goto(`/task/@${id}`);
       await page.getByRole("link", { name: "Task performance", exact: true }).click();
@@ -160,7 +150,27 @@ for (const history of ["clustered", "live"] as const) {
       await expect(sampleTable.getByRole("table").locator("tbody tr")).toHaveCount(samples.length);
       const cpu = page.getByLabel("CPU utilization over time");
       await expect(cpu).toBeVisible();
-      if (server) {
+      if (history === "clustered") {
+        // Reproduce the original layout after the completed turn's analytics
+        // have rendered: the chart starts in view with its midpoint clipped.
+        await expect(page.getByRole("img", { name: "Tokens by turn" })).toBeVisible();
+        const viewport = await cpu.evaluate((svg) => {
+          const { top, height } = svg.getBoundingClientRect();
+          return { width: innerWidth, height: Math.floor(top + height / 4) };
+        });
+        await page.setViewportSize(viewport);
+        await expect
+          .poll(
+            () =>
+              cpu.evaluate((svg) => {
+                const { top, height } = svg.getBoundingClientRect();
+                return top < innerHeight && top + height / 2 >= innerHeight;
+              }),
+            { message: "CPU chart should start partly below the viewport" },
+          )
+          .toBe(true);
+      }
+      if (history === "live") {
         // Deliver after the chart is visible: a snapshot-only implementation must fail.
         const sample = validateEventStats({
           ...samples[1],
@@ -198,11 +208,15 @@ for (const history of ["clustered", "live"] as const) {
           return {
             x: which === "left" ? Math.min(...xs) - 1 : Math.max(...xs) + 1,
             y: rect.y + rect.height / 2,
-            box: { x: rect.x, y: rect.y, width: rect.width },
+            box: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+            viewport: { width: innerWidth, height: innerHeight },
           };
         }, edge);
         if (!aim) return "missing sample dots";
         const { box } = aim;
+        const position =
+          `pointer (${aim.x.toFixed(1)}, ${aim.y.toFixed(1)}) in ${aim.viewport.width}×${aim.viewport.height} viewport, ` +
+          `chart y=${box.y.toFixed(1)}–${(box.y + box.height).toFixed(1)}`;
         await page.mouse.move(box.x - 2, box.y - 2);
         await page.mouse.move(aim.x, aim.y);
         const snapshot = await cpu.evaluate((svg) => {
@@ -214,26 +228,32 @@ for (const history of ["clustered", "live"] as const) {
           });
           return {
             samples,
-            value: text?.textContent ?? "",
+            value: text?.textContent ?? null,
             transform: text?.getAttribute("transform") ?? "",
             width: text instanceof SVGElement ? (text as SVGElement & { getBBox(): DOMRect }).getBBox().width : 0,
           };
         });
-        if (snapshot.samples.length < 2) return "missing samples";
+        if (snapshot.value === null) return `missing ${edge} edge readout at ${position}`;
+        if (snapshot.samples.length < 2) return `missing samples at ${position}`;
         const timestamps = snapshot.samples.map((sample) => sample.ts);
         const targetTs = edge === "left" ? Math.min(...timestamps) : Math.max(...timestamps);
         const oppositeTs = edge === "left" ? Math.max(...timestamps) : Math.min(...timestamps);
         const expected = snapshot.samples.filter((sample) => sample.ts === targetTs).map((sample) => sample.cpu);
         const opposite = snapshot.samples.filter((sample) => sample.ts === oppositeTs).map((sample) => sample.cpu);
-        if (expected.some((value) => opposite.includes(value))) return "waiting for distinct edge samples";
+        if (expected.some((value) => opposite.includes(value)))
+          return `waiting for distinct edge samples at ${position}`;
         const actual = Number.parseFloat(snapshot.value);
-        if (!expected.includes(actual)) return `${actual} is not a ${edge} edge sample (${expected.join(", ")})`;
+        if (!expected.includes(actual)) {
+          return `wrong ${edge} edge readout ${JSON.stringify(snapshot.value)}, expected ${expected.join(" or ")} at ${position}`;
+        }
         if (edge === "right") {
           // The readout is centered on the focused sample, so half of the text
           // it actually renders must stay inside the frame. Plot and DOM layout
           // use slightly different floating-point rounding.
           const x = Number(/translate\(([-\d.]+)/u.exec(snapshot.transform)?.[1] ?? Number.NaN);
-          if (!(x + snapshot.width / 2 <= box.width - 3 + 0.5)) return `readout at ${x} clips the right edge`;
+          if (!(x + snapshot.width / 2 <= box.width - 3 + 0.5)) {
+            return `readout at ${x} clips the right edge for ${position}`;
+          }
         }
         return "matched";
       }
@@ -274,10 +294,8 @@ for (const history of ["clustered", "live"] as const) {
         }
       }
     } finally {
-      if (server) {
-        server.closeAllConnections();
-        await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
-      }
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
     }
   });
 }

@@ -1,4 +1,4 @@
-// End-to-end browser tests using a fake backend, local Chrome detection, and pinned CI/visual Chromium.
+// Configures fake backend browser tests, optional benchmarks, and pinned Chromium for CI and visuals.
 //
 // The fake server (scripts/run-dev.py --fake) replaces containers, runtime
 // inventory, runtime events, CI, usage providers, VNC, and agent processes
@@ -14,11 +14,12 @@
 // Never run this suite concurrently with itself or with frontend builds
 // (`make build`, screenshots targets): they share backend/frontend/dist, so
 // simultaneous builds can delete or replace one another's generated assets.
-// Run through `make test-e2e`, which builds the frontend first; a targeted run
+// Run through `make test-e2e`, which prepares the frontend first. A targeted run
 // takes FILES, like make test-frontend, which may also carry Playwright options:
 //   make test-e2e FILES=e2e/tests/account-menu.spec.ts
-// The fake server embeds the last built bundle, so this config refuses to start
-// when the bundle predates its inputs (see bundle.ts).
+// The fake server embeds the last built bundle. This config checks the same
+// fingerprint that the frontend build uses to decide whether to rebuild.
+// CAIC_E2E_BENCHMARKS=1 selects only measurement cases and uses one worker.
 // Local behavioral tests detect installed Chrome on Linux, macOS, and Windows.
 // CI and screenshot generation always use bundled Chromium for consistent rendering.
 //
@@ -30,7 +31,7 @@ import os from "node:os";
 import path from "node:path";
 import { defineConfig } from "@playwright/test";
 import { chromeExecutable } from "./browser";
-import { staleBundle } from "./bundle";
+import { staleBundle } from "../scripts/frontend_bundle";
 
 // Workers reload this config; the runner process checks once.
 if (process.env.TEST_WORKER_INDEX === undefined) {
@@ -40,6 +41,8 @@ if (process.env.TEST_WORKER_INDEX === undefined) {
 
 const seed = process.env.CAIC_E2E_SEED ?? Date.now().toString(36);
 const includeVisuals = process.env.CAIC_E2E_VISUALS === "1";
+const runBenchmarks = !includeVisuals && process.env.CAIC_E2E_BENCHMARKS === "1";
+const benchmarkTag = /@benchmark\b/;
 const executablePath = chromeExecutable();
 const serverHost = process.env.CAIC_E2E_HOST ?? "127.0.0.1";
 if (serverHost !== "127.0.0.1") {
@@ -86,6 +89,8 @@ if (process.env.TEST_WORKER_INDEX === undefined) {
 export default defineConfig({
   testDir: "./tests",
   testIgnore: includeVisuals ? [] : ["**/gen-screenshots.spec.ts", "**/prompt-input.spec.ts"],
+  grep: runBenchmarks ? benchmarkTag : undefined,
+  grepInvert: runBenchmarks ? undefined : benchmarkTag,
   // A busy host (load average above 100) stretched waits past the 60 s test and
   // 5 s assertion defaults while every failing test passed on rerun. Passing
   // runs never wait on these limits.
@@ -95,7 +100,7 @@ export default defineConfig({
   // renderers, SwiftShader WebGL, and OCCT workers do not starve one another on
   // 4-core CI runners while keeping large local hosts within a predictable
   // memory budget.
-  workers: includeVisuals ? 1 : Math.min(4, Math.max(1, Math.floor(os.availableParallelism() / 2))),
+  workers: includeVisuals || runBenchmarks ? 1 : Math.min(4, Math.max(1, Math.floor(os.availableParallelism() / 2))),
   outputDir: process.env.CAIC_E2E_OUTPUT_DIR,
   // The dot reporter keeps progress to one line; failures still print in full at the end.
   reporter: "dot",
@@ -109,7 +114,7 @@ export default defineConfig({
       reuseExistingServer: false,
       timeout: 30_000,
     },
-    ...(includeVisuals
+    ...(includeVisuals || runBenchmarks
       ? []
       : [
           {
