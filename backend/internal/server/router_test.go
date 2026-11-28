@@ -2726,6 +2726,27 @@ func TestBuildHandler(t *testing.T) {
 		}
 	})
 
+	t.Run("OAuth limits unauthenticated callers to a burst of 20", func(t *testing.T) {
+		t.Parallel()
+		store, err := auth.Open(filepath.Join(t.TempDir(), "users.json"), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		h, err := newTestOAuthRouter(t, store).buildHandler()
+		if err != nil {
+			t.Fatalf("buildHandler() error = %v", err)
+		}
+		for i := 1; i <= 21; i++ {
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "https://caic.example.com/oauth/register", strings.NewReader(`{}`))
+			req.RemoteAddr = "192.0.2.56:1234"
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			if rejected := w.Code == http.StatusTooManyRequests; rejected != (i == 21) || w.Header().Get("X-Ratelimit-Limit") != "60" {
+				t.Fatalf("request %d: %d with limit %q, want a 60/min limit that rejects request 21", i, w.Code, w.Header().Get("X-Ratelimit-Limit"))
+			}
+		}
+	})
+
 	t.Run("go mode settings are public", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)

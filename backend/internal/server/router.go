@@ -191,7 +191,12 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (_ *Router, retE
 		focusEpoch: ksid.NewID().String(),
 	}
 	audit := &auditStore{log: log.With("scope", "audit"), path: d.AuditLogPath}
-	rateLimiter := ratelimit.New(120, time.Minute, 120)
+	// MCP allows its whole minute at once for an agent's bursts of tool calls. OAuth's endpoints
+	// serve unauthenticated callers and persist clients and grants, so they get a smaller burst; the
+	// limiter also paces device-flow polling, which the 5 s advertised interval puts at 12 token
+	// requests a minute.
+	mcpRateLimiter := ratelimit.New(120, time.Minute, 120)
+	oauthRateLimiter := ratelimit.New(60, time.Minute, 20)
 	systemStats := newSystemStats(ctx, workers) //nolint:contextcheck // router context derives from the caller and ends at shutdown
 
 	s := &Router{
@@ -299,7 +304,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (_ *Router, retE
 			Session:                 &caicSessionManager{store: d.AuthStore},
 			UI:                      &caicAuthorizationUI{login: s.authHandlers},
 			Audit:                   audit,
-			RateLimiter:             rateLimiter,
+			RateLimiter:             oauthRateLimiter,
 		})
 		if err != nil {
 			return nil, err
@@ -310,7 +315,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (_ *Router, retE
 	s.serverHandlers.mcpOAuthAvailable = s.oauthServer != nil
 
 	s.mcpHandlers = &mcpHandlers{
-		rateLimiter: rateLimiter,
+		rateLimiter: mcpRateLimiter,
 		hostPolicy:  d.HostPolicy,
 		authStore:   d.AuthStore,
 	}
