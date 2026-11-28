@@ -1,21 +1,46 @@
-// Keeps the conversation live while optional documents and task subviews load, resize, and fill the screen.
+// Keeps the conversation live across task subviews and records its return presentation.
 import { type JSX, Show, Suspense, createSignal, createEffect, onCleanup } from "solid-js";
-import { useLocation, useParams } from "@solidjs/router";
+import { useBeforeLeave, useLocation, useNavigate, useParams } from "@solidjs/router";
 import TaskDetailPage from "../pages/TaskDetailPage";
 import { taskIdFromParam, taskIdFromPath } from "../taskPath";
 import {
   isTaskDetailPath,
+  taskDetailFullscreen,
   taskViewMode,
   rememberTaskViewOrigin,
   restoreTaskViewOrigin,
   type TaskViewMode,
+  type TaskViewNavigationState,
 } from "../taskView";
 import { TaskTimelineProvider } from "../TaskTimelineContext";
 import styles from "./TaskWorkspace.module.css";
 
 export default function TaskWorkspace(props: { children?: JSX.Element }) {
-  const location = useLocation();
+  const location = useLocation<TaskViewNavigationState>();
+  const navigate = useNavigate();
   const params = useParams();
+  const mode = () => taskViewMode(location.pathname, location.search);
+
+  useBeforeLeave((event) => {
+    // History traversal already has the destination entry's return state.
+    if (event.defaultPrevented || typeof event.to !== "string") return;
+    if (
+      !taskDetailFullscreen(location.pathname, location.search) &&
+      !(mode() !== "closed" && location.state?.returnToFullscreen === true)
+    )
+      return;
+    const target = new URL(event.to, window.location.origin);
+    if (
+      taskIdFromPath(target.pathname) !== taskIdFromParam(params.taskId) ||
+      taskViewMode(target.pathname, target.search) === "closed"
+    )
+      return;
+    const state = event.options?.state as TaskViewNavigationState | undefined;
+    if (state?.returnToFullscreen === true) return;
+    event.preventDefault();
+    navigate(event.to, { ...event.options, resolve: false, state: { ...state, returnToFullscreen: true } });
+  });
+
   function bindConversation(pane: HTMLDivElement) {
     const remember = (event: MouseEvent) => {
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -37,7 +62,6 @@ export default function TaskWorkspace(props: { children?: JSX.Element }) {
   const update = () => setMobile(media.matches);
   media.addEventListener("change", update);
   onCleanup(() => media.removeEventListener("change", update));
-  const mode = () => taskViewMode(location.pathname, location.search);
   let previousMode: TaskViewMode = "closed";
   let previousPath = location.pathname;
   createEffect(() => {

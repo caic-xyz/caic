@@ -27,13 +27,6 @@
   min-width: 0;
 }
 
-.paneControls {
-  display: flex;
-  flex-shrink: 0;
-  gap: 0.5rem;
-  align-items: center;
-}
-
 .header h3 {
   margin: 0;
 }
@@ -1384,10 +1377,6 @@ a.ciStatus:hover {
 
   .toolBlockPre {
     max-height: 150px;
-  }
-
-  button.closeBtn {
-    display: none;
   }
 
   .askOptions {

@@ -565,7 +565,11 @@ test("generate documentation screenshots", async ({ page, api }) => {
       return Math.abs(repositoryStateBox.y + repositoryStateBox.height / 2 - infoLinkBox.y - infoLinkBox.height / 2);
     })
     .toBeLessThanOrEqual(1);
-  await expect.poll(() => detailHeader.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await expect
+    .poll(() =>
+      detailHeader.getByTestId("task-detail-header-content").evaluate((el) => el.scrollWidth <= el.clientWidth),
+    )
+    .toBe(true);
   await captureScreenshotPair(page, "mobile", "task-detail-header-compact");
   // Restore desktop viewport.
   await page.setViewportSize({ width: 1280, height: 800 });

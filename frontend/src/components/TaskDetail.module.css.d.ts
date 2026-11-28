@@ -32,7 +32,6 @@ declare const classes: {
   readonly "ciStatus_failure": string;
   readonly "ciStatus_pending": string;
   readonly "ciStatus_success": string;
-  readonly "closeBtn": string;
   readonly "composerMenu": string;
   readonly "composerMenuAnchor": string;
   readonly "container": string;
@@ -67,7 +66,6 @@ declare const classes: {
   readonly "messageArea": string;
   readonly "messageContent": string;
   readonly "messageTiming": string;
-  readonly "paneControls": string;
   readonly "pendingInput": string;
   readonly "placeholder": string;
   readonly "planAction": string;

@@ -17,6 +17,8 @@ for (const width of [390, 1280]) {
     const enter = header.getByRole("button", { name: "Full screen", exact: true });
     const exit = header.getByRole("button", { name: "Exit full screen", exact: true });
     const close = header.getByRole("button", { name: "Close task details" });
+    const pane = page.getByTestId("task-view-pane");
+    const fullScreenConversation = new RegExp(`/task/@${id}(?:\\+[^/?]+)?\\?fullscreen=1$`);
     await prompt.fill("Keep this draft");
     const promptNode = await prompt.elementHandle();
 
@@ -84,25 +86,55 @@ for (const width of [390, 1280]) {
       expect(await promptNode?.evaluate((node) => node === document.activeElement)).toBe(true);
     });
 
-    await test.step("Restore full screen through browser Back from the workspace and a subview", async () => {
+    await test.step("Restore full screen through browser Back and subview closing", async () => {
       await page.goBack();
       await expect(page).toHaveURL(fullScreenURL);
       const info = conversation.getByRole("link", { name: "Task info" });
       await info.click();
       await expect(page).toHaveURL(`${taskURL}/info`);
-      await expect(page.getByTestId("task-view-pane")).toBeVisible();
+      await expect(pane).toBeVisible();
       await page.goBack();
       await expect(page).toHaveURL(fullScreenURL);
       await expect(info).toBeFocused();
+      await page.goForward();
+      await expect(page).toHaveURL(`${taskURL}/info`);
+      if (width <= 768) {
+        const expandSubview = pane.getByRole("button", { name: "Full screen", exact: true });
+        await expect(expandSubview).toBeFocused();
+        await page.mouse.move(0, 843);
+        await expect(page.getByRole("tooltip")).toBeHidden();
+        await expandSubview.press("Escape");
+      } else await pane.getByRole("button", { name: "Close view" }).click();
+      await expect(page).toHaveURL(fullScreenConversation);
+      await expect(exit).toBeVisible();
+      await expect(summary).toBeHidden();
       await expect(prompt).toHaveText("Keep this draft");
     });
 
-    await test.step("Reload in full screen and exit with the header control", async () => {
+    await test.step("Return from a nested subview after toggling its full screen and reloading", async () => {
+      await header.getByRole("link", { name: "Task performance" }).click();
+      await pane
+        .getByTestId("turn-strip")
+        .getByRole("link", { name: /^Turn 1,/ })
+        .click();
+      await expect(page).toHaveURL(/\/perf\/turns\/1$/);
+      await pane.getByRole("button", { name: "Full screen", exact: true }).click();
+      await page.reload();
+      await expect(pane.getByRole("button", { name: "Exit full screen", exact: true })).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(page).toHaveURL(/\/perf\/turns\/1$/);
+      if (width <= 768) await page.keyboard.press("Escape");
+      else await pane.getByRole("button", { name: "Close view" }).click();
+      await expect(page).toHaveURL(fullScreenConversation);
+    });
+
+    await test.step("Reload the full-screen conversation and exit with the header control", async () => {
+      const conversationPath = new URL(page.url()).pathname;
       await page.reload();
       await expect(exit).toBeVisible();
       await expect(newTask).toBeHidden();
       await exit.click();
-      await expect(page).toHaveURL(taskURL);
+      await expect(page).toHaveURL(conversationPath);
       await expect(enter).toBeFocused();
     });
   });

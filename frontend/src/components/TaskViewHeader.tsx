@@ -1,11 +1,8 @@
-// Shared task-view controls handle immersive documents, desktop pane closing, URL-backed full screen, focus, and Escape.
-import { Show, onCleanup, onMount, type JSX } from "solid-js";
-import { useLocation, useNavigate, useSearchParams } from "@solidjs/router";
-import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
-import FullscreenIcon from "@material-symbols/svg-400/outlined/fullscreen.svg?solid";
-import FullscreenExitIcon from "@material-symbols/svg-400/outlined/fullscreen_exit.svg?solid";
-import { isTaskViewEscape, taskViewMode } from "../taskView";
-import ActionButton from "./ActionButton";
+// Task subview header manages immersive documents, return navigation, focus, and Escape.
+import { onCleanup, onMount, type JSX } from "solid-js";
+import { useLocation, useNavigate } from "@solidjs/router";
+import { isTaskViewEscape, taskViewMode, type TaskViewNavigationState } from "../taskView";
+import TaskViewControls, { useTaskFullscreenToggle } from "./TaskViewControls";
 import styles from "./TaskViewHeader.module.css";
 
 export default function TaskViewHeader(props: {
@@ -15,18 +12,15 @@ export default function TaskViewHeader(props: {
   actions?: JSX.Element;
   keyboardTarget?: () => HTMLElement | undefined;
 }) {
-  const location = useLocation();
+  const location = useLocation<TaskViewNavigationState>();
   const navigate = useNavigate();
-  const [, setQuery] = useSearchParams();
   const fullscreen = () => taskViewMode(location.pathname, location.search) === "fullscreen";
+  const toggleFullscreen = useTaskFullscreenToggle(fullscreen);
   const immersive = () => fullscreen() && location.pathname.endsWith("/view");
   let closeButton: HTMLButtonElement | undefined;
   let fullscreenButton: HTMLButtonElement | undefined;
   function close() {
-    navigate(props.taskPath);
-  }
-  function toggleFullscreen() {
-    setQuery({ fullscreen: fullscreen() ? undefined : "1" });
+    navigate(location.state?.returnToFullscreen === true ? `${props.taskPath}?fullscreen=1` : props.taskPath);
   }
 
   onMount(() => {
@@ -61,20 +55,18 @@ export default function TaskViewHeader(props: {
     <header class={styles.header} hidden={immersive()} aria-label={props.label}>
       {props.children}
       {props.actions}
-      <div class={styles.paneControls}>
-        <ActionButton
-          ref={fullscreenButton}
-          onClick={toggleFullscreen}
-          label={fullscreen() ? "Exit full screen" : "Full screen"}
-        >
-          <Show when={fullscreen()} fallback={<FullscreenIcon width={20} height={20} aria-hidden="true" />}>
-            <FullscreenExitIcon width={20} height={20} aria-hidden="true" />
-          </Show>
-        </ActionButton>
-        <ActionButton ref={closeButton} class={styles.closeButton} onClick={close} label="Close view">
-          <CloseIcon width={20} height={20} aria-hidden="true" />
-        </ActionButton>
-      </div>
+      <TaskViewControls
+        fullscreen={fullscreen()}
+        toggleFullscreen={toggleFullscreen}
+        fullscreenRef={(element) => {
+          fullscreenButton = element;
+        }}
+        close={close}
+        closeLabel="Close view"
+        closeRef={(element) => {
+          closeButton = element;
+        }}
+      />
     </header>
   );
 }

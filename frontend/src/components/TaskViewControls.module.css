@@ -1,0 +1,15 @@
+/* Right-aligned task header controls with desktop-only closing. */
+.controls {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.5rem;
+  align-items: center;
+  margin-left: auto;
+}
+
+@media (width <= 768px) {
+  button.closeButton,
+  .controls:has(> .closeButton:only-child) {
+    display: none;
+  }
+}

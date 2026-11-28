@@ -243,9 +243,11 @@ for (const width of [390, 1000, 1440]) {
     await page.keyboard.press("Escape");
     await expect(page.getByTestId("task-detail-prompt")).toHaveText("Keep this draft");
     await expect(page.getByRole("link", { name: "Guide", exact: true })).toBeFocused();
-    // The pane width legitimately differs once the document closes, so compare
-    // where the row sits after the queued anchor correction finishes.
-    await expect.poll(async () => (await conversationPosition(page)).offset).toBe(taskPosition.offset);
+    // Compare the row after the anchor correction. The previous measurement
+    // and the restored one can differ by one CSS pixel.
+    await expect
+      .poll(async () => Math.abs((await conversationPosition(page)).offset - taskPosition.offset))
+      .toBeLessThanOrEqual(1);
     expect(await conversation?.evaluate((node) => node.isConnected)).toBe(true);
     await page.getByRole("link", { name: "Guide", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Guide", exact: true })).toBeVisible();

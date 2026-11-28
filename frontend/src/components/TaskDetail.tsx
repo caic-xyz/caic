@@ -18,10 +18,8 @@ import {
   useContext,
 } from "solid-js";
 import { ConversationViewportContext } from "../ConversationViewportContext";
-import { A, useLocation, useSearchParams } from "@solidjs/router";
+import { A, useLocation } from "@solidjs/router";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
-import FullscreenIcon from "@material-symbols/svg-400/outlined/fullscreen.svg?solid";
-import FullscreenExitIcon from "@material-symbols/svg-400/outlined/fullscreen_exit.svg?solid";
 import CopyIcon from "@material-symbols/svg-400/outlined/content_copy.svg?solid";
 import CheckIcon from "@material-symbols/svg-400/outlined/check.svg?solid";
 import InfoIcon from "@material-symbols/svg-400/outlined/info.svg?solid";
@@ -109,6 +107,7 @@ import type { ToolCall } from "../grouping";
 import AutoResizeTextarea from "./AutoResizeTextarea";
 import PromptInput from "./PromptInput";
 import Tooltip from "./Tooltip";
+import TaskViewControls, { useTaskFullscreenToggle } from "./TaskViewControls";
 import BackgroundStrip from "./BackgroundStrip";
 import { bindPromptSubmitShortcut } from "./promptSubmitShortcut";
 import Button from "./Button";
@@ -272,12 +271,9 @@ function ciActionsURL(remoteURL?: string, forge?: string): string | undefined {
 export default function TaskDetail(props: Props) {
   const hostMode = useHostMode();
   const location = useLocation();
-  const [, setQuery] = useSearchParams();
   const taskPath = () => taskPathFromPathname(location.pathname);
   const fullscreen = () => taskDetailFullscreen(location.pathname, location.search);
-  function toggleFullscreen() {
-    setQuery({ fullscreen: fullscreen() ? undefined : "1" });
-  }
+  const toggleFullscreen = useTaskFullscreenToggle(fullscreen);
   const timeline = useTaskTimeline();
   const messages = timeline.messages;
   const metadata = () => timeline.manifest()?.metadata;
@@ -1558,23 +1554,13 @@ export default function TaskDetail(props: Props) {
                 </span>
               </Show>
             </div>
-            <div class={styles.paneControls}>
-              <Show when={isTaskDetailPath(location.pathname)}>
-                <ActionButton onClick={toggleFullscreen} label={fullscreen() ? "Exit full screen" : "Full screen"}>
-                  <Show when={fullscreen()} fallback={<FullscreenIcon width={20} height={20} aria-hidden="true" />}>
-                    <FullscreenExitIcon width={20} height={20} aria-hidden="true" />
-                  </Show>
-                </ActionButton>
-              </Show>
-              <ActionButton
-                class={styles.closeBtn}
-                onClick={() => props.onClose()}
-                label="Close task details"
-                title="Close"
-              >
-                <CloseIcon width={20} height={20} />
-              </ActionButton>
-            </div>
+            <TaskViewControls
+              fullscreen={fullscreen()}
+              toggleFullscreen={isTaskDetailPath(location.pathname) ? toggleFullscreen : undefined}
+              close={() => props.onClose()}
+              closeLabel="Close task details"
+              closeTitle="Close"
+            />
           </div>
           <Show when={props.parentTaskID || props.childTasks.length > 0}>
             <nav class={styles.hierarchy} aria-label="Task hierarchy">

@@ -1,4 +1,4 @@
-// Owns URL-backed task presentation, Escape handling, and weak focus restoration for workspace navigation.
+// Owns task presentation, subview return state, Escape handling, and workspace focus restoration.
 
 let viewOrigin: WeakRef<HTMLAnchorElement> | null = null;
 
@@ -17,6 +17,11 @@ export function restoreTaskViewOrigin() {
 }
 
 export type TaskViewMode = "closed" | "docked" | "fullscreen";
+
+/** Router history state for subviews entered from a full-screen conversation. */
+export interface TaskViewNavigationState {
+  returnToFullscreen?: true;
+}
 
 export function isTaskDetailPath(pathname: string): boolean {
   return /^\/task\/[^/]+\/?$/.test(pathname);
