@@ -22,7 +22,6 @@ export default function BrowserVoiceShell() {
             preparation={preparation}
             authorize={authorizeVoice}
             setupFailed="Voice assistant unavailable."
-            onError={(error) => console.error("Could not configure caic voice gateway", error)}
           >
             {({ session }) => <VoiceTaskUpdates tasks={s.tasks} session={session} />}
           </SharedBrowserVoiceShell>

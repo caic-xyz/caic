@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/gomodedev/gomode/httpserver"
+	"github.com/gomodedev/gomode/httpserver/ratelimit"
 
 	agentbackends "github.com/caic-xyz/caic/backend/internal/agent/backends"
 	"github.com/caic-xyz/caic/backend/internal/tailscale"
@@ -2698,7 +2699,7 @@ func TestBuildHandler(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
 		s.hostPolicy = newTestHostPolicy(t, "https://caic.example.com")
-		s.mcpHandlers.rateLimiter = newRateLimiter(1, time.Minute)
+		s.mcpHandlers.rateLimiter = ratelimit.New(1, time.Minute, 1)
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -2715,8 +2716,8 @@ func TestBuildHandler(t *testing.T) {
 				t.Fatalf("request %d status = %d, want %d", i+1, w.Code, want)
 			}
 			if want == http.StatusTooManyRequests {
-				if got := w.Header().Get("Retry-After"); got != "60" && got != "59" {
-					t.Fatalf("Retry-After = %q, want the rest of the 1-minute window", got)
+				if got := w.Header().Get("Retry-After"); got != "60" {
+					t.Fatalf("Retry-After = %q, want the minute until the next token", got)
 				}
 			}
 		}

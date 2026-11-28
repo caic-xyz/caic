@@ -9,11 +9,10 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gomodedev/gomode/httpserver"
+	"github.com/gomodedev/gomode/httpserver/ratelimit"
 	"github.com/maruel/ksid"
 
 	"github.com/gomodedev/gomode/mcp"
@@ -28,7 +27,7 @@ import (
 // browser-session authorization, or direct loopback access as configured.
 type mcpHandlers struct {
 	protocol    *mcp.Handler
-	rateLimiter *rateLimiter
+	rateLimiter *ratelimit.Limiter
 
 	// Shared, injected reference (not owned).
 	hostPolicy *httpserver.HostPolicy
@@ -121,13 +120,11 @@ func (h *mcpHandlers) allowMCPRequest(w http.ResponseWriter, r *http.Request) bo
 	if h.rateLimiter == nil {
 		return true
 	}
-	wait, ok := h.rateLimiter.Allow(h.mcpRateKey(r))
-	if ok {
+	result := h.rateLimiter.Allow(h.mcpRateKey(r))
+	if result.Allowed {
 		return true
 	}
-	// Retry-After holds whole seconds; round up so a retry lands after the reset.
-	seconds := max(1, (wait+time.Second-1)/time.Second)
-	w.Header().Set("Retry-After", strconv.FormatInt(int64(seconds), 10))
+	ratelimit.SetRetryAfter(w.Header(), result.RetryAfter)
 	http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 	return false
 }

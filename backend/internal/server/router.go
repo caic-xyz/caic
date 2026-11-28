@@ -23,6 +23,7 @@ import (
 	"github.com/gomodedev/gomode/devicelogin"
 	"github.com/gomodedev/gomode/httpserver"
 	"github.com/gomodedev/gomode/httpserver/geoip"
+	"github.com/gomodedev/gomode/httpserver/ratelimit"
 	"github.com/gomodedev/gomode/mcp"
 	"github.com/gomodedev/gomode/oauth/oauthclient"
 	"github.com/gomodedev/gomode/oauth/oauthserver"
@@ -190,7 +191,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (_ *Router, retE
 		focusEpoch: ksid.NewID().String(),
 	}
 	audit := &auditStore{log: log.With("scope", "audit"), path: d.AuditLogPath}
-	rateLimiter := newRateLimiter(120, time.Minute)
+	rateLimiter := ratelimit.New(120, time.Minute, 120)
 	systemStats := newSystemStats(ctx, workers) //nolint:contextcheck // router context derives from the caller and ends at shutdown
 
 	s := &Router{
