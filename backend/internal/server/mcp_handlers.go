@@ -121,10 +121,10 @@ func (h *mcpHandlers) allowMCPRequest(w http.ResponseWriter, r *http.Request) bo
 		return true
 	}
 	result := h.rateLimiter.Allow(h.mcpRateKey(r))
+	ratelimit.WriteHeaders(w.Header(), result)
 	if result.Allowed {
 		return true
 	}
-	ratelimit.SetRetryAfter(w.Header(), result.RetryAfter)
 	http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 	return false
 }

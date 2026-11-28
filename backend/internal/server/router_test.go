@@ -2715,6 +2715,9 @@ func TestBuildHandler(t *testing.T) {
 			if w.Code != want {
 				t.Fatalf("request %d status = %d, want %d", i+1, w.Code, want)
 			}
+			if got := w.Header().Get("X-Ratelimit-Remaining"); got != "0" {
+				t.Fatalf("request %d X-RateLimit-Remaining = %q, want 0", i+1, got)
+			}
 			if want == http.StatusTooManyRequests {
 				if got := w.Header().Get("Retry-After"); got != "60" {
 					t.Fatalf("Retry-After = %q, want the minute until the next token", got)
