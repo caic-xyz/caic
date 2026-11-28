@@ -19,16 +19,18 @@ import (
 
 // replayAgentScript writes one retained native harness recording to stdout, one
 // recorded payload per line, after waiting for the caic session's first prompt.
-// It pauses before the payload at hold_after for hold_ms so a smoke test can
-// restart caic between the recorded running card and the records that settle it.
+// It waits for the test to release the remaining payloads after caic restores
+// the running card.
 // Synthetic markers supply the turn boundaries missing from the minimized
 // recording; a recording that ends with its own prompt response needs no end
 // marker, so end_marker is 0.
 const replayAgentScript = `
 import sys
 import time
+from pathlib import Path
 
-payloads_path, hold_after, hold_ms, end_marker = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), sys.argv[4] == "1"
+payloads_path, hold_after, end_marker = sys.argv[1], int(sys.argv[2]), sys.argv[3] == "1"
+release_path = Path('` + replayReleasePath + `')
 
 with open(payloads_path, encoding="utf-8") as f:
     payloads = [line.rstrip("\n") for line in f if line.strip()]
@@ -44,7 +46,8 @@ sys.stdout.flush()
 
 for index, payload in enumerate(payloads):
     if index == hold_after:
-        time.sleep(hold_ms / 1000.0)
+        while not release_path.exists():
+            time.sleep(0.05)
     sys.stdout.write(payload + "\n")
     sys.stdout.flush()
     time.sleep(0.05)
@@ -61,6 +64,7 @@ for line in sys.stdin:
 const (
 	replayAgentPath   = agent.RelayDir + "/replay_agent.py"
 	replayPayloadPath = agent.RelayDir + "/replay_payloads.jsonl"
+	replayReleasePath = agent.RelayDir + "/replay_release"
 	replayStartMarker = `{"caic_replay_start":true}`
 	replayEndMarker   = `{"caic_replay_end":true}`
 )
@@ -83,8 +87,15 @@ type ReplayRecording struct {
 	Payloads [][]byte
 	// HoldAfter is how many payloads the agent emits before pausing.
 	HoldAfter int
-	// Hold is how long the agent pauses before the remaining payloads.
-	Hold time.Duration
+}
+
+// ReleaseReplay lets the paused replay agent emit the remaining payloads.
+func ReleaseReplay(ctx context.Context, runtimeName string, instanceID runtime.InstanceID) error {
+	out, err := runSmokeCommand(ctx, runtimeName, "container", "exec", "--user", "user", string(instanceID), "touch", replayReleasePath)
+	if err != nil {
+		return fmt.Errorf("release replay in %s: %w: %s", instanceID, err, out)
+	}
+	return nil
 }
 
 // ReplayBackend implements agent.Backend by replaying one harness's retained
@@ -145,7 +156,7 @@ func (b *ReplayBackend) Start(ctx context.Context, opts *agent.Options) (*agent.
 	}
 	args := []string{
 		"python3", "-u", replayAgentPath, replayPayloadPath,
-		strconv.Itoa(rec.HoldAfter), strconv.FormatInt(rec.Hold.Milliseconds(), 10), endMarker,
+		strconv.Itoa(rec.HoldAfter), endMarker,
 	}
 	session, err := agent.StartRelay(ctx, opts, args)
 	if err != nil {

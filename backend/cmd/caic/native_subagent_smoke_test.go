@@ -37,12 +37,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/smoketest"
 )
 
-const (
-	// smokeReplayHold keeps the replay agent paused long enough for caic to
-	// restart between the recorded running card and the records that settle it.
-	smokeReplayHold = 15 * time.Second
-)
-
 // smokeReplayRecordings lists every retained recording the smoke test delivers:
 // the standardized delegation for each harness, plus Pi's workflow
 // orchestration, which is the only recording that pins the batch scope. The agy
@@ -87,13 +81,6 @@ type smokeReplayCase struct {
 	contract  agenttest.NativeSubagentContract
 }
 
-// recordedObservation is one native-subagent observation with the producer time
-// its physical task-log record carried.
-type recordedObservation struct {
-	subagent   agent.NativeSubagent
-	producerAt time.Time
-}
-
 // newSmokeReplayCase loads one retained recording into a replay recording.
 func newSmokeReplayCase(t *testing.T, h harness.Name, file string) smokeReplayCase {
 	newWire := func() agent.WireFormat { return smokeReplayWire(h) }
@@ -111,7 +98,6 @@ func newSmokeReplayCase(t *testing.T, h harness.Name, file string) smokeReplayCa
 			Harness:      h,
 			Payloads:     evidence.Payloads,
 			HoldAfter:    split,
-			Hold:         smokeReplayHold,
 		},
 		contract: evidence.Contract(t),
 	}
@@ -154,12 +140,22 @@ func runSmokeReplay(t *testing.T, fixture *smokeServer, h harness.Name, tc *smok
 		}
 	}
 
-	downtimeStart := time.Now().UTC()
+	// Check the durable prefix while caic is stopped. The relay encodes producer
+	// times to milliseconds, so they cannot order an event against shutdown.
+	logDir := fixture.cfg.Dirs.CacheDir
 	fixture.stop()
+	recordedBefore := replayTaskLog(t, logDir, taskID, smoketest.NewReplayWire(smokeReplayWire(h)))
+	if diff := compareCards(uiBefore, recordedBefore); diff != "" {
+		t.Fatalf("task %s: saved running card disagrees with the task UI: %s", taskID, diff)
+	}
 	fixture.start()
-	downtimeEnd := time.Now().UTC()
-	if !downtimeEnd.After(downtimeStart) {
-		t.Fatalf("task %s: caic downtime window is inverted", taskID)
+	waitForTaskState(t, fixture, taskID, "running")
+	uiRestored := readTaskHistory(t, fixture.baseURL, taskID)
+	if diff := compareCards(uiRestored, recordedBefore); diff != "" {
+		t.Fatalf("task %s: restored running card disagrees with the recording: %s", taskID, diff)
+	}
+	if err := smoketest.ReleaseReplay(t.Context(), fixture.runtimeName, runtimeID.InstanceID()); err != nil {
+		t.Fatalf("task %s: %v", taskID, err)
 	}
 
 	task := waitForTaskState(t, fixture, taskID, "waiting")
@@ -172,8 +168,7 @@ func runSmokeReplay(t *testing.T, fixture *smokeServer, h harness.Name, tc *smok
 
 	// The durable recording: replay the task log through the same wire the task
 	// used, exactly like restart and settled-history replay do.
-	records := replayTaskLog(t, fixture.cfg.Dirs.CacheDir, taskID, smoketest.NewReplayWire(smokeReplayWire(h)))
-	recorded := subagentsOf(records)
+	recorded := replayTaskLog(t, logDir, taskID, smoketest.NewReplayWire(smokeReplayWire(h)))
 	if got := agenttest.Contract(recorded); !got.Equal(tc.contract) {
 		t.Fatalf("task %s: replayed contract = %s, want the retained recording's %s", taskID, got, tc.contract)
 	}
@@ -184,7 +179,6 @@ func runSmokeReplay(t *testing.T, fixture *smokeServer, h harness.Name, tc *smok
 	if cards[0].ID != beforeCards[0].ID {
 		t.Fatalf("task %s: restored card ID = %q, want the pre-restart identity %q", taskID, cards[0].ID, beforeCards[0].ID)
 	}
-	verifySmokeSettlement(t, taskID, records, downtimeStart, downtimeEnd)
 
 	// The task UI the frontend consumes must agree with the delivered records.
 	uiAfter := readTaskHistory(t, fixture.baseURL, taskID)
@@ -194,45 +188,15 @@ func runSmokeReplay(t *testing.T, fixture *smokeServer, h harness.Name, tc *smok
 	if diff := compareCards(uiAfter, recorded); diff != "" {
 		t.Fatalf("task %s: task UI disagrees with the recording: %s", taskID, diff)
 	}
-	t.Logf("task %s: %s reproduced %s; the restored card settled from a record produced after %s",
-		taskID, h, agenttest.Contract(recorded), downtimeStart.Format(time.RFC3339))
+	t.Logf("task %s: %s reproduced %s after restoring the running card", taskID, h, agenttest.Contract(recorded))
 
 	stopAndPurgeTask(t, fixture, taskID)
-}
-
-// verifySmokeSettlement checks that the running card came from pre-restart
-// history and that the harness records that settled it were produced after caic
-// stopped. A settling record may land while caic is still down, in which case
-// adoption imports it from the relay tail, or on the live tail after adoption;
-// both are records the container produced without caic watching, so the count of
-// each is reported rather than asserted.
-func verifySmokeSettlement(t *testing.T, taskID string, records []recordedObservation, downtimeStart, downtimeEnd time.Time) {
-	var runningBefore, settledAfter, duringDowntime int
-	for i := range records {
-		switch {
-		case records[i].subagent.Status == agent.NativeSubagentStatusRunning && records[i].producerAt.Before(downtimeStart):
-			runningBefore++
-		case records[i].subagent.Status.Terminal() && records[i].producerAt.After(downtimeStart):
-			settledAfter++
-			if records[i].producerAt.Before(downtimeEnd) {
-				duringDowntime++
-			}
-		}
-	}
-	if runningBefore == 0 {
-		t.Fatalf("task %s: no recorded running card preceded the restart", taskID)
-	}
-	if settledAfter == 0 {
-		t.Fatalf("task %s: no record produced after caic stopped at %s settled the card: %#v", taskID, downtimeStart.Format(time.RFC3339), records)
-	}
-	t.Logf("task %s: caic was down %s-%s; %d running record(s) before, %d settling record(s) after (%d in the downtime window)",
-		taskID, downtimeStart.Format(time.RFC3339), downtimeEnd.Format(time.RFC3339), runningBefore, settledAfter, duringDowntime)
 }
 
 // stopAndPurgeTask stops and purges one replayed task so the next harness starts
 // from a clean task list.
 func stopAndPurgeTask(t *testing.T, fixture *smokeServer, taskID string) {
-	postJSON(t, fixture.baseURL, "/api/caic/v1/tasks/"+taskID+"/stop", nil, nil)
+	smokeStop(t, fixture, taskID)
 	waitForTaskState(t, fixture, taskID, "stopped")
 	postJSON(t, fixture.baseURL, "/api/caic/v1/tasks/"+taskID+"/purge", nil, nil)
 	waitForTaskState(t, fixture, taskID, "purged")
@@ -338,9 +302,8 @@ func readTaskEvents(ctx context.Context, baseURL, taskID string, stop func(ready
 }
 
 // replayTaskLog replays one task log through the given wire, exactly like
-// restart and settled-history replay do, and returns the native-subagent
-// observations with the producer times the log recorded.
-func replayTaskLog(t *testing.T, cacheDir, taskID string, wire agent.WireFormat) []recordedObservation {
+// restart and settled-history replay do, and returns the native-subagent observations.
+func replayTaskLog(t *testing.T, cacheDir, taskID string, wire agent.WireFormat) []agent.NativeSubagent {
 	path := findTaskLog(t, cacheDir, taskID)
 	reader := openTaskLog(t, path)
 	defer func() {
@@ -352,7 +315,7 @@ func replayTaskLog(t *testing.T, cacheDir, taskID string, wire agent.WireFormat)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var out []recordedObservation
+	var out []agent.NativeSubagent
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 64*1024), 32<<20)
 	for scanner.Scan() {
@@ -365,7 +328,7 @@ func replayTaskLog(t *testing.T, cacheDir, taskID string, wire agent.WireFormat)
 		}
 		for _, message := range record.Messages {
 			if subagent, ok := message.Message.(*agent.NativeSubagentMessage); ok {
-				out = append(out, recordedObservation{subagent: subagent.Subagent, producerAt: message.ProducerTime})
+				out = append(out, subagent.Subagent)
 			}
 		}
 	}
@@ -499,13 +462,4 @@ func nativeSubagent(e *v1.EventNativeSubagent) agent.NativeSubagent {
 		Result:     e.Result,
 		Background: e.Background,
 	}
-}
-
-// subagentsOf drops the producer times from recorded observations.
-func subagentsOf(records []recordedObservation) []agent.NativeSubagent {
-	out := make([]agent.NativeSubagent, 0, len(records))
-	for i := range records {
-		out = append(out, records[i].subagent)
-	}
-	return out
 }

@@ -440,9 +440,8 @@ func TestSmoke(t *testing.T) {
 	// The NativeSubagents scenario proves the canonical native-subagent lifecycle inside
 	// a caic-managed md container for every supported harness and recording. Each task
 	// replays the retained recording through the production relay and that harness's
-	// wire, and caic restarts while the replay agent is paused between the recorded
-	// running card and the records that settle it, so the restored card must settle
-	// from records the container produced after caic stopped, without a duplicate.
+	// wire. The agent waits for caic to restore the running card after restarting
+	// before emitting the records that settle it without a duplicate.
 	//
 	// It never runs a live harness: the recordings are the evidence, so the test stays
 	// deterministic and needs no model credentials.
