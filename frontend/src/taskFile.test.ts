@@ -133,7 +133,7 @@ describe("readTaskFilePreview", () => {
 });
 
 describe("streamTaskStepFile", () => {
-  it("delivers STEP chunks before requesting more bytes and reports known totals", async () => {
+  it("reports first receipt and the known total before handing off the first chunk", async () => {
     fetchMock.mockResolvedValue(new Response(new Uint8Array([1, 2, 3, 4]), { headers: { "Content-Length": "4" } }));
     const progress: [number, number | null][] = [];
     const received: number[] = [];
@@ -141,13 +141,16 @@ describe("streamTaskStepFile", () => {
       "abc",
       "/part.step",
       new AbortController().signal,
-      (chunk) => received.push(...chunk),
+      (chunk) => {
+        expect(progress).toEqual([
+          [0, 4],
+          [4, 4],
+        ]);
+        received.push(...chunk);
+      },
       (done, total) => progress.push([done, total]),
     );
-    expect(progress).toEqual([
-      [0, 4],
-      [4, 4],
-    ]);
+    expect(progress.at(-1)).toEqual([4, 4]);
     expect(received).toEqual([1, 2, 3, 4]);
   });
 

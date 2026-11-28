@@ -149,6 +149,9 @@ export async function streamTaskStepFile(
       if (size > limit)
         throw new Error(compressed ? "Compressed STEP file exceeds 64 MiB" : "STEP file exceeds 512 MiB");
       if (!compressed && total !== null && size > total) throw new Error("STEP download exceeds Content-Length");
+      const expected = total !== null && size <= total ? total : null;
+      // Publish the first receipt before inflation and indexing occupy the worker.
+      if (size === value.byteLength && size > 0) progress(size, expected);
       // Cap each consumer call even when a mocked response or browser provides
       // a large chunk. The archive decoder further bounds inflate input slices.
       for (let offset = 0; offset < value.length; offset += 65536) {
@@ -156,7 +159,7 @@ export async function streamTaskStepFile(
         consume(value.subarray(offset, offset + 65536));
         // Network receipt and decoding progress are independent: a browser
         // chunk may already contain the full file while indexing still grows.
-        progress(size, total !== null && size <= total ? total : null);
+        progress(size, expected);
         signal.throwIfAborted();
       }
     }

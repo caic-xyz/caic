@@ -1,4 +1,4 @@
-// Tests early STEP indexing, bounded pulls, cancellation, and atomic validation before geometry import.
+// Tests early STEP indexing, file size at EOF, bounded pulls, cancellation, and validation before geometry import.
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { gzipSync, zipSync } from "three/addons/libs/fflate.module.js";
@@ -79,7 +79,7 @@ describe("streamed STEP input", () => {
       gate.resolve();
       expect(await pending).toHaveLength(8);
       expect(cancelled).toBe(false);
-      expect(updates.every((value) => value.stage === "download")).toBe(true);
+      expect(updates.at(-1)).toMatchObject({ stage: "parse", parseStep: "input", fileBytes: bytes.length });
       expect(work.downloadMs).toBeGreaterThanOrEqual(0);
       expect(work.decompressMs).toBeGreaterThanOrEqual(0);
       expect(work.directParseMs).toBeGreaterThan(0);
@@ -90,7 +90,7 @@ describe("streamed STEP input", () => {
   it("reports growing decoded and indexed counts inside one fully received browser chunk", async () => {
     const model = createFacetedStep(256, false);
     const updates: CadLoadProgress[] = [];
-    fetchMock.mockResolvedValue(new Response(model, { headers: { "Content-Length": String(model.length) } }));
+    fetchMock.mockResolvedValue(new Response(model));
     const reader = await readStepInput(
       "task",
       "part.step",
@@ -103,7 +103,8 @@ describe("streamed STEP input", () => {
     assert.ok(decoded[0] !== undefined);
     expect(decoded[0].decodedBytes).toBeLessThan(model.length);
     expect(decoded.at(-1)?.decodedBytes).toBe(model.length);
-    expect(decoded.every((value) => value.completed === model.length && value.total === model.length)).toBe(true);
+    expect(decoded.every((value) => value.completed === model.length && value.total === null)).toBe(true);
+    expect(updates.at(-1)).toMatchObject({ stage: "parse", parseStep: "input", fileBytes: model.length });
     for (let i = 1; i < decoded.length; i++) {
       const previous = decoded[i - 1];
       assert.ok(previous !== undefined);

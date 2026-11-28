@@ -5,8 +5,14 @@ import { zipSync } from "three/addons/libs/fflate.module.js";
 import { createFacetedStep } from "../../frontend/tests/step-fixture";
 import { test, expect, createTaskAPI, waitForTaskState, STEP_IMPORT_TIMEOUT } from "../helpers";
 
+const largePrefixSize = 10 * 1024 * 1024;
+
 async function archiveStream(corrupt: boolean) {
-  const archive = Buffer.from(zipSync({ "assembly.stp": createFacetedStep(8, false) }));
+  const model = createFacetedStep(8, false);
+  // Pad with STEP whitespace and store without compression to exercise a large transfer.
+  const entry = corrupt ? model : new Uint8Array(largePrefixSize).fill(32);
+  if (!corrupt) entry.set(model);
+  const archive = Buffer.from(zipSync({ "assembly.stp": entry }, { level: corrupt ? 6 : 0 }));
   const invalid = Buffer.from(archive);
   const directory = archive.readUInt32LE(archive.length - 6);
   invalid.writeUInt32LE((invalid.readUInt32LE(directory + 16) ^ 1) >>> 0, directory + 16);
@@ -18,7 +24,7 @@ async function archiveStream(corrupt: boolean) {
     response.writeHead(200, {
       "Access-Control-Allow-Origin": "*",
       "Content-Type": "application/zip",
-      "Content-Length": bytes.length,
+      ...(corrupt ? { "Content-Length": bytes.length } : {}),
       "Cache-Control": "no-store",
     });
     if (corrupt && requests > 1) {
@@ -27,7 +33,8 @@ async function archiveStream(corrupt: boolean) {
     }
     // On the integrity journey the entire STEP is available, but the directory
     // and its authoritative checksum are withheld. No model may be published.
-    const split = corrupt ? directory : Math.floor(bytes.length / 2);
+    // Otherwise pause inside the ZIP header, before any STEP records exist.
+    const split = corrupt ? directory : 16;
     response.write(bytes.subarray(0, split));
     held.set(response, bytes.subarray(split));
     response.on("close", () => held.delete(response));
@@ -38,6 +45,13 @@ async function archiveStream(corrupt: boolean) {
   if (!address || typeof address === "string") throw new Error("Missing archive stream address");
   return {
     url: `http://127.0.0.1:${address.port}/assembly.stpz`,
+    sendLargePrefix() {
+      for (const [response, remaining] of held) {
+        const length = largePrefixSize - (archive.length - remaining.length);
+        response.write(remaining.subarray(0, length));
+        held.set(response, remaining.subarray(length));
+      }
+    },
     finish() {
       for (const [response, remaining] of held) response.end(remaining);
       held.clear();
@@ -55,7 +69,7 @@ test.describe("streaming STEP", () => {
     { width: 390, corrupt: false },
     { width: 1280, corrupt: true },
   ]) {
-    test(`${corrupt ? "rejects a late checksum failure" : "cancels and retries an unfinished stream"} at ${width}px`, async ({
+    test(`${corrupt ? "rejects a late checksum failure" : "shows received bytes and closes an unfinished stream"} at ${width}px`, async ({
       page,
       context,
       api,
@@ -77,7 +91,13 @@ test.describe("streaming STEP", () => {
         await page.getByRole("link", { name: "Assembly", exact: true }).click();
         const worker = await started;
         await expect(page.getByRole("progressbar", { name: "Downloading and reading STEP" })).toBeVisible();
-        await expect(page.getByText(/[1-9][\d,]* records indexed/)).toBeVisible();
+        if (corrupt) {
+          await expect(page.getByText(/[1-9][\d,]* records indexed/)).toBeVisible();
+        } else {
+          await expect(page.getByText("16 B received · 0 records indexed", { exact: true })).toBeVisible();
+          source.sendLargePrefix();
+          await expect(page.getByText(/10 MiB received · [1-9][\d,]* records indexed/)).toBeVisible();
+        }
         await expect(page.getByText("32 triangles", { exact: true })).toHaveCount(0);
         await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
@@ -88,11 +108,10 @@ test.describe("streaming STEP", () => {
           await page.getByRole("button", { name: "Retry", exact: true }).click();
         } else {
           const closed = new Promise<void>((resolve) => worker.once("close", () => resolve()));
-          await page.getByRole("button", { name: "Cancel loading", exact: true }).click();
+          await page.goBack();
           await closed;
-          await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeFocused();
-          await page.getByRole("button", { name: "Retry", exact: true }).click();
-          await expect(page.getByText(/[1-9][\d,]* records indexed/)).toBeVisible();
+          await page.getByRole("link", { name: "Assembly", exact: true }).click();
+          await expect(page.getByText("16 B received · 0 records indexed", { exact: true })).toBeVisible();
           source.finish();
         }
         await expect(page.getByText("32 triangles", { exact: true })).toBeVisible({ timeout: STEP_IMPORT_TIMEOUT });

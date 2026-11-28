@@ -20,12 +20,21 @@ globalThis.onmessage = async (event: MessageEvent<StepRequest>) => {
     occtParseMs: 0,
     packingMs: 0,
   };
+  const progressInterval = 100;
   let previousStage = "";
   let previousTime = 0;
+  let pending: CadLoadProgress | null = null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  function sendProgress(value: CadLoadProgress) {
+    clearTimeout(timer);
+    timer = undefined;
+    pending = null;
+    previousTime = performance.now();
+    send({ type: "progress", progress: value }, []);
+  }
   function progress(value: CadLoadProgress) {
-    const now = performance.now();
-    // Deliver the first indexed prefix even when it arrives within the normal
-    // throttle interval and the next network read then waits indefinitely.
+    // Deliver the first received bytes and first indexed prefix even when
+    // the next network read stalls within the normal throttle interval.
     const inputState =
       value.stage !== "download"
         ? ""
@@ -33,15 +42,23 @@ globalThis.onmessage = async (event: MessageEvent<StepRequest>) => {
           ? "decoded"
           : (value.indexedRecords ?? 0) > 0
             ? "indexed"
-            : "waiting";
+            : (value.completed ?? 0) > 0
+              ? "receiving"
+              : "waiting";
     const stage = `${value.stage}:${value.parseStep ?? ""}:${inputState}`;
     // Receiving all network bytes does not finish indexing buffered slices.
     // Those updates retain the normal cadence even at 100% received.
     const finished = value.stage !== "download" && value.total !== null && value.completed === value.total;
-    if (stage !== previousStage || now - previousTime >= 100 || finished) {
-      send({ type: "progress", progress: value }, []);
+    const remaining = progressInterval - (performance.now() - previousTime);
+    if (stage !== previousStage || remaining <= 0 || finished) {
       previousStage = stage;
-      previousTime = now;
+      sendProgress(value);
+    } else if (value.stage === "download") {
+      // A network pause may leave this as the last update until EOF.
+      pending = value;
+      timer ??= setTimeout(() => {
+        if (pending) sendProgress(pending);
+      }, remaining);
     }
   }
   try {
@@ -62,5 +79,7 @@ globalThis.onmessage = async (event: MessageEvent<StepRequest>) => {
     send({ type: "result", meshes, timings }, [...transfers]);
   } catch (error) {
     send({ type: "error", message: error instanceof Error ? error.message : "Failed to import STEP model" }, []);
+  } finally {
+    clearTimeout(timer);
   }
 };

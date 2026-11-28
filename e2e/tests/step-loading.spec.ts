@@ -1,4 +1,4 @@
-// Browser coverage for STEP loading controls, cancellation, retry, and worker cleanup using gated downloads.
+// Browser coverage for STEP loading feedback, fullscreen transitions, file switching, closing, and error recovery.
 import type { Page, Route } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { zipSync } from "three/addons/libs/fflate.module.js";
@@ -40,7 +40,7 @@ for (const width of [390, 1280]) {
       await page.getByRole("link", { name: "Cube", exact: true }).click();
       const { worker, closed } = await started;
       await requested.promise;
-      const progress = page.getByRole("progressbar", { name: "Downloading model" });
+      const progress = page.getByRole("progressbar", { name: "Loading model" });
       await expect(progress).toBeVisible();
       await expect(progress).not.toHaveAttribute("value");
       await page.getByRole("button", { name: "Full screen", exact: true }).click();
@@ -65,7 +65,7 @@ for (const width of [390, 1280]) {
     }
   });
 
-  test(`STEP cancellation, retry, and file switching at ${width}px`, async ({ page, context, api, uniquePrompt }) => {
+  test(`STEP closing and file switching at ${width}px`, async ({ page, context, api, uniquePrompt }) => {
     await page.setViewportSize({ width, height: 900 });
     let loads = 0;
     const pending: Route[] = [];
@@ -73,42 +73,26 @@ for (const width of [390, 1280]) {
     page.on("pageerror", (error) => errors.push(error.message));
     await context.route("**/raw?*", async (route) => {
       const path = new URL(route.request().url()).searchParams.get("path");
-      if (path === "/cube.stpz" && ++loads !== 2) {
-        // These requests must remain pending until cancellation, navigation,
-        // or closing the view terminates their workers. Retry gets real bytes.
+      if (path === "/cube.stpz") {
+        loads++;
+        // Keep compressed requests pending until navigation terminates their workers.
         pending.push(route);
         return;
       }
       await route.fulfill({
         contentType: "application/octet-stream",
-        body: path === "/cube.stpz" ? archive : Buffer.from(cube),
+        body: cube,
       });
     });
     try {
       const id = await createTaskAPI(api, uniquePrompt("Inspect [Compressed](/cube.stpz) and [Cube](/cube.step)."));
       await waitForTaskState(api, id, "waiting");
       await page.goto(`/task/@${id}`);
-      const started = nextStepWorker(page);
-      await page.getByRole("link", { name: "Compressed", exact: true }).click();
-      const { closed } = await started;
-      await expect.poll(() => loads).toBe(1);
-      await expect(page.getByRole("progressbar", { name: "Downloading model" })).toBeVisible();
-      await page.getByRole("button", { name: "Cancel loading", exact: true }).click();
-      await closed;
-      await expect(page.getByRole("status")).toHaveText("Model loading cancelled.");
-      await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeFocused();
-      const retryStarted = nextStepWorker(page);
-      await page.getByRole("button", { name: "Retry", exact: true }).click();
-      const { closed: retryClosed } = await retryStarted;
-      await expect(page.getByText("12 triangles", { exact: true })).toBeVisible({ timeout: STEP_IMPORT_TIMEOUT });
-      await retryClosed;
-      expect(loads).toBe(2);
-      await page.keyboard.press("Escape");
       const switchedStarted = nextStepWorker(page);
       await page.getByRole("link", { name: "Compressed", exact: true }).click();
       const { closed: switchedClosed } = await switchedStarted;
-      await expect.poll(() => loads).toBe(3);
-      await expect(page.getByRole("progressbar", { name: "Downloading model" })).toBeVisible();
+      await expect.poll(() => loads).toBe(1);
+      await expect(page.getByRole("progressbar", { name: "Loading model" })).toBeVisible();
       if (width === 390) {
         await page.goBack();
         await switchedClosed;
@@ -122,8 +106,8 @@ for (const width of [390, 1280]) {
       const closingStarted = nextStepWorker(page);
       await page.getByRole("link", { name: "Compressed", exact: true }).click();
       const { closed: closingClosed } = await closingStarted;
-      await expect.poll(() => loads).toBe(4);
-      await expect(page.getByRole("progressbar", { name: "Downloading model" })).toBeVisible();
+      await expect.poll(() => loads).toBe(2);
+      await expect(page.getByRole("progressbar", { name: "Loading model" })).toBeVisible();
       await page.keyboard.press("Escape");
       await closingClosed;
       expect(page.workers().filter((worker) => worker.url().includes("stepWorker"))).toHaveLength(0);
@@ -138,9 +122,14 @@ for (const width of [390, 1280]) {
 
 test("STEP worker startup errors are recoverable", async ({ page, context, api, uniquePrompt }) => {
   let attempts = 0;
+  const parserGate = Promise.withResolvers<void>();
   await context.route("**/assets/stepWorker-*.js", (route) => {
     attempts++;
     return attempts === 1 ? route.abort("failed") : route.continue();
+  });
+  await context.route("**/assets/occt-import-js-*.wasm", async (route) => {
+    await parserGate.promise;
+    await route.continue();
   });
   await context.route("**/raw?*", (route) => route.fulfill({ contentType: "application/octet-stream", body: cube }));
   const id = await createTaskAPI(api, uniquePrompt("Inspect [Cube](/cube.step)."));
@@ -152,6 +141,12 @@ test("STEP worker startup errors are recoverable", async ({ page, context, api, 
     timeout: STEP_IMPORT_TIMEOUT,
   });
   await page.getByRole("button", { name: "Retry", exact: true }).click();
+  try {
+    await expect(page.getByRole("status").filter({ hasText: "Preparing STEP parser" })).toBeVisible();
+    await expect(page.getByText("File size: 8.1 KiB", { exact: true })).toBeVisible();
+  } finally {
+    parserGate.resolve();
+  }
   await expect(page.getByText("12 triangles", { exact: true })).toBeVisible({ timeout: STEP_IMPORT_TIMEOUT });
   await expect(page.getByRole("alert")).toHaveCount(0);
   expect(attempts).toBe(2);

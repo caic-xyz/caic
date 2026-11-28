@@ -1,6 +1,6 @@
-// CAD pane with timed cancellable STEP loading, slow-import recovery, and display/axis controls.
+// CAD pane with staged loading and file-size feedback, error recovery, and display/axis controls.
 
-import { Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { Dynamic } from "solid-js/web";
 import FileViewerHeader from "./FileViewerHeader";
 import ActionButton from "./ActionButton";
@@ -8,11 +8,11 @@ import CadViewControls from "./CadViewControls";
 import WireframeIcon from "@material-symbols/svg-400/outlined/view_in_ar.svg?solid";
 import SolidIcon from "@material-symbols/svg-400/outlined/deployed_code.svg?solid";
 import TranslucentIcon from "@material-symbols/svg-400/outlined/opacity.svg?solid";
-import CancelIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
 import RetryIcon from "@material-symbols/svg-400/outlined/refresh.svg?solid";
 
 import styles from "./CadViewer.module.css";
 import type { CadModelInfo, CadScene, CadViewMode } from "../cad";
+import { formatBytes } from "../formatting";
 import { isStepPath } from "../runtimePath";
 import { StepLoadTimings } from "../stepTimings";
 import type { CadLoadProgress } from "../stepProtocol";
@@ -31,45 +31,74 @@ const VIEW_MODES = {
 } as const;
 
 export default function CadViewer(props: Props) {
-  let cancelRef: HTMLButtonElement | undefined;
-  let retryRef: HTMLButtonElement | undefined;
   let canvasRef: HTMLCanvasElement | undefined;
   let wrapRef: HTMLDivElement | undefined;
+  let contentRef: HTMLDivElement | undefined;
+  let retryRef: HTMLButtonElement | undefined;
   let scene: CadScene | null = null;
   let resizeObserver: ResizeObserver | null = null;
   let abortController: AbortController | null = null;
 
   const [loading, setLoading] = createSignal(true);
-  const [cancelled, setCancelled] = createSignal(false);
   const [elapsedSeconds, setElapsedSeconds] = createSignal(0);
   const [slowImport, setSlowImport] = createSignal(false);
   const [progress, setProgress] = createSignal<CadLoadProgress>({ stage: "download", completed: 0, total: null });
+  const [fileBytes, setFileBytes] = createSignal<number | null>(null);
+  const fileSizeText = () => {
+    const size = fileBytes();
+    return size === null ? "" : `File size: ${formatBytes(size)}`;
+  };
+  const readingStep = createMemo(() => {
+    const value = progress();
+    return (
+      value.stage === "download" &&
+      value.decodedBytes !== undefined &&
+      value.total !== null &&
+      value.total > 0 &&
+      value.completed === value.total
+    );
+  });
   const stageLabel = () => {
-    const step = progress().parseStep;
-    if (progress().stage === "download" && progress().decodedBytes !== undefined) return "Downloading and reading STEP";
-    if (progress().stage === "parse" && step === "occt-init") return "Preparing STEP parser";
-    if (progress().stage === "parse" && step === "geometry") return "Extracting STEP faces";
+    const value = progress();
+    if (value.stage === "download") {
+      if (!value.completed) return "Loading model";
+      if (readingStep()) return "Reading STEP";
+      return value.decodedBytes === undefined ? "Downloading model" : "Downloading and reading STEP";
+    }
+    if (value.stage === "parse" && value.parseStep === "occt-init") return "Preparing STEP parser";
+    if (value.stage === "parse" && value.parseStep === "geometry") return "Extracting STEP faces";
+    if (value.stage === "parse" && value.parseStep === "input") return "Processing STEP";
     return {
-      download: "Downloading model",
       parse: "Parsing STEP",
       meshes: "Preparing meshes",
       render: "Preparing view",
-    }[progress().stage];
+    }[value.stage];
   };
   const progressValue = () => {
     const value = progress();
-    return value.total !== null && value.total > 0 && value.completed !== null ? value.completed : undefined;
+    return !readingStep() && value.total !== null && value.total > 0 && value.completed !== null
+      ? value.completed
+      : undefined;
   };
-  const progressText = () => {
+  const progressText = createMemo(() => {
     const value = progress();
-    if (value.stage === "download" && value.decodedBytes !== undefined) {
-      const received =
-        value.total !== null && value.total > 0 && value.completed !== null
-          ? `${Math.floor((value.completed / value.total) * 100)}% received`
-          : `${((value.completed ?? 0) / 1024 / 1024).toFixed(1)} MiB received`;
-      return value.indexedRecords !== null && value.indexedRecords !== undefined
-        ? `${received} · ${value.indexedRecords.toLocaleString()} records indexed`
-        : `${received} · ${(value.decodedBytes / 1024 / 1024).toFixed(1)} MiB decoded`;
+    if (value.stage === "download") {
+      if (!value.completed) return "";
+      const details: string[] = [];
+      if (!readingStep()) {
+        if (value.total !== null && value.total > 0) {
+          const percent = `${Math.floor((value.completed / value.total) * 100)}%`;
+          details.push(value.decodedBytes === undefined ? percent : `${percent} received`);
+        } else {
+          details.push(`${formatBytes(value.completed)} received`);
+        }
+      }
+      if (value.indexedRecords !== null && value.indexedRecords !== undefined) {
+        details.push(`${value.indexedRecords.toLocaleString()} records indexed`);
+      } else if (value.decodedBytes !== undefined) {
+        details.push(`${formatBytes(value.decodedBytes)} decoded`);
+      }
+      return details.join(" · ");
     }
     if (value.total !== null && value.total > 0 && value.completed !== null) {
       if (value.stage === "parse")
@@ -78,10 +107,8 @@ export default function CadViewer(props: Props) {
           : `${(value.completed / 1024 / 1024).toFixed(1)} / ${(value.total / 1024 / 1024).toFixed(1)} MiB`;
       return `${Math.floor((value.completed / value.total) * 100)}%`;
     }
-    return value.stage === "download" && value.completed !== null
-      ? `${(value.completed / 1024 / 1024).toFixed(1)} MiB received`
-      : "";
-  };
+    return "";
+  });
   const [error, setError] = createSignal<string | null>(null);
   const [modelInfo, setModelInfo] = createSignal<CadModelInfo | null>(null);
   const [viewMode, setViewMode] = createSignal<CadViewMode>("solid");
@@ -109,15 +136,9 @@ export default function CadViewer(props: Props) {
     scene?.setAxesVisible(next);
   }
 
-  function cancelLoad() {
-    abortController?.abort();
-    setLoading(false);
-    setCancelled(true);
-    queueMicrotask(() => retryRef?.focus());
-  }
-
   async function loadModelData(taskId: string, filePath: string) {
-    const restoreCancelFocus = document.activeElement === retryRef;
+    const restoreRetryFocus = document.activeElement === retryRef;
+    if (restoreRetryFocus) contentRef?.focus();
     abortController?.abort();
     scene?.clearModel();
     const controller = new AbortController();
@@ -125,17 +146,16 @@ export default function CadViewer(props: Props) {
     const timings = isStepPath(filePath) ? new StepLoadTimings() : undefined;
     abortController = controller;
     setLoading(true);
-    setCancelled(false);
     setError(null);
     setModelInfo(null);
     setProgress({ stage: "download", completed: 0, total: null });
+    setFileBytes(null);
     setElapsedSeconds(0);
     setSlowImport(false);
-    if (restoreCancelFocus) queueMicrotask(() => cancelRef?.focus());
     const started = performance.now();
     let occtStarted: number | null = null;
     // The kernel runs synchronously in its worker. Own its clock here so elapsed
-    // feedback and cancellation remain available without worker messages. A slow
+    // feedback remains available without worker messages. A slow
     // hint starts after ten seconds inside OCCT, excluding parser initialization.
     const timer = timings
       ? setInterval(() => {
@@ -157,6 +177,8 @@ export default function CadViewer(props: Props) {
         occtStarted = null;
         setSlowImport(false);
       }
+      if (value.stage === "download") setFileBytes(value.total);
+      else if (value.fileBytes !== undefined) setFileBytes(value.fileBytes);
       setProgress(value);
     };
     try {
@@ -202,6 +224,7 @@ export default function CadViewer(props: Props) {
       if (signal.aborted) return;
       setLoading(false);
       setError(err instanceof Error ? err.message : "Failed to load 3D model");
+      if (restoreRetryFocus && document.activeElement === contentRef) retryRef?.focus();
     } finally {
       stopTimer();
       signal.removeEventListener("abort", stopTimer);
@@ -248,18 +271,18 @@ export default function CadViewer(props: Props) {
               </span>
             )}
           </Show>
-          <Show when={webglAvailable() && !loading() && !error() && !cancelled()}>
+          <Show when={webglAvailable() && !loading() && !error()}>
             <ActionButton label={displayLabel()} onClick={cycleViewMode}>
               <Dynamic component={VIEW_MODES[viewMode()].icon} width={20} height={20} aria-hidden="true" />
             </ActionButton>
           </Show>
         </div>
       </FileViewerHeader>
-      <div class={styles.content}>
-        <Show when={error() || cancelled()}>
+      <div class={styles.content} ref={contentRef} role="region" aria-label="Model viewer" tabIndex={-1}>
+        <Show when={error()}>
           <div class={styles.loading}>
-            <p class={`${error() ? styles.errorText : ""}`} role={error() ? "alert" : "status"}>
-              {error() ?? "Model loading cancelled."}
+            <p class={styles.errorText} role="alert">
+              {error()}
             </p>
             <ActionButton ref={retryRef} label="Retry" onClick={() => void loadModelData(props.taskId, props.path)}>
               <RetryIcon width={20} height={20} />
@@ -269,7 +292,7 @@ export default function CadViewer(props: Props) {
         </Show>
         <Show when={loading()}>
           <div class={styles.loading}>
-            <div class={styles.loadingProgress} aria-busy="true">
+            <div class={styles.loadingProgress}>
               <p class={styles.loadingMessage} role="status">
                 {stageLabel()}…
               </p>
@@ -284,32 +307,30 @@ export default function CadViewer(props: Props) {
                   value={progressValue() ?? 0}
                 />
               </Show>
-              <span class={styles.progressDetails}>{progressText()}</span>
+              <div class={styles.progressDetails}>
+                <span>{fileSizeText()}</span>
+                {fileBytes() !== null && progressText() && " · "}
+                <span>{progressText()}</span>
+              </div>
             </div>
             <Show when={isStepPath(props.path)}>
               <div class={styles.loadFeedback}>
                 <span class={styles.progressDetails}>Elapsed: {elapsedSeconds()} s</span>
                 <p class={styles.slowMessage} role="status">
-                  {slowImport()
-                    ? "This model is taking longer to parse. You can keep waiting or cancel and retry."
-                    : ""}
+                  {slowImport() ? "This model is taking longer to parse." : ""}
                 </p>
               </div>
             </Show>
-            <ActionButton ref={cancelRef} label="Cancel loading" onClick={cancelLoad}>
-              <CancelIcon width={20} height={20} />
-              Cancel loading
-            </ActionButton>
           </div>
         </Show>
-        <Show when={!loading() && !error() && !cancelled() && !webglAvailable()}>
+        <Show when={!loading() && !error() && !webglAvailable()}>
           <div class={styles.notice}>3D canvas preview requires WebGL support in your browser.</div>
         </Show>
         <div
           ref={(el) => {
             wrapRef = el;
           }}
-          class={`${styles.canvasWrap} ${loading() || cancelled() || Boolean(error()) || !webglAvailable() ? styles.hidden : ""}`}
+          class={`${styles.canvasWrap} ${loading() || Boolean(error()) || !webglAvailable() ? styles.hidden : ""}`}
         >
           <CadViewControls axesVisible={axesVisible()} onToggleAxes={toggleAxes} onResetView={resetCamera}>
             <canvas

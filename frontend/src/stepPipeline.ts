@@ -48,6 +48,7 @@ export async function readStepInput(
       report();
     },
   );
+  progress({ stage: "parse", parseStep: "input", completed: null, total: null, fileBytes: completed });
   decode(null);
   return reader;
 }

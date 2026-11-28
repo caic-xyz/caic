@@ -3,7 +3,9 @@
 export interface CadLoadProgress {
   stage: "download" | "parse" | "meshes" | "render";
   // Parse counts belong to this substep, never to overall model readiness.
-  parseStep?: "geometry" | "occt-init" | "occt";
+  parseStep?: "input" | "geometry" | "occt-init" | "occt";
+  // Actual input size at EOF, before expansion of a STEP archive.
+  fileBytes?: number;
   // During download, decoded bytes and indexed records advance concurrently.
   decodedBytes?: number;
   indexedRecords?: number | null;
