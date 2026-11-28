@@ -11,13 +11,13 @@ declare const classes: {
   readonly "errorMessage": string;
   readonly "errorReport": string;
   readonly "errorTitle": string;
+  readonly "fullscreen": string;
   readonly "headerActions": string;
   readonly "navbar": string;
   readonly "normalContent": string;
   readonly "routeLoading": string;
   readonly "scrollingPage": string;
   readonly "subtitle": string;
-  readonly "subviewFullscreen": string;
   readonly "subviewOpen": string;
   readonly "title": string;
   readonly "titleButton": string;

@@ -1,4 +1,4 @@
-// TaskDetail renders current-context history, archived disclosures, background-work reveal, queued prompt appending and keyboard editing, file links, and task actions.
+// TaskDetail renders the live conversation, history disclosures, background work, the prompt composer, and task controls including full screen.
 
 import {
   createContext,
@@ -18,8 +18,10 @@ import {
   useContext,
 } from "solid-js";
 import { ConversationViewportContext } from "../ConversationViewportContext";
-import { A, useLocation } from "@solidjs/router";
+import { A, useLocation, useSearchParams } from "@solidjs/router";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
+import FullscreenIcon from "@material-symbols/svg-400/outlined/fullscreen.svg?solid";
+import FullscreenExitIcon from "@material-symbols/svg-400/outlined/fullscreen_exit.svg?solid";
 import CopyIcon from "@material-symbols/svg-400/outlined/content_copy.svg?solid";
 import CheckIcon from "@material-symbols/svg-400/outlined/check.svg?solid";
 import InfoIcon from "@material-symbols/svg-400/outlined/info.svg?solid";
@@ -61,7 +63,13 @@ import type {
 import { formatMoney } from "../formatting";
 import { RootConversationProjection } from "../rootConversation";
 import type { DraftImage } from "../images";
-import { rememberTaskViewOrigin } from "../taskView";
+import {
+  isTaskDetailPath,
+  isTaskViewEscape,
+  rememberTaskViewOrigin,
+  taskDetailFullscreen,
+  taskViewMode,
+} from "../taskView";
 import { taskPathFromPathname, taskPerformancePath } from "../taskPath";
 import { SyncTargetDefault } from "@sdk/types.gen";
 
@@ -100,6 +108,7 @@ import { VisualTimingTracker, formatTimingDuration, formatTotalDuration } from "
 import type { ToolCall } from "../grouping";
 import AutoResizeTextarea from "./AutoResizeTextarea";
 import PromptInput from "./PromptInput";
+import Tooltip from "./Tooltip";
 import BackgroundStrip from "./BackgroundStrip";
 import { bindPromptSubmitShortcut } from "./promptSubmitShortcut";
 import Button from "./Button";
@@ -131,7 +140,6 @@ import styles from "./TaskDetail.module.css";
 
 const TaskStartDirContext = createContext<Accessor<string>>(() => "");
 import { api } from "../api";
-import { taskViewMode } from "../taskView";
 import { boundTooltipText } from "../tooltipText";
 
 // Module-level store for <details> open/closed state (tool calls, thinking blocks).
@@ -264,7 +272,12 @@ function ciActionsURL(remoteURL?: string, forge?: string): string | undefined {
 export default function TaskDetail(props: Props) {
   const hostMode = useHostMode();
   const location = useLocation();
+  const [, setQuery] = useSearchParams();
   const taskPath = () => taskPathFromPathname(location.pathname);
+  const fullscreen = () => taskDetailFullscreen(location.pathname, location.search);
+  function toggleFullscreen() {
+    setQuery({ fullscreen: fullscreen() ? undefined : "1" });
+  }
   const timeline = useTaskTimeline();
   const messages = timeline.messages;
   const metadata = () => timeline.manifest()?.metadata;
@@ -340,17 +353,19 @@ export default function TaskDetail(props: Props) {
   // Compact Git state is pushed with the task over the task-list stream.
   const repoStates = () => props.repoStates ?? [];
   const [elideHeaderGitStats, setElideHeaderGitStats] = createSignal(false);
-  let headerRef: HTMLDivElement | undefined;
+  const [titleTruncated, setTitleTruncated] = createSignal(false);
+  let headerContentRef: HTMLDivElement | undefined;
+  let headerTitleRef: HTMLSpanElement | undefined;
   let headerMetaRef: HTMLSpanElement | undefined;
-  let headerGitStatsFrame: number | undefined;
+  let headerLayoutFrame: number | undefined;
 
   function isEllipsized(element: HTMLElement | undefined): boolean {
     return !!element && element.scrollWidth > element.clientWidth;
   }
 
   function headerRows(): number {
-    if (!headerRef) return 0;
-    const centers = Array.from(headerRef.children)
+    if (!headerContentRef) return 0;
+    const centers = Array.from(headerContentRef.children)
       .filter(
         (child): child is HTMLElement => child instanceof HTMLElement && getComputedStyle(child).display !== "none",
       )
@@ -369,20 +384,20 @@ export default function TaskDetail(props: Props) {
 
   // The header only wraps when its items no longer fit, so the line totals give
   // way to the repository context once a second row appears.
-  function scheduleHeaderGitStatsElision() {
-    if (headerGitStatsFrame !== undefined) cancelAnimationFrame(headerGitStatsFrame);
-    headerGitStatsFrame = requestAnimationFrame(() => {
-      headerGitStatsFrame = undefined;
+  function scheduleHeaderLayout() {
+    if (headerLayoutFrame !== undefined) cancelAnimationFrame(headerLayoutFrame);
+    headerLayoutFrame = requestAnimationFrame(() => {
+      headerLayoutFrame = undefined;
       // Measure the unwrapped layout in this frame. The browser paints only the
       // final value, so the temporary layout is never displayed.
       setElideHeaderGitStats(false);
       setElideHeaderGitStats(isEllipsized(headerMetaRef) || headerRows() > 1);
+      setTitleTruncated(isEllipsized(headerTitleRef));
     });
   }
 
   onMount(() => {
-    scheduleHeaderGitStatsElision();
-    window.addEventListener("resize", scheduleHeaderGitStatsElision);
+    window.addEventListener("resize", scheduleHeaderLayout);
     // The header settles after mount: panel widths animate, CI checks and Git
     // state arrive, and token totals stream in. Re-decide on any of those so the
     // outcome does not depend on when the first measurement ran.
@@ -390,24 +405,29 @@ export default function TaskDetail(props: Props) {
       const ownAttributeOnly = records.every(
         (record) => record.type === "attributes" && record.attributeName === "data-elide-diff-stats",
       );
-      if (!ownAttributeOnly) scheduleHeaderGitStatsElision();
+      if (!ownAttributeOnly) scheduleHeaderLayout();
     });
-    const resizeObserver = new ResizeObserver(scheduleHeaderGitStatsElision);
-    if (headerRef) {
-      observer.observe(headerRef, {
+    const resizeObserver = new ResizeObserver(scheduleHeaderLayout);
+    if (headerContentRef) {
+      observer.observe(headerContentRef, {
         attributeFilter: ["data-elide-diff-stats"],
         characterData: true,
         childList: true,
         subtree: true,
       });
-      resizeObserver.observe(headerRef);
+      resizeObserver.observe(headerContentRef);
     }
     onCleanup(() => {
       observer.disconnect();
       resizeObserver.disconnect();
-      window.removeEventListener("resize", scheduleHeaderGitStatsElision);
-      if (headerGitStatsFrame !== undefined) cancelAnimationFrame(headerGitStatsFrame);
+      window.removeEventListener("resize", scheduleHeaderLayout);
+      if (headerLayoutFrame !== undefined) cancelAnimationFrame(headerLayoutFrame);
     });
+  });
+
+  createEffect(() => {
+    fullscreen();
+    scheduleHeaderLayout();
   });
 
   createEffect(() => {
@@ -418,7 +438,7 @@ export default function TaskDetail(props: Props) {
       setElideHeaderGitStats(false);
       return;
     }
-    scheduleHeaderGitStatsElision();
+    scheduleHeaderLayout();
   });
 
   // The prompt may appear after the task fetch; focus it whenever its ref attaches.
@@ -455,7 +475,8 @@ export default function TaskDetail(props: Props) {
       return;
     }
     if (event.key === "Escape") {
-      if (taskViewMode(location.pathname, location.search) !== "closed") return;
+      if (!isTaskViewEscape(event) || fullscreen() || taskViewMode(location.pathname, location.search) !== "closed")
+        return;
       event.preventDefault();
       event.stopPropagation();
       props.onClose();
@@ -488,11 +509,14 @@ export default function TaskDetail(props: Props) {
   }
 
   onMount(() => {
-    // Escape dismisses the task detail (navigates to /).
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || e.defaultPrevented || taskViewMode(location.pathname, location.search) !== "closed")
+      if (!isTaskViewEscape(e) || taskViewMode(location.pathname, location.search) !== "closed") return;
+      if (fullscreen()) {
+        e.preventDefault();
+        toggleFullscreen();
         return;
-      const target = e.target instanceof HTMLElement ? e.target : null;
+      }
+      const target = e.target instanceof Element ? e.target : null;
       if (target?.closest("[data-testid='task-detail-prompt']")) return;
       props.onClose();
     };
@@ -1286,254 +1310,271 @@ export default function TaskDetail(props: Props) {
     <MarkdownTaskContext.Provider value={markdownTaskId}>
       <TaskStartDirContext.Provider value={startDir}>
         <div class={styles.container}>
-          <div
-            class={styles.header}
-            data-testid="task-detail-header"
-            ref={(element) => {
-              headerRef = element;
-            }}
-          >
-            <ActionButton
-              class={styles.closeBtn}
-              onClick={() => props.onClose()}
-              label="Close task details"
-              title="Close"
-            >
-              <CloseIcon width={20} height={20} />
-            </ActionButton>
-            <Show when={props.title}>
-              <span class={styles.headerTitle}>{props.title}</span>
-            </Show>
-            <span
-              class={styles.headerMeta}
-              data-testid="task-header-meta"
+          <div class={styles.header} classList={{ [styles.fullscreen]: fullscreen() }} data-testid="task-detail-header">
+            <div
+              class={styles.headerContent}
+              data-testid="task-detail-header-content"
               ref={(element) => {
-                headerMetaRef = element;
+                headerContentRef = element;
               }}
             >
-              <Show when={props.remoteURL} fallback={<span class={styles.headerRepo}>{props.repo}</span>}>
-                <a class={styles.headerRepo} href={props.remoteURL} target="_blank" rel="noopener">
-                  {props.repo}
-                </a>
+              <Show when={props.title}>
+                <Tooltip text={props.title} class={styles.headerTitle} disabled={!titleTruncated()}>
+                  <span class={styles.headerTitleText} ref={headerTitleRef}>
+                    {props.title}
+                  </span>
+                </Tooltip>
               </Show>
-              <span class={styles.headerBranch}>{props.branch}</span>
-              <Show when={prURL()}>
-                <a class={styles.headerPR} href={prURL()} target="_blank" rel="noopener">
-                  {prLabel()}
-                </a>
-              </Show>
-              <Show when={props.ciStatus && props.ciStatus in CI_STATUS_CLASS}>
-                {(() => {
-                  const s = props.ciStatus as CIStatus;
-                  const hasChecks = () => (props.ciChecks?.length ?? 0) > 0;
-                  const actionsURL = () => ciActionsURL(props.remoteURL, props.forge);
-                  return (
-                    <>
-                      <Show
-                        when={hasChecks()}
-                        fallback={
-                          <Show
-                            when={actionsURL()}
-                            keyed
-                            fallback={
-                              <span class={`${styles.ciStatus} ${CI_STATUS_CLASS[s]}`}>
-                                {ciLabel(s, props.ciChecks)}
-                              </span>
-                            }
-                          >
-                            {(url) => (
-                              <a
-                                class={`${styles.ciStatus} ${CI_STATUS_CLASS[s]}`}
-                                href={url}
-                                target="_blank"
-                                rel="noopener"
-                              >
-                                {ciLabel(s, props.ciChecks)}
-                              </a>
-                            )}
-                          </Show>
-                        }
-                      >
-                        <details class={styles.ciDetails}>
-                          <summary class={`${styles.ciStatus} ${CI_STATUS_CLASS[s]}`}>
-                            {ciLabel(s, props.ciChecks)}
-                          </summary>
-                          <div class={styles.ciDropdown}>
-                            <For each={props.ciChecks}>
-                              {(c) => {
-                                const statusCls =
-                                  c.status === "completed"
-                                    ? c.conclusion === "success" ||
-                                      c.conclusion === "neutral" ||
-                                      c.conclusion === "skipped"
-                                      ? styles.ciCheckPassed
-                                      : styles.ciCheckFailed
-                                    : c.status === "in_progress"
-                                      ? styles.ciCheckRunning
-                                      : styles.ciCheckQueued;
-                                const jobURL = () => checkJobURL(c, props.forge);
-                                return (
-                                  <Show
-                                    when={jobURL()}
-                                    keyed
-                                    fallback={
-                                      <div class={`${styles.ciCheckRow} ${statusCls}`}>
-                                        <span class={styles.ciCheckName}>{c.name}</span>
-                                        <span class={styles.ciCheckStatus}>{checkStatusLabel(c)}</span>
-                                        <Show when={c.startedAt || c.queuedAt}>
-                                          <span class={styles.ciCheckDuration}>{checkDuration(c, Date.now())}</span>
-                                        </Show>
-                                      </div>
-                                    }
-                                  >
-                                    {(url) => (
-                                      <a
-                                        class={`${styles.ciCheckRow} ${styles.ciCheckLink} ${statusCls}`}
-                                        href={url}
-                                        target="_blank"
-                                        rel="noopener"
-                                      >
-                                        <span class={styles.ciCheckName}>{c.name}</span>
-                                        <span class={styles.ciCheckStatus}>{checkStatusLabel(c)}</span>
-                                        <Show when={c.startedAt || c.queuedAt}>
-                                          <span class={styles.ciCheckDuration}>{checkDuration(c, Date.now())}</span>
-                                        </Show>
-                                      </a>
-                                    )}
-                                  </Show>
-                                );
-                              }}
-                            </For>
-                          </div>
-                        </details>
-                      </Show>
-                      <Show
-                        when={
-                          s === "failure" &&
-                          props.ciChecks?.some(
-                            (c) =>
-                              c.conclusion !== "success" && c.conclusion !== "neutral" && c.conclusion !== "skipped",
-                          )
-                        }
-                      >
-                        <button class={styles.fixCIBtn} onClick={handleFixPR} disabled={fixingPR()}>
-                          {fixingPR() ? "Sending…" : "Fix PR"}
-                        </button>
-                      </Show>
-                    </>
-                  );
-                })()}
-              </Show>
-            </span>
-            <A class={styles.glyphLink} href={`${taskPath()}/info`} aria-label="Task info" title="Task info">
-              <InfoIcon width="13" height="13" aria-hidden="true" />
-            </A>
-            <Show
-              when={
-                repoStates().some((state) => repoStateLabel(state)) || repoStateLabel(diffStatState(props.diffStat))
-              }
-            >
-              <span class={styles.repoStateLinks}>
-                <For each={repoStates()}>
-                  {(state) => (
-                    <RepoStateIcons
-                      state={state}
-                      href={`${taskPath()}/diff`}
-                      elideDiffStats={elideHeaderGitStats()}
-                      onNavigateIntent={() => void prefetchTaskDiff(props.taskId).catch(() => undefined)}
-                    />
-                  )}
-                </For>
-                <Show when={!repoStates().some((state) => repoStateLabel(state))}>
-                  <RepoStateIcons
-                    state={diffStatState(props.diffStat)}
-                    href={`${taskPath()}/diff`}
-                    elideDiffStats={elideHeaderGitStats()}
-                    onNavigateIntent={() => void prefetchTaskDiff(props.taskId).catch(() => undefined)}
-                  />
+              <span
+                class={styles.headerMeta}
+                data-testid="task-header-meta"
+                ref={(element) => {
+                  headerMetaRef = element;
+                }}
+              >
+                <Show when={props.remoteURL} fallback={<span class={styles.headerRepo}>{props.repo}</span>}>
+                  <a class={styles.headerRepo} href={props.remoteURL} target="_blank" rel="noopener">
+                    {props.repo}
+                  </a>
+                </Show>
+                <span class={styles.headerBranch}>{props.branch}</span>
+                <Show when={prURL()}>
+                  <a class={styles.headerPR} href={prURL()} target="_blank" rel="noopener">
+                    {prLabel()}
+                  </a>
+                </Show>
+                <Show when={props.ciStatus && props.ciStatus in CI_STATUS_CLASS}>
+                  {(() => {
+                    const s = props.ciStatus as CIStatus;
+                    const hasChecks = () => (props.ciChecks?.length ?? 0) > 0;
+                    const actionsURL = () => ciActionsURL(props.remoteURL, props.forge);
+                    return (
+                      <>
+                        <Show
+                          when={hasChecks()}
+                          fallback={
+                            <Show
+                              when={actionsURL()}
+                              keyed
+                              fallback={
+                                <span class={`${styles.ciStatus} ${CI_STATUS_CLASS[s]}`}>
+                                  {ciLabel(s, props.ciChecks)}
+                                </span>
+                              }
+                            >
+                              {(url) => (
+                                <a
+                                  class={`${styles.ciStatus} ${CI_STATUS_CLASS[s]}`}
+                                  href={url}
+                                  target="_blank"
+                                  rel="noopener"
+                                >
+                                  {ciLabel(s, props.ciChecks)}
+                                </a>
+                              )}
+                            </Show>
+                          }
+                        >
+                          <details class={styles.ciDetails}>
+                            <summary class={`${styles.ciStatus} ${CI_STATUS_CLASS[s]}`}>
+                              {ciLabel(s, props.ciChecks)}
+                            </summary>
+                            <div class={styles.ciDropdown}>
+                              <For each={props.ciChecks}>
+                                {(c) => {
+                                  const statusCls =
+                                    c.status === "completed"
+                                      ? c.conclusion === "success" ||
+                                        c.conclusion === "neutral" ||
+                                        c.conclusion === "skipped"
+                                        ? styles.ciCheckPassed
+                                        : styles.ciCheckFailed
+                                      : c.status === "in_progress"
+                                        ? styles.ciCheckRunning
+                                        : styles.ciCheckQueued;
+                                  const jobURL = () => checkJobURL(c, props.forge);
+                                  return (
+                                    <Show
+                                      when={jobURL()}
+                                      keyed
+                                      fallback={
+                                        <div class={`${styles.ciCheckRow} ${statusCls}`}>
+                                          <span class={styles.ciCheckName}>{c.name}</span>
+                                          <span class={styles.ciCheckStatus}>{checkStatusLabel(c)}</span>
+                                          <Show when={c.startedAt || c.queuedAt}>
+                                            <span class={styles.ciCheckDuration}>{checkDuration(c, Date.now())}</span>
+                                          </Show>
+                                        </div>
+                                      }
+                                    >
+                                      {(url) => (
+                                        <a
+                                          class={`${styles.ciCheckRow} ${styles.ciCheckLink} ${statusCls}`}
+                                          href={url}
+                                          target="_blank"
+                                          rel="noopener"
+                                        >
+                                          <span class={styles.ciCheckName}>{c.name}</span>
+                                          <span class={styles.ciCheckStatus}>{checkStatusLabel(c)}</span>
+                                          <Show when={c.startedAt || c.queuedAt}>
+                                            <span class={styles.ciCheckDuration}>{checkDuration(c, Date.now())}</span>
+                                          </Show>
+                                        </a>
+                                      )}
+                                    </Show>
+                                  );
+                                }}
+                              </For>
+                            </div>
+                          </details>
+                        </Show>
+                        <Show
+                          when={
+                            s === "failure" &&
+                            props.ciChecks?.some(
+                              (c) =>
+                                c.conclusion !== "success" && c.conclusion !== "neutral" && c.conclusion !== "skipped",
+                            )
+                          }
+                        >
+                          <button class={styles.fixCIBtn} onClick={handleFixPR} disabled={fixingPR()}>
+                            {fixingPR() ? "Sending…" : "Fix PR"}
+                          </button>
+                        </Show>
+                      </>
+                    );
+                  })()}
                 </Show>
               </span>
-            </Show>
-            <Show
-              when={
-                props.taskState !== "pending" &&
-                props.taskState !== "branching" &&
-                props.taskState !== "provisioning" &&
-                props.taskState !== "starting" &&
-                props.taskState !== "stopped" &&
-                props.taskState !== "crashed" &&
-                props.taskState !== "purged" &&
-                props.taskState !== "failed"
-              }
-            >
-              <A
-                class={styles.glyphLink}
-                href={`${taskPath()}/processes`}
-                aria-label="Task processes"
-                title="Task processes"
-              >
-                <ProcessesIcon width="13" height="13" aria-hidden="true" />
-              </A>
-            </Show>
-            <Show when={(props.vncPort ?? 0) > 0}>
-              <A class={styles.diffLink} href={`${taskPath()}/vnc`}>
-                VNC
-              </A>
-            </Show>
-            <Show when={props.sudoPassword}>
-              <span class={styles.sudoPassword}>
-                <span class={styles.sudoPasswordText}>{props.sudoPassword}</span>
-                <button
-                  class={styles.sudoCopyBtn}
-                  title="Copy password"
-                  onClick={(e) => {
-                    const btn = e.currentTarget;
-                    if (!props.sudoPassword) return;
-                    setPasswordCopyError(false);
-                    if (!navigator.clipboard) {
-                      setPasswordCopyError(true);
-                      return;
-                    }
-                    navigator.clipboard
-                      .writeText(props.sudoPassword)
-                      .then(() => {
-                        const copiedClass = styles.copied;
-                        btn.classList.add(copiedClass);
-                        setTimeout(() => btn.classList.remove(copiedClass), 1500);
-                      })
-                      .catch(() => setPasswordCopyError(true));
-                  }}
+              <span class={styles.repoLinks}>
+                <A class={styles.glyphLink} href={`${taskPath()}/info`} aria-label="Task info" title="Task info">
+                  <InfoIcon width="13" height="13" aria-hidden="true" />
+                </A>
+                <Show
+                  when={
+                    repoStates().some((state) => repoStateLabel(state)) || repoStateLabel(diffStatState(props.diffStat))
+                  }
                 >
-                  <CopyIcon width={14} height={14} class={styles.copyIcon} />
-                  <CheckIcon width={14} height={14} class={styles.checkIcon} />
-                </button>
-                <span role="status">{passwordCopyError() ? "Copy failed" : ""}</span>
+                  <span class={styles.repoStateLinks}>
+                    <For each={repoStates()}>
+                      {(state) => (
+                        <RepoStateIcons
+                          state={state}
+                          href={`${taskPath()}/diff`}
+                          elideDiffStats={elideHeaderGitStats()}
+                          onNavigateIntent={() => void prefetchTaskDiff(props.taskId).catch(() => undefined)}
+                        />
+                      )}
+                    </For>
+                    <Show when={!repoStates().some((state) => repoStateLabel(state))}>
+                      <RepoStateIcons
+                        state={diffStatState(props.diffStat)}
+                        href={`${taskPath()}/diff`}
+                        elideDiffStats={elideHeaderGitStats()}
+                        onNavigateIntent={() => void prefetchTaskDiff(props.taskId).catch(() => undefined)}
+                      />
+                    </Show>
+                  </span>
+                </Show>
               </span>
-            </Show>
-            <Show when={props.inPlanMode}>
-              <span class={styles.planIndicator}>Plan Mode</span>
-            </Show>
-            <Show when={props.taskState === "stopped" && props.stoppedDiskUsedBytes >= 0}>
-              <span class={styles.stoppedDiskUsage}>Disk {formatBytes(props.stoppedDiskUsedBytes)}</span>
-            </Show>
-            <StatsIcon
-              href={taskPerformancePath(taskPath())}
-              stats={statsHistory()}
-              usage={{
-                inputTokens: props.cumulativeInputTokens ?? 0,
-                cacheWriteInputTokens: props.cumulativeCacheCreationInputTokens ?? 0,
-                cacheReadInputTokens: props.cumulativeCacheReadInputTokens ?? 0,
-                outputTokens: props.cumulativeOutputTokens ?? 0,
-                costUSD: props.costUSD ?? 0,
-                costKnown: props.costKnown ?? false,
-                costComplete: props.costComplete ?? false,
-              }}
-            />
-            <Show when={timeline.loading()}>
-              <span class={styles.headerLoading} role="status" aria-label="Loading history">
-                <LoadingIcon aria-hidden="true" />
-              </span>
-            </Show>
+              <Show
+                when={
+                  props.taskState !== "pending" &&
+                  props.taskState !== "branching" &&
+                  props.taskState !== "provisioning" &&
+                  props.taskState !== "starting" &&
+                  props.taskState !== "stopped" &&
+                  props.taskState !== "crashed" &&
+                  props.taskState !== "purged" &&
+                  props.taskState !== "failed"
+                }
+              >
+                <A
+                  class={styles.glyphLink}
+                  href={`${taskPath()}/processes`}
+                  aria-label="Task processes"
+                  title="Task processes"
+                >
+                  <ProcessesIcon width="13" height="13" aria-hidden="true" />
+                </A>
+              </Show>
+              <Show when={(props.vncPort ?? 0) > 0}>
+                <A class={styles.diffLink} href={`${taskPath()}/vnc`}>
+                  VNC
+                </A>
+              </Show>
+              <Show when={props.sudoPassword}>
+                <span class={styles.sudoPassword}>
+                  <span class={styles.sudoPasswordText}>{props.sudoPassword}</span>
+                  <button
+                    class={styles.sudoCopyBtn}
+                    title="Copy password"
+                    onClick={(e) => {
+                      const btn = e.currentTarget;
+                      if (!props.sudoPassword) return;
+                      setPasswordCopyError(false);
+                      if (!navigator.clipboard) {
+                        setPasswordCopyError(true);
+                        return;
+                      }
+                      navigator.clipboard
+                        .writeText(props.sudoPassword)
+                        .then(() => {
+                          const copiedClass = styles.copied;
+                          btn.classList.add(copiedClass);
+                          setTimeout(() => btn.classList.remove(copiedClass), 1500);
+                        })
+                        .catch(() => setPasswordCopyError(true));
+                    }}
+                  >
+                    <CopyIcon width={14} height={14} class={styles.copyIcon} />
+                    <CheckIcon width={14} height={14} class={styles.checkIcon} />
+                  </button>
+                  <span role="status">{passwordCopyError() ? "Copy failed" : ""}</span>
+                </span>
+              </Show>
+              <Show when={props.inPlanMode}>
+                <span class={styles.planIndicator}>Plan Mode</span>
+              </Show>
+              <Show when={props.taskState === "stopped" && props.stoppedDiskUsedBytes >= 0}>
+                <span class={styles.stoppedDiskUsage}>Disk {formatBytes(props.stoppedDiskUsedBytes)}</span>
+              </Show>
+              <StatsIcon
+                href={taskPerformancePath(taskPath())}
+                stats={statsHistory()}
+                usage={{
+                  inputTokens: props.cumulativeInputTokens ?? 0,
+                  cacheWriteInputTokens: props.cumulativeCacheCreationInputTokens ?? 0,
+                  cacheReadInputTokens: props.cumulativeCacheReadInputTokens ?? 0,
+                  outputTokens: props.cumulativeOutputTokens ?? 0,
+                  costUSD: props.costUSD ?? 0,
+                  costKnown: props.costKnown ?? false,
+                  costComplete: props.costComplete ?? false,
+                }}
+              />
+              <Show when={timeline.loading()}>
+                <span class={styles.headerLoading} role="status" aria-label="Loading history">
+                  <LoadingIcon aria-hidden="true" />
+                </span>
+              </Show>
+            </div>
+            <div class={styles.paneControls}>
+              <Show when={isTaskDetailPath(location.pathname)}>
+                <ActionButton onClick={toggleFullscreen} label={fullscreen() ? "Exit full screen" : "Full screen"}>
+                  <Show when={fullscreen()} fallback={<FullscreenIcon width={20} height={20} aria-hidden="true" />}>
+                    <FullscreenExitIcon width={20} height={20} aria-hidden="true" />
+                  </Show>
+                </ActionButton>
+              </Show>
+              <ActionButton
+                class={styles.closeBtn}
+                onClick={() => props.onClose()}
+                label="Close task details"
+                title="Close"
+              >
+                <CloseIcon width={20} height={20} />
+              </ActionButton>
+            </div>
           </div>
           <Show when={props.parentTaskID || props.childTasks.length > 0}>
             <nav class={styles.hierarchy} aria-label="Task hierarchy">

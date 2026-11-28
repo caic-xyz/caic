@@ -554,11 +554,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await expect(taskPerformance).toBeVisible();
   const infoLink = detailHeader.getByRole("link", { name: "Task info" });
   await expect(infoLink).toBeVisible();
-  const titleBox = await detailHeader
-    .locator(":scope > span")
-    .filter({ hasText: "Fix OAuth security hardening" })
-    .first()
-    .boundingBox();
+  const titleBox = await detailHeader.getByText(/^Fix OAuth security hardening/).boundingBox();
   expect(titleBox?.width).toBeLessThanOrEqual(128);
   await expect
     .poll(async () => {

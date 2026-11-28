@@ -2,7 +2,7 @@
 
 import { For, onCleanup, onMount, Show } from "solid-js";
 import { useLocation } from "@solidjs/router";
-import { taskViewMode } from "../taskView";
+import { isTaskViewEscape, taskDetailFullscreen, taskViewMode } from "../taskView";
 
 import { useAppState } from "../AppState";
 import { taskPathForTask } from "../taskPath";
@@ -157,7 +157,12 @@ export default function KeyboardShortcuts(props: Props) {
         return;
       }
       if (event.key === "Escape") {
-        if (taskViewMode(location.pathname, location.search) !== "closed") return;
+        if (
+          !isTaskViewEscape(event) ||
+          taskViewMode(location.pathname, location.search) !== "closed" ||
+          taskDetailFullscreen(location.pathname, location.search)
+        )
+          return;
         event.preventDefault();
         focusNewTaskControl("[data-testid='prompt-input']");
         return;

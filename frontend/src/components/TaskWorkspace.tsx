@@ -3,7 +3,13 @@ import { type JSX, Show, Suspense, createSignal, createEffect, onCleanup } from 
 import { useLocation, useParams } from "@solidjs/router";
 import TaskDetailPage from "../pages/TaskDetailPage";
 import { taskIdFromParam, taskIdFromPath } from "../taskPath";
-import { taskViewMode, rememberTaskViewOrigin, restoreTaskViewOrigin, type TaskViewMode } from "../taskView";
+import {
+  isTaskDetailPath,
+  taskViewMode,
+  rememberTaskViewOrigin,
+  restoreTaskViewOrigin,
+  type TaskViewMode,
+} from "../taskView";
 import { TaskTimelineProvider } from "../TaskTimelineContext";
 import styles from "./TaskWorkspace.module.css";
 
@@ -39,7 +45,7 @@ export default function TaskWorkspace(props: { children?: JSX.Element }) {
     if (
       next === "closed" &&
       previousMode !== "closed" &&
-      /^\/task\/[^/]+$/.test(location.pathname) &&
+      isTaskDetailPath(location.pathname) &&
       taskIdFromPath(location.pathname) === taskIdFromPath(previousPath)
     ) {
       requestAnimationFrame(restoreTaskViewOrigin);

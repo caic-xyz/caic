@@ -2,7 +2,7 @@
 
 import { type JSX, For, Show, createSignal, createEffect, onCleanup } from "solid-js";
 import { useLocation } from "@solidjs/router";
-import { taskViewMode } from "../taskView";
+import { taskFullscreen, taskViewMode } from "../taskView";
 import ChevronRightIcon from "@material-symbols/svg-400/outlined/chevron_right.svg?solid";
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 import LoadingIcon from "@material-symbols/svg-400/outlined/progress_activity.svg?solid";
@@ -29,7 +29,7 @@ export default function MainLayout(props: { children?: JSX.Element }) {
   const s = useAppState();
   const location = useLocation();
   const mode = () => taskViewMode(location.pathname, location.search);
-  const fullscreen = () => mode() === "fullscreen";
+  const fullscreen = () => taskFullscreen(location.pathname, location.search);
   const media = window.matchMedia("(max-width: 1279px)");
   const [compact, setCompact] = createSignal(media.matches);
   const [sidebarOverride, setSidebarOverride] = createSignal<boolean | null>(null);

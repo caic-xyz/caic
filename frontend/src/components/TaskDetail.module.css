@@ -7,17 +7,31 @@
   min-height: 0;
 }
 
-/* One font size and one line height for every header item. A shared metric keeps
-   text baselines identical, and the centered flex items then share one optical
-   center with them. */
 .header {
   display: flex;
-  flex-wrap: wrap;
   gap: 0.75rem;
-  align-items: center;
+  align-items: flex-start;
   margin-bottom: 0.5rem;
   font-size: 0.8rem;
   line-height: 1.35;
+}
+
+/* Metadata shares a baseline and wraps within the space beside the controls. */
+.headerContent {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  align-self: center;
+  min-width: 0;
+}
+
+.paneControls {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.5rem;
+  align-items: center;
 }
 
 .header h3 {
@@ -65,13 +79,23 @@
   text-decoration: underline;
 }
 
-.headerTitle {
+.header .headerTitle {
   display: none;
   flex: 0 1 8rem;
   min-width: 8rem;
+  font-weight: 500;
+}
+
+.header.fullscreen .headerTitle {
+  display: block;
+  flex-basis: auto;
+  max-inline-size: min(32ch, 40%);
+}
+
+.headerTitleText {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-weight: 500;
   white-space: nowrap;
 }
 
@@ -487,12 +511,19 @@ a.headerPR:hover {
   outline-offset: 2px;
 }
 
+.repoLinks {
+  display: inline-flex;
+  gap: 0.75rem;
+  align-items: center;
+  max-width: 100%;
+}
+
 .repoStateLinks {
   display: inline-flex;
   flex: 0 1 auto;
   flex-wrap: wrap;
   align-items: center;
-  max-width: 100%;
+  min-width: 0;
 }
 
 .sudoPassword {
@@ -1338,7 +1369,7 @@ a.ciStatus:hover {
     padding: 0 0.5rem;
   }
 
-  .headerTitle {
+  .header .headerTitle {
     display: block;
   }
 

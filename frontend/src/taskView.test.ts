@@ -1,7 +1,31 @@
-// Tests task subview presentation URLs and rejects fullscreen flags outside supported workspace routes.
+// Tests supported fullscreen URLs and which Escape events can dismiss a task view.
 import { describe, it } from "node:test";
 import { expect } from "@tests/expect";
-import { taskViewMode } from "./taskView";
+import { isTaskViewEscape, taskDetailFullscreen, taskFullscreen, taskViewMode } from "./taskView";
+
+describe("task view Escape", () => {
+  it("ignores held keys and Escape that ends text composition", () => {
+    expect(isTaskViewEscape(new KeyboardEvent("keydown", { key: "Escape" }))).toBe(true);
+    expect(isTaskViewEscape(new KeyboardEvent("keydown", { key: "Escape", repeat: true }))).toBe(false);
+    expect(isTaskViewEscape(new KeyboardEvent("keydown", { key: "Escape", isComposing: true }))).toBe(false);
+  });
+});
+
+describe("task fullscreen", () => {
+  it("accepts the explicit flag on conversation routes", () => {
+    expect(taskFullscreen("/task/@abc", "")).toBe(false);
+    expect(taskFullscreen("/task/@abc", "?fullscreen=true")).toBe(false);
+    expect(taskDetailFullscreen("/task/@abc+slug", "?fullscreen=1")).toBe(true);
+    expect(taskFullscreen("/task/@abc/", "?fullscreen=1")).toBe(true);
+  });
+
+  it("leaves subview validation in effect", () => {
+    expect(taskDetailFullscreen("/task/@abc/diff", "?fullscreen=1")).toBe(false);
+    expect(taskFullscreen("/task/@abc/diff", "?fullscreen=1")).toBe(true);
+    expect(taskFullscreen("/task/@abc/view", "?fullscreen=1")).toBe(false);
+    expect(taskFullscreen("/settings", "?fullscreen=1")).toBe(false);
+  });
+});
 
 describe("taskViewMode", () => {
   it("requires a document route and a nonempty path", () => {

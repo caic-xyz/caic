@@ -1,7 +1,112 @@
-// Browser coverage for persistent task subviews, shared history, and full screen on mobile and desktop.
+// Browser coverage for persistent task views, shared history, and full screen on mobile and desktop.
 import { createTaskAPI, expect, test, waitForTaskState } from "../helpers";
 
 for (const width of [390, 1280]) {
+  test(`task details fill the workspace at ${width}px`, async ({ page, api, uniquePrompt }) => {
+    await page.setViewportSize({ width, height: 844 });
+    const id = await createTaskAPI(api, uniquePrompt("Check task details full screen"));
+    const task = await waitForTaskState(api, id, "waiting");
+    const taskURL = `/task/@${id}`;
+    const fullScreenURL = `${taskURL}?fullscreen=1`;
+    await page.goto(taskURL);
+    const conversation = page.getByTestId("conversation-pane");
+    const prompt = conversation.getByTestId("task-detail-prompt");
+    const summary = page.getByTestId("summary-pane");
+    const newTask = page.getByTestId("new-task-button");
+    const header = conversation.getByTestId("task-detail-header");
+    const enter = header.getByRole("button", { name: "Full screen", exact: true });
+    const exit = header.getByRole("button", { name: "Exit full screen", exact: true });
+    const close = header.getByRole("button", { name: "Close task details" });
+    await prompt.fill("Keep this draft");
+    const promptNode = await prompt.elementHandle();
+
+    async function expectRightAlignedControls(toggle: typeof enter) {
+      const headerBox = await header.boundingBox();
+      const toggleBox = await toggle.boundingBox();
+      if (!headerBox || !toggleBox) throw new Error("Task header and full-screen control must be visible");
+      let lastControl = toggleBox;
+      if (width <= 768) {
+        await expect(close).toBeHidden();
+      } else {
+        const closeBox = await close.boundingBox();
+        if (!closeBox) throw new Error("The desktop task header must have a close control");
+        expect(toggleBox.x + toggleBox.width).toBeLessThan(closeBox.x);
+        expect(toggleBox.y).toBeCloseTo(closeBox.y, 0);
+        lastControl = closeBox;
+      }
+      expect(Math.abs(headerBox.x + headerBox.width - (lastControl.x + lastControl.width))).toBeLessThanOrEqual(12);
+      expect(Math.abs(toggleBox.y - headerBox.y)).toBeLessThanOrEqual(4);
+    }
+
+    await test.step("Expand the conversation and keep the task title visible", async () => {
+      await expectRightAlignedControls(enter);
+      await enter.click();
+      await expect(page).toHaveURL(fullScreenURL);
+      await expect(exit).toBeFocused();
+      await expect(summary).toBeHidden();
+      await expect(newTask).toBeHidden();
+      await expectRightAlignedControls(exit);
+      const title = header.getByText(task.title, { exact: true });
+      await expect(title).toBeVisible();
+      await title.hover();
+      await expect(page.getByRole("tooltip")).toHaveText(task.title);
+      await exit.hover();
+      await expect(conversation).toBeVisible();
+      const bounds = await conversation.boundingBox();
+      expect(bounds!.width).toBeGreaterThan(width - 24);
+      await expect(prompt).toHaveText("Keep this draft");
+    });
+
+    await test.step("Let Escape dismiss task actions before exiting full screen", async () => {
+      const actions = conversation.getByRole("button", { name: "Task actions" });
+      const fork = conversation.getByRole("menuitem", { name: "Fork", exact: true });
+      await actions.click();
+      await expect(fork).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(fork).toBeHidden();
+      await expect(actions).toBeFocused();
+      await expect(page).toHaveURL(fullScreenURL);
+      await actions.click();
+      await fork.click();
+      const dialog = page.getByRole("dialog");
+      await expect(dialog.getByRole("heading", { name: "Fork task" })).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(dialog).toBeHidden();
+      await expect(page).toHaveURL(fullScreenURL);
+    });
+
+    await test.step("Restore the workspace with Escape and keep the focused draft", async () => {
+      await prompt.press("Escape");
+      await expect(page).toHaveURL(taskURL);
+      await expect(prompt).toBeFocused();
+      await expect(newTask).toBeVisible();
+      await expect(prompt).toHaveText("Keep this draft");
+      expect(await promptNode?.evaluate((node) => node === document.activeElement)).toBe(true);
+    });
+
+    await test.step("Restore full screen through browser Back from the workspace and a subview", async () => {
+      await page.goBack();
+      await expect(page).toHaveURL(fullScreenURL);
+      const info = conversation.getByRole("link", { name: "Task info" });
+      await info.click();
+      await expect(page).toHaveURL(`${taskURL}/info`);
+      await expect(page.getByTestId("task-view-pane")).toBeVisible();
+      await page.goBack();
+      await expect(page).toHaveURL(fullScreenURL);
+      await expect(info).toBeFocused();
+      await expect(prompt).toHaveText("Keep this draft");
+    });
+
+    await test.step("Reload in full screen and exit with the header control", async () => {
+      await page.reload();
+      await expect(exit).toBeVisible();
+      await expect(newTask).toBeHidden();
+      await exit.click();
+      await expect(page).toHaveURL(taskURL);
+      await expect(enter).toBeFocused();
+    });
+  });
+
   for (const subview of ["diff", "info", "perf", "processes", "vnc"]) {
     test(`${subview} preserves the task workspace at ${width}px`, async ({ page, api, uniquePrompt }) => {
       await page.setViewportSize({ width, height: 844 });

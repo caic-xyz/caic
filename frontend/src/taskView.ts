@@ -1,4 +1,4 @@
-// Owns URL-backed task subview presentation and weak focus restoration for workspace navigation.
+// Owns URL-backed task presentation, Escape handling, and weak focus restoration for workspace navigation.
 
 let viewOrigin: WeakRef<HTMLAnchorElement> | null = null;
 
@@ -17,6 +17,24 @@ export function restoreTaskViewOrigin() {
 }
 
 export type TaskViewMode = "closed" | "docked" | "fullscreen";
+
+export function isTaskDetailPath(pathname: string): boolean {
+  return /^\/task\/[^/]+\/?$/.test(pathname);
+}
+
+export function taskDetailFullscreen(pathname: string, search: string): boolean {
+  return isTaskDetailPath(pathname) && new URLSearchParams(search).get("fullscreen") === "1";
+}
+
+export function taskFullscreen(pathname: string, search: string): boolean {
+  return taskDetailFullscreen(pathname, search) || taskViewMode(pathname, search) === "fullscreen";
+}
+
+export function isTaskViewEscape(event: KeyboardEvent): boolean {
+  if (event.key !== "Escape" || event.defaultPrevented || event.isComposing || event.repeat) return false;
+  const target = event.target instanceof Element ? event.target : null;
+  return !document.querySelector("dialog[open]") && !target?.closest('[role="dialog"], [role="menu"]');
+}
 
 export function taskViewMode(pathname: string, search: string): TaskViewMode {
   const query = new URLSearchParams(search);

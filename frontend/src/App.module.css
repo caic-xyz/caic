@@ -17,7 +17,7 @@
   width: min(100%, 1920px);
 }
 
-.subviewFullscreen {
+.app.fullscreen {
   width: 100%;
   padding: 0;
 }
@@ -32,6 +32,10 @@
   flex: 1;
   flex-direction: column;
   min-height: 0;
+}
+
+.fullscreen .viewport {
+  padding: 0.5rem 0.5rem 0;
 }
 
 .normalContent {

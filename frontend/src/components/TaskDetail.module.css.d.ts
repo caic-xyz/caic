@@ -44,14 +44,17 @@ declare const classes: {
   readonly "elidedTurnExpanded": string;
   readonly "fileChangesInput": string;
   readonly "fixCIBtn": string;
+  readonly "fullscreen": string;
   readonly "glyphLink": string;
   readonly "header": string;
   readonly "headerBranch": string;
+  readonly "headerContent": string;
   readonly "headerLoading": string;
   readonly "headerMeta": string;
   readonly "headerPR": string;
   readonly "headerRepo": string;
   readonly "headerTitle": string;
+  readonly "headerTitleText": string;
   readonly "hierarchy": string;
   readonly "hierarchyLink": string;
   readonly "history-loading": string;
@@ -64,6 +67,7 @@ declare const classes: {
   readonly "messageArea": string;
   readonly "messageContent": string;
   readonly "messageTiming": string;
+  readonly "paneControls": string;
   readonly "pendingInput": string;
   readonly "placeholder": string;
   readonly "planAction": string;
@@ -87,6 +91,7 @@ declare const classes: {
   readonly "quotaRecoveryTitle": string;
   readonly "rateLimitRejected": string;
   readonly "rateLimitWarning": string;
+  readonly "repoLinks": string;
   readonly "repoStateLinks": string;
   readonly "result": string;
   readonly "resultControls": string;

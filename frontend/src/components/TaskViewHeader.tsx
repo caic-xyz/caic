@@ -4,7 +4,7 @@ import { useLocation, useNavigate, useSearchParams } from "@solidjs/router";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
 import FullscreenIcon from "@material-symbols/svg-400/outlined/fullscreen.svg?solid";
 import FullscreenExitIcon from "@material-symbols/svg-400/outlined/fullscreen_exit.svg?solid";
-import { taskViewMode } from "../taskView";
+import { isTaskViewEscape, taskViewMode } from "../taskView";
 import ActionButton from "./ActionButton";
 import styles from "./TaskViewHeader.module.css";
 
@@ -26,7 +26,7 @@ export default function TaskViewHeader(props: {
     navigate(props.taskPath);
   }
   function toggleFullscreen() {
-    setQuery({ fullscreen: fullscreen() ? undefined : "1" }, { replace: false });
+    setQuery({ fullscreen: fullscreen() ? undefined : "1" });
   }
 
   onMount(() => {
@@ -35,9 +35,7 @@ export default function TaskViewHeader(props: {
     if (!fullscreen()) closeButton?.focus({ preventScroll: true });
     if (document.activeElement !== closeButton) fullscreenButton?.focus({ preventScroll: true });
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented || document.querySelector("dialog[open]")) return;
-      const target = event.target instanceof Element ? event.target : null;
-      if (target?.closest('[role="dialog"], [role="menu"]')) return;
+      if (!isTaskViewEscape(event)) return;
       event.preventDefault();
       event.stopPropagation();
       if (fullscreen()) {

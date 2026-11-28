@@ -1063,7 +1063,7 @@ describe("TaskDetail", () => {
   it("re-decides header Git line totals when a late item wraps the header", async () => {
     await renderTaskDetail();
 
-    const header = screen.getByTestId("task-detail-header");
+    const header = screen.getByTestId("task-detail-header-content");
     const link = await screen.findByRole("link", {
       name: /my-repo: 2 changed files/,
     });
@@ -1100,7 +1100,7 @@ describe("TaskDetail", () => {
   it("keeps header Git line totals on one center-aligned flex line", async () => {
     await renderTaskDetail();
 
-    const header = screen.getByTestId("task-detail-header");
+    const header = screen.getByTestId("task-detail-header-content");
     Array.from(header.children).forEach((child, index) => {
       const height = 16 + index * 2;
       const top = 40 - height / 2;

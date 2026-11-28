@@ -35,7 +35,7 @@ import CloneRepoDialog from "./components/CloneRepoDialog";
 import MobileVoiceTasks from "./components/MobileVoiceTasks";
 import { getVoiceTaskNumber, voiceConnected } from "./voiceTaskState";
 import styles from "./App.module.css";
-import { taskViewMode } from "./taskView";
+import { taskFullscreen, taskViewMode } from "./taskView";
 
 /** Fallback UI shown when an ErrorBoundary catches a render error. */
 function ErrorFallback(props: { error: unknown; reset: () => void }) {
@@ -143,6 +143,7 @@ function Shell(props: { children?: JSX.Element }) {
   const [mobile, setMobile] = createSignal(mobileQuery.matches);
   const mobileVoice = () => mobile() && voiceConnected() && location.pathname === "/";
   const taskView = () => taskViewMode(location.pathname, location.search);
+  const fullscreen = () => taskFullscreen(location.pathname, location.search);
   const [viewport, setViewport] = createSignal<HTMLDivElement>();
   const scrollingConversation = createMemo(() => mobile() && s.selectedId() !== null && taskView() === "closed");
   const scrollingDocument = createMemo(
@@ -166,7 +167,7 @@ function Shell(props: { children?: JSX.Element }) {
     <Show when={auth.ready() || auth.providers().length === 0} fallback={<SessionCheckPage />}>
       <Show when={auth.providers().length === 0 || auth.user()} fallback={<LoginPage />}>
         <div
-          class={`${styles.app} ${taskView() !== "closed" ? styles.subviewOpen : ""} ${taskView() === "fullscreen" ? styles.subviewFullscreen : ""}`}
+          class={`${styles.app} ${taskView() !== "closed" ? styles.subviewOpen : ""} ${fullscreen() ? styles.fullscreen : ""}`}
           data-testid="app-shell"
         >
           <div class={styles.viewport} ref={setViewport} data-testid="app-viewport">
@@ -175,7 +176,7 @@ function Shell(props: { children?: JSX.Element }) {
               aria-hidden={mobileVoice()}
               data-testid="normal-content"
             >
-              <header class={`${styles.navbar} ${taskView() === "fullscreen" ? styles.chromeHidden : ""}`}>
+              <header class={`${styles.navbar} ${fullscreen() ? styles.chromeHidden : ""}`}>
                 <h1 class={styles.title}>
                   <button
                     class={styles.titleButton}
@@ -244,9 +245,9 @@ function Shell(props: { children?: JSX.Element }) {
           />
           <VoiceTaskFocus mobile={mobile} />
           <div
-            class={`${styles.voiceShell} ${taskView() === "fullscreen" ? styles.chromeHidden : ""}`}
-            inert={taskView() === "fullscreen"}
-            aria-hidden={taskView() === "fullscreen"}
+            class={`${styles.voiceShell} ${fullscreen() ? styles.chromeHidden : ""}`}
+            inert={fullscreen()}
+            aria-hidden={fullscreen()}
           >
             <BrowserVoiceShell />
           </div>
