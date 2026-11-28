@@ -5,13 +5,20 @@ import { createTaskAPI, expect, test, waitForTaskState, type APIClient } from ".
 
 async function threeTurnTask(api: APIClient, prompt: string): Promise<string> {
   const id = await createTaskAPI(api, prompt);
-  let task = await waitForTaskState(api, id, "waiting");
-  for (const text of ["tell me another", "and one more"]) {
-    const before = task.numTurns;
+  for (const [index, text] of ["tell me another", "and one more"].entries()) {
+    // The fake agent gives each event a distinct millisecond timestamp, so a
+    // burst can put the result ahead of the clock used to stamp the next prompt.
+    await expect
+      .poll(async () => {
+        const turn = (await api.getHistoryManifest(id)).metadata.turns?.[index];
+        return turn !== undefined && Date.now() > Date.parse(turn.at);
+      })
+      .toBe(true);
+    await waitForTaskState(api, id, "waiting");
     await api.sendInput(id, { prompt: { text } });
-    await expect.poll(async () => (task = await api.getTask(id)).numTurns, { timeout: 15_000 }).toBeGreaterThan(before);
-    task = await waitForTaskState(api, id, "waiting");
   }
+  await expect.poll(async () => (await api.getHistoryManifest(id)).metadata.turns?.length).toBe(3);
+  await waitForTaskState(api, id, "waiting");
   return id;
 }
 
