@@ -222,8 +222,8 @@ github.com/golangci/swaggoswag v0.0.0-20250504205917-77f2aca3143e h1:ai0EfmVYE2b
 github.com/golangci/swaggoswag v0.0.0-20250504205917-77f2aca3143e/go.mod h1:Vrn4B5oR9qRwM+f54koyeH3yzphlecwERs0el27Fr/s=
 github.com/golangci/unconvert v0.0.0-20250410112200-a129a6e6413e h1:gD6P7NEo7Eqtt0ssnqSJNNndxe69DOQ24A5h7+i3KpM=
 github.com/golangci/unconvert v0.0.0-20250410112200-a129a6e6413e/go.mod h1:h+wZwLjUTJnm/P2rwlbJdRPZXOzaT36/FwnPnY2inzc=
-github.com/gomodedev/gomode v0.5.1-0.20261128032538-8e84d55b028a h1:2dKOzNuwbvy8QwXH/lglwnZIqPTlcexcI1A4mePqhqU=
-github.com/gomodedev/gomode v0.5.1-0.20261128032538-8e84d55b028a/go.mod h1:M41f5AsAEE9pnB75rpy6wwHx5jhEbrQ6w3fJYiXbyUk=
+github.com/gomodedev/gomode v0.6.0 h1:pnHNAeZY+Gb1Zii1LyyHsBzSA1zyDTO90xCaHK2p2Oc=
+github.com/gomodedev/gomode v0.6.0/go.mod h1:eF5V5fMem0IpZ+R/ghaR9OLx0euSwaW3qsfnPRWOrZs=
 github.com/google/go-cmp v0.5.2/go.mod h1:v8dTdLbMG2kIc/vJvl+f65V22dbkXbowE6jgT/gNBxE=
 github.com/google/go-cmp v0.5.4/go.mod h1:v8dTdLbMG2kIc/vJvl+f65V22dbkXbowE6jgT/gNBxE=
 github.com/google/go-cmp v0.5.6/go.mod h1:v8dTdLbMG2kIc/vJvl+f65V22dbkXbowE6jgT/gNBxE=
@@ -319,8 +319,8 @@ github.com/maratori/testableexamples v1.0.1 h1:HfOQXs+XgfeRBJ+Wz0XfH+FHnoY9TVqL6
 github.com/maratori/testableexamples v1.0.1/go.mod h1:XE2F/nQs7B9N08JgyRmdGjYVGqxWwClLPCGSQhXQSrQ=
 github.com/maratori/testpackage v1.1.2 h1:ffDSh+AgqluCLMXhM19f/cpvQAKygKAJXFl9aUjmbqs=
 github.com/maratori/testpackage v1.1.2/go.mod h1:8F24GdVDFW5Ew43Et02jamrVMNXLUNaOynhDssITGfc=
-github.com/maruel/apisdkgen v0.3.2-0.20261127211507-933834b80213 h1:HUjeyPYcyfj+4kDZL8ZKQE5N0aUKOkyZ3r8kBIm/IG8=
-github.com/maruel/apisdkgen v0.3.2-0.20261127211507-933834b80213/go.mod h1:HmbSOAPMTz+EP/CswVeC08BxS4CsVLhoHU/wZId1TAA=
+github.com/maruel/apisdkgen v0.4.0 h1:THCGRbj+q89I2W+Yn7ovAl7zf6pfCNc59cC+G/l1Im0=
+github.com/maruel/apisdkgen v0.4.0/go.mod h1:1sH1317qb67v2yW5UJXin6qmQcaPcyZX6r2MC2x/tjk=
 github.com/maruel/genai v0.11.5 h1:KBtYHS7ix9YKa9vEBbVy+/BlDt0VUwtFEng7IVT/tXg=
 github.com/maruel/genai v0.11.5/go.mod h1:s1k7dxL59wB8/LVPuqL4M5rfxUK6eVljdeJYWIjcgNg=
 github.com/maruel/genaipy v0.2.1 h1:CjnEqu4vt1+ZxThP37SBtYZ1R1xngo93sqSGEwSRXBs=
