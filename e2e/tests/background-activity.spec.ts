@@ -91,7 +91,10 @@ for (const width of [390, 1280]) {
                   await expect(tooltip).toBeHidden();
                   await row.hover();
                 }
-                await row.locator("..").press("Escape");
+                // Preserve focus when dismissing the open tooltip. Focusing its
+                // trigger can scroll the card list and dismiss the tooltip first.
+                await expect(tooltip).toBeVisible();
+                await page.keyboard.press("Escape");
                 await expect(tooltip).toBeHidden();
               }
             }
