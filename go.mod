@@ -5,7 +5,7 @@ go 1.27.3
 require (
 	github.com/andybalholm/brotli v1.2.7
 	github.com/buger/jsonparser v1.6.1
-	github.com/caic-xyz/md v0.20.1-0.20261126181414-bfb848be8a4a
+	github.com/caic-xyz/md v0.20.1-0.20261128024705-a4e8db7cda33
 	github.com/coder/websocket v1.8.15
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/gofrs/flock v0.13.2
